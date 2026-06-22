@@ -9341,13 +9341,15 @@ function getCategoryEmoji(cat) {
     return map[cat] || '📎';
 }
 
-function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-    });
+const IMGBB_API_KEY = 'b733862d15744e2bfaa4329d122f4ba0';
+
+async function fileToBase64(file) {
+    const formData = new FormData();
+    formData.append('image', file);
+    const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, { method: 'POST', body: formData });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error?.message || 'Image upload failed');
+    return json.data.url;
 }
 
 function showToast(msg, type = 'success') {
@@ -9476,7 +9478,7 @@ document.addEventListener('keydown', (e) => {
 
 <!-- Version Footer -->
 <div id="versionFooter" style="position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,0.03);border-top:1px solid rgba(0,0,0,0.06);padding:2px 8px;font-size:10px;color:#94a3b8;display:flex;justify-content:center;gap:16px;z-index:1;font-family:'JetBrains Mono',monospace;letter-spacing:0.3px">
-    <span>R&M Tracker v3.12</span>
+    <span>R&M Tracker v3.14</span>
 </div>
 
 </body>
