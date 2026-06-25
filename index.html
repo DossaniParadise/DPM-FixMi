@@ -1392,16 +1392,14 @@ function ticketRow(t){
       <div class="row-right">${right}</div>
     </div>${below}</div>`;
 }
-// On a phone: Text / Call / Email open native apps directly (no API).
-// On desktop: no buttons — just a hint to use a phone.
+// Email opens a prefilled draft in the native mail client on BOTH desktop and
+// mobile (mailto:). Text / Call use sms:/tel:, which only do anything useful on
+// a phone, so they stay mobile-only.
 function contactBtns(t,who){
-  if(!IS_MOBILE){
-    return `<span class="rb-none">Open on your phone for contact options</span>`;
-  }
   const msg=draftBody(t,who);
   const subj=`Ticket ${t.shortId} · ${storeName(t.storeId)}`;
   let b="";
-  if(who.phone){
+  if(IS_MOBILE && who.phone){
     b+=`<a class="btn btn-ghost btn-sm" href="${escA(smsLink(who.phone,msg))}">✉ Text</a>`;
     b+=`<a class="btn btn-ghost btn-sm" href="${escA(telLink(who.phone))}">📞 Call</a>`;
   }
@@ -1409,7 +1407,12 @@ function contactBtns(t,who){
     const replyTo=SESSION.email;
     b+=`<a class="btn btn-ghost btn-sm" href="${escA(mailtoLink(who.email,subj,msg+"\n\nReply to: "+replyTo,replyTo))}">@ Email</a>`;
   }
-  if(!b) b=`<span class="rb-none">No contact info on file</span>`;
+  if(!b){
+    // No email on file, and on desktop there's nothing tappable to offer.
+    b = who.phone
+      ? `<span class="rb-none">${esc(who.phone)} — call or text from your phone</span>`
+      : `<span class="rb-none">No contact info on file</span>`;
+  }
   return b;
 }
 // shared message body (ticket + store + address + photo links + reply-to)
