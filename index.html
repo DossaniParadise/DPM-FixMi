@@ -254,8 +254,18 @@ body.no-reftags .reftag{display:none}
 .detail-store{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .gps-btn{flex-shrink:0;text-decoration:none}
 .thumb-grid{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 16px}
-.thumb{width:72px;height:72px;border-radius:9px;overflow:hidden;border:1px solid var(--line);background:var(--panel-2);display:block;flex-shrink:0}
+.thumb{width:72px;height:72px;border-radius:9px;overflow:hidden;border:1px solid var(--line);background:var(--panel-2);display:block;flex-shrink:0;padding:0;cursor:pointer}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.photo-overlay{z-index:80;align-items:center;padding:32px 16px;background:rgba(15,20,30,.82)}
+@media(min-width:640px){.photo-overlay{padding:48px}}
+.photo-lightbox{position:relative;max-width:min(960px,96vw);max-height:90vh;display:flex}
+.photo-lightbox img{max-width:100%;max-height:90vh;width:auto;height:auto;object-fit:contain;border-radius:12px;box-shadow:0 12px 48px rgba(0,0,0,.5)}
+.photo-lightbox .x-float{top:-6px;right:-6px;background:var(--panel);border:1px solid var(--line)}
+.bulk-prog{padding:6px 2px 2px}
+.bp-count{font-family:var(--disp,var(--mono));font-weight:800;font-size:26px;text-align:center;margin-bottom:12px}
+.bp-track{height:12px;border-radius:99px;background:var(--panel-2);border:1px solid var(--line);overflow:hidden}
+.bp-fill{height:100%;background:linear-gradient(90deg,var(--amber),var(--amber-deep));border-radius:99px;transition:width .25s ease}
+.bp-note{font-size:12.5px;color:var(--ink-dim);text-align:center;margin-top:10px}
 .timeline{margin:6px 0 4px;padding-left:4px}
 .tl-item{display:flex;gap:11px;padding:8px 0;font-size:13px}
 .tl-dot{width:9px;height:9px;border-radius:50%;background:var(--amber);margin-top:5px;flex-shrink:0;box-shadow:0 0 0 3px rgba(255,176,0,.15)}
@@ -530,6 +540,12 @@ async function apiGet(){
 }
 async function apiWrite(path,payload){
   const updates={}; updates[path]=payload;
+  const r=await fetch(API_BASE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:APP_WRITE_PASSWORD,updates})});
+  if(!r.ok){let m="Write failed";try{m=(await r.json()).error||m}catch(e){}throw new Error(m)}
+}
+// Batched multi-path write — one request updates many ticket nodes at once.
+// `updates` is a map of "maintenanceTickets/<id>" -> full ticket object.
+async function apiWriteMulti(updates){
   const r=await fetch(API_BASE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:APP_WRITE_PASSWORD,updates})});
   if(!r.ok){let m="Write failed";try{m=(await r.json()).error||m}catch(e){}throw new Error(m)}
 }
@@ -929,6 +945,19 @@ function render(){
   v.innerHTML=renderBoard();
   applyTags();
 }
+/* Typing in a search box re-renders the view, which replaces the <input> node
+   and drops focus after the first keystroke. This updates the term, re-renders,
+   then restores focus + caret to the freshly-rendered search field. */
+function onSearchInput(el){
+  curSearch=el.value;
+  const caret=el.selectionStart;
+  render();
+  const next=document.querySelector(".input.search");
+  if(next){
+    next.focus();
+    try{const p=(caret==null?next.value.length:caret);next.setSelectionRange(p,p);}catch(e){}
+  }
+}
 
 /* ---- manager hub: single action + their open tickets listed below ---- */
 function renderManagerHub(){
@@ -1079,7 +1108,7 @@ function renderBoard(){
           <option value="all"${curStore==="all"?" selected":""}>All stores (${storeIds.length})</option>
           ${storeIds.slice().sort((a,b)=>storeName(a).localeCompare(storeName(b))).map(id=>`<option value="${id}"${curStore===id?" selected":""}>${esc(storeName(id))}</option>`).join("")}
         </select>`:""}
-        <input class="input search" placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="curSearch=this.value;render()">
+        <input class="input search" placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="onSearchInput(this)">
       </div>
       ${curFilter==="dispatched"?(TECH_LOC
         ? `<div class="loc-note ok">📍 Sorted nearest first from your location</div>`
@@ -1152,7 +1181,7 @@ function renderBoard(){
         ${storeIds.slice().sort((a,b)=>storeName(a).localeCompare(storeName(b))).map(id=>`<option value="${id}"${curStore===id?" selected":""}>${esc(storeName(id))}</option>`).join("")}
       </select>`:""}
       ${(curFilter==="dispatched"||curFilter==="assigned")?assigneeFilterSelect(allTickets):""}
-      <input class="input search" placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="curSearch=this.value;render()">
+      <input class="input search" placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="onSearchInput(this)">
     </div>`;
 
   if(!storeIds.length) return head+`<div class="empty"><div class="empty-mark">🏪</div><h3>No stores assigned to you</h3><p>Managed in the master.</p></div>`;
@@ -1172,7 +1201,7 @@ function renderBoard(){
       bulkBar=`<div class="bulk-bar">
         <button class="btn btn-ghost btn-sm" onclick="startSelect()">☑ Select</button>
         ${curFilter==="finished"
-          ? `<button class="btn btn-primary btn-sm" onclick="confirmBulk('closeAll')">Close out all finished (${rows.length})</button>`
+          ? `<button class="btn btn-primary btn-sm" onclick="openCloseOldFinished()">Close out finished…</button>`
           : `<button class="btn btn-ghost btn-sm" onclick="openReopenAll()">↩ Reopen by date…</button>`}
       </div>`;
     }else{
@@ -1542,9 +1571,25 @@ let editPhotos=null;
 function photoThumbs(t){
   const ph=(t.photos||[]);
   if(!ph.length) return "";
-  const imgs=ph.map(u=>`<a class="thumb" href="${escA(u)}" target="_blank" rel="noopener"><img src="${escA(u)}" loading="lazy" decoding="async" alt="job photo"></a>`).join("");
+  const imgs=ph.map(u=>`<button type="button" class="thumb" onclick="openPhoto('${escA(u)}')"><img src="${escA(u)}" loading="lazy" decoding="async" alt="job photo"></button>`).join("");
   return `<div class="thumb-grid">${imgs}</div>`;
 }
+// In-app photo lightbox as its OWN overlay, stacked above the ticket detail so
+// closing it (X or click-away) returns you to the ticket, not the board.
+function openPhoto(url){
+  let o=$("photoOverlay");
+  if(!o){
+    o=document.createElement("div");o.id="photoOverlay";o.className="overlay photo-overlay";
+    document.body.appendChild(o);
+    o.addEventListener("click",e=>{if(e.target===o)closePhoto()});
+  }
+  o.innerHTML=`<div class="photo-lightbox">
+    <button class="x-btn x-float" aria-label="Close" onclick="closePhoto()">✕</button>
+    <img src="${escA(url)}" alt="job photo" decoding="async">
+  </div>`;
+  requestAnimationFrame(()=>o.classList.add("on"));
+}
+function closePhoto(){const o=$("photoOverlay");if(o){o.classList.remove("on");setTimeout(()=>{if(o)o.innerHTML=""},200)}}
 function openTicket(id){
   const t={_id:id,...TICKETS[id]};
   const st=STATUSES[t.status]||STATUSES.open;
@@ -1748,25 +1793,98 @@ function currentVisibleRows(){
   if(curStore!=="all")rows=rows.filter(t=>t.storeId===curStore);
   return applyFilterSearch(rows);
 }
-// run a status change across many tickets, sequentially, with a progress toast
+// run a status change across many tickets — batched, idempotent, resumable.
+// Safe against double-clicks (a run-lock) and interruptions (already-done
+// tickets are skipped, so re-running finishes the rest).
+let _bulkRunning=false;
+function bulkProgressModal(label,total){
+  modal(`<div class="sheet-head"><h2>${esc(label)}</h2></div>
+    <div class="sheet-body">
+      <div class="bulk-prog">
+        <div class="bp-count" id="bpCount">0 / ${total}</div>
+        <div class="bp-track"><div class="bp-fill" id="bpFill" style="width:0%"></div></div>
+        <div class="bp-note" id="bpNote">Working… you can leave this open.</div>
+      </div>
+    </div>`);
+}
+function bulkProgressUpdate(done,total,failed){
+  const f=$("bpFill"),c=$("bpCount"),n=$("bpNote");
+  if(c)c.textContent=`${done} / ${total}`;
+  if(f)f.style.width=Math.round(done/Math.max(1,total)*100)+"%";
+  if(n&&failed)n.textContent=`${failed} couldn't be updated — you can re-run to retry them.`;
+}
 async function bulkSetStatus(ids,status){
-  if(!ids.length){toast("Nothing selected","err");return}
-  showLoader(true);
+  if(_bulkRunning){toast("Already working on a batch…");return}
+  // Idempotent filter: only touch tickets not already at the target status.
+  const todo=ids.filter(id=>TICKETS[id] && TICKETS[id].status!==status);
+  if(!todo.length){toast("Nothing to do — already done");closeModal();return}
+  _bulkRunning=true;
+  bulkProgressModal(`${STATUSES[status].label==="Closed"?"Closing out":"Updating"} ${todo.length} ticket${todo.length===1?"":"s"}`,todo.length);
   let done=0,failed=0;
-  for(const id of ids){
-    const t=TICKETS[id]; if(!t){failed++;continue}
-    const activity=Array.isArray(t.activity)?t.activity.slice():[];
-    activity.push({ts:now(),by:SESSION.name,role:SESSION.role,action:"status",toStatus:status,note:"bulk"});
-    try{await apiWrite(`${TICKETS_NODE}/${id}`,{...t,status,activity,updatedAt:now()});done++;}
-    catch(e){failed++;}
-    if(done%10===0)$("pollTxt")&&($("pollTxt").textContent=`${done}/${ids.length}`);
+  const CHUNK=25;
+  for(let i=0;i<todo.length;i+=CHUNK){
+    const slice=todo.slice(i,i+CHUNK);
+    const updates={};
+    for(const id of slice){
+      const t=TICKETS[id]; if(!t){failed++;continue}
+      const activity=Array.isArray(t.activity)?t.activity.slice():[];
+      activity.push({ts:now(),by:SESSION.name,role:SESSION.role,action:"status",toStatus:status,note:"bulk"});
+      updates[`${TICKETS_NODE}/${id}`]={...t,status,activity,updatedAt:now()};
+    }
+    try{
+      await apiWriteMulti(updates);
+      // reflect locally so a resume/re-run sees them as done immediately
+      for(const id of slice){ if(TICKETS[id]) TICKETS[id].status=status; }
+      done+=Object.keys(updates).length;
+    }catch(e){ failed+=Object.keys(updates).length; }
+    bulkProgressUpdate(done,todo.length,failed);
   }
-  await refresh();showLoader(false);
+  _bulkRunning=false;
+  await refresh();
   selectMode=false;selectedIds={};
-  render();
-  toast(`${done} moved to ${STATUSES[status].label}${failed?` · ${failed} failed`:""}`);
+  closeModal();render();
+  toast(`${done} → ${STATUSES[status].label}${failed?` · ${failed} failed (re-run to retry)`:""}`);
 }
 // confirmation wrappers
+/* Close out finished tickets older than N days. Asks for an integer, computes
+   the set of finished tickets past that age, then runs the robust batch engine
+   (which shows a progress bar and is safe to re-click / resume). */
+function openCloseOldFinished(){
+  const total=currentVisibleRows().filter(t=>t.status==="finished").length;
+  modal(`<div class="sheet-head"><h2>Close out finished tickets</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body">
+      <p style="color:var(--ink-mid);font-size:14px;margin-top:0">There ${total===1?"is":"are"} <b>${total}</b> finished ticket${total===1?"":"s"}. Close out the ones older than:</p>
+      <div class="field"><label class="label">Days old</label>
+        <input class="input" id="closeDays" type="number" inputmode="numeric" min="0" step="1" value="0" style="font-size:18px">
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">0 = close out all finished, regardless of age.</div>
+      </div>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" style="flex:1" onclick="runCloseOldFinished()">Continue</button>
+    </div>`);
+  setTimeout(()=>{const el=$("closeDays");if(el){el.focus();el.select();}},60);
+}
+function finishedAge(t){return t.finishedAt||t.updatedAt||t.createdAt||0;}
+function runCloseOldFinished(){
+  let days=parseInt(($("closeDays")||{}).value,10); if(!isFinite(days)||days<0)days=0;
+  const cutoff=now()-days*86400000;
+  const ids=currentVisibleRows()
+    .filter(t=>t.status==="finished" && (days===0 || finishedAge(t)<=cutoff))
+    .map(t=>t._id);
+  if(!ids.length){toast(days===0?"No finished tickets":`No finished tickets older than ${days} day${days===1?"":"s"}`,"err");return}
+  closeModal();
+  _closeOldIds=ids;
+  const label=days===0?`Close out all ${ids.length} finished?`:`Close out ${ids.length} finished ticket${ids.length===1?"":"s"} older than ${days} day${days===1?"":"s"}?`;
+  modal(`<div class="sheet-head"><h2>Confirm</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body"><p style="font-size:15px">${esc(label)}</p>
+      <p style="color:var(--ink-dim);font-size:13px">Closed tickets leave every board except Overwatch. You can re-run this safely if it's interrupted.</p></div>
+    <div class="sheet-foot">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" style="flex:1" onclick="bulkSetStatus(_closeOldIds.slice(),'closed')">Close them out</button>
+    </div>`);
+}
+let _closeOldIds=[];
 function confirmBulk(kind){
   const visible=currentVisibleRows();
   const selIds=visible.filter(t=>selectedIds[t._id]).map(t=>t._id);
@@ -1802,22 +1920,25 @@ function openReopenAll(){
       <button class="btn btn-primary" style="flex:1" onclick="confirmReopenAll()">Continue</button>
     </div>`);
 }
+let _reopenIds=[];
 function confirmReopenAll(){
   const days=parseInt($("reopenWindow").value,10), target=$("reopenTarget").value;
   const cutoff=now()-days*86400000;
   // closed tickets whose close happened within the window (use updatedAt as the close time)
-  const ids=currentVisibleRows().filter(t=>t.status==="closed" && (t.updatedAt||t.createdAt||0)>=cutoff).map(t=>t._id);
-  const winLabel={30:"last 30 days",120:"last 120 days",365:"last year"}[days];
+  _reopenIds=currentVisibleRows().filter(t=>t.status==="closed" && (t.updatedAt||t.createdAt||0)>=cutoff).map(t=>t._id);
+  _reopenTarget=target;
+  const winLabel={30:"last 30 days",120:"last 120 days",365:"last year"}[days]||`last ${days} days`;
   closeModal();
-  if(!ids.length){toast(`No closed tickets in the ${winLabel}`,"err");return}
+  if(!_reopenIds.length){toast(`No closed tickets in the ${winLabel}`,"err");return}
   modal(`<div class="sheet-head"><h2>Confirm — this is a big change</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
-    <div class="sheet-body"><p style="font-size:15px">Reopen <b>${ids.length}</b> tickets closed in the <b>${winLabel}</b> to <b>${STATUSES[target].label}</b>?</p>
+    <div class="sheet-body"><p style="font-size:15px">Reopen <b>${_reopenIds.length}</b> tickets closed in the <b>${winLabel}</b> to <b>${STATUSES[target].label}</b>?</p>
       <p style="color:var(--red);font-size:13px">They will return to active boards across the app.</p></div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">No, cancel</button>
-      <button class="btn btn-danger" style="flex:1" onclick="closeModal();bulkSetStatus(${JSON.stringify(ids)},'${target}')">Yes, reopen ${ids.length}</button>
+      <button class="btn btn-danger" style="flex:1" onclick="bulkSetStatus(_reopenIds.slice(),_reopenTarget)">Yes, reopen ${_reopenIds.length}</button>
     </div>`);
 }
+let _reopenTarget="finished";
 async function doAssign(id){
   const val=$("assignSel").value;
   let patch,note;
