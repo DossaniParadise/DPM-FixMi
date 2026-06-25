@@ -863,7 +863,7 @@ function ticketsForStore(sid){
 /* ============================================================ PERMISSIONS */
 function canCreate(){return SESSION.role!=="tech"}
 function canManageVendors(){return SESSION.role==="admin"}
-function canEditContent(){return SESSION.role==="admin"}
+function canEditContent(){return SESSION.role==="admin"||SESSION.role==="coach";}
 function canAssign(){return SESSION.role==="admin"}
 
 /* ============================================================ ENTER / POLL */
@@ -1088,15 +1088,17 @@ function renderBoard(){
     let trows=allTickets.slice();
     if(curStore!=="all") trows=trows.filter(t=>t.storeId===curStore);
     trows=applyFilterSearch(trows);
-    // Tech list priority: (1) in-progress always on top, (2) emergencies next,
-    // (3) then nearest-to-farthest from the tech's current location. If location
-    // isn't granted yet, distance drops out and we fall back to recency.
+    // Tech list order: in-progress stays pinned on top (the active job), then by
+    // priority — emergency, then urgent, then normal — and within the same
+    // priority, nearest-to-farthest from the tech's location (if location is
+    // granted; otherwise newest first).
     if(curFilter==="dispatched"){
+      const priRank=t=>t.priority==="emergency"?0:(t.priority==="urgent"?1:2);
       trows.sort((a,b)=>{
         const ai=a.status==="in_progress"?0:1, bi=b.status==="in_progress"?0:1;
         if(ai!==bi)return ai-bi;
-        const ae=a.priority==="emergency"?0:1, be=b.priority==="emergency"?0:1;
-        if(ae!==be)return ae-be;
+        const ar=priRank(a), br=priRank(b);
+        if(ar!==br)return ar-br;
         const ad=ticketDistance(a), bd=ticketDistance(b);
         if(ad!=null && bd!=null && ad!==bd) return ad-bd;
         if(ad!=null && bd==null) return -1;
@@ -1635,7 +1637,7 @@ function ticketControls(t){
   if(role==="admin"){
     h+=`<div class="section-label">Assign<span class="ln"></span></div>${assignControls(t)}`;
     h+=`<div class="section-label">Set status<span class="ln"></span></div>${statusGrid(t,STATUS_ORDER)}`;
-    h+=`<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="openEdit('${t._id}')">✎ Edit ticket text / photos</button>`;
+    h+=`<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="openEdit('${t._id}')">✎ Edit details &amp; urgency</button>`;
     return h;
   }
 
@@ -1666,6 +1668,9 @@ function ticketControls(t){
       h+=`<button class="btn btn-ghost btn-block" onclick="setStatus('${t._id}','in_progress')">▶ Mark in progress</button>`;
     h+=`<button class="btn btn-danger btn-block" onclick="confirmClose('${t._id}')">✕ Close ticket</button>`;
     h+=`</div><div style="font-size:11px;color:var(--ink-dim);margin-top:8px">Closing removes the ticket from all views except Overwatch.</div>`;
+    // Overwatch + area coaches can correct the ticket's text, category, and urgency.
+    if(canEditContent())
+      h+=`<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="openEdit('${t._id}')">✎ Edit details &amp; urgency</button>`;
     return h;
   }
   return h;
