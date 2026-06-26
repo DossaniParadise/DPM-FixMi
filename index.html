@@ -526,7 +526,7 @@ let MASTER=null, SESSION=null;
 let REPLY_NUMBERS={}; // email(lowercased) -> reply phone number, stored in master
 let TICKETS={}, VENDORS={}, RESTAURANTS={};
 let curFilter="active", curSearch="", curStore="all", tilesExpanded=false, curAssignee="all";
-let selectMode=false, selectedIds={}; // bulk-action selection (finished/closed pages)
+/* bulk select removed */
 let openGroups={};          // storeId -> bool (expanded)
 let managerScreen="hub";
 let coachScreen="hub";   // "hub" (store tiles) or a storeId (drilled into one store)
@@ -1192,32 +1192,7 @@ function renderBoard(){
   rows=applyFilterSearch(rows);
   const label=({active:"Open",all:"All",unassigned:"Unassigned",assigned:"Assigned",dispatched:"Dispatched",waiting:"Waiting",in_progress:"In Progress",finished:"Finished",closed:"Closed"})[curFilter]||"";
   // bulk-action bar — admin only, on the finished & closed pages
-  const bulkable = SESSION.role==="admin" && (curFilter==="finished"||curFilter==="closed");
-  const visibleIds = rows.map(t=>t._id);
-  const selCount = visibleIds.filter(id=>selectedIds[id]).length;
-  let bulkBar="";
-  if(bulkable){
-    if(!selectMode){
-      bulkBar=`<div class="bulk-bar">
-        <button class="btn btn-ghost btn-sm" onclick="startSelect()">☑ Select</button>
-        ${curFilter==="finished"
-          ? `<button class="btn btn-primary btn-sm" onclick="openCloseOldFinished()">Close out finished…</button>`
-          : `<button class="btn btn-ghost btn-sm" onclick="openReopenAll()">↩ Reopen by date…</button>`}
-      </div>`;
-    }else{
-      const moveBtns = curFilter==="finished"
-        ? `<button class="btn btn-primary btn-sm" ${selCount?"":"disabled"} onclick="confirmBulk('closeSel')">Close out (${selCount})</button>`
-        : `<button class="btn btn-ghost btn-sm" ${selCount?"":"disabled"} onclick="confirmBulk('toFinished')">→ Finished (${selCount})</button>
-           <button class="btn btn-ghost btn-sm" ${selCount?"":"disabled"} onclick="confirmBulk('toUnassigned')">→ Unassigned (${selCount})</button>`;
-      bulkBar=`<div class="bulk-bar active">
-        <label class="bulk-all"><input type="checkbox" ${selCount===rows.length&&rows.length?"checked":""} onchange="toggleAllVisible(this.checked)"> All</label>
-        <span class="bulk-count">${selCount} selected</span>
-        ${moveBtns}
-        <button class="btn btn-ghost btn-sm" onclick="endSelect()">Cancel</button>
-      </div>`;
-    }
-  }
-  const listHead=`<div class="list-head">${esc(label)} tickets <span class="lh-n">(${rows.length})</span></div>${bulkBar}`;
+  const listHead=`<div class="list-head">${esc(label)} tickets <span class="lh-n">(${rows.length})</span></div>`;
   const body = rows.length
     ? `<div class="rows">${rows.map(ticketRow).join("")}</div>`
     : `<div class="empty"><div class="empty-mark">🗂️</div><h3>Nothing here</h3><p>${curSearch?"No tickets match your search.":"No tickets in this view."}</p></div>`;
@@ -1233,7 +1208,7 @@ function renderBoard(){
 }
 // choosing OPEN or CLOSED unpins the strip; a middle status keeps it open
 function pickStatus(key){
-  curFilter=key; curAssignee="all"; selectMode=false; selectedIds={};
+  curFilter=key; curAssignee="all";
   if(key==="active"||key==="closed"){_tilePinned=false;tilesExpanded=false;}
   render();
 }
@@ -1317,7 +1292,8 @@ function ticketRow(t){
   }else{
     let sub="";
     if(who) sub=who.name;
-    else if(storeTech(t.storeId)) sub=storeTech(t.storeId).name;
+    // No fallback to the store's default tech — an unassigned ticket shows no
+    // assignee, otherwise it would look assigned.
     // status-specific subline
     let extra="";
     if(t.status==="dispatched"&&t.dispatchedAt) extra=`<div class="rs-meta">Dispatched ${fmtDateShort(t.dispatchedAt)}</div>`;
@@ -1346,7 +1322,7 @@ function ticketRow(t){
     }else if(t.status==="finished"){
       below=`<div class="row-bar" onclick="event.stopPropagation()">
         <span><b>Finished</b> — ready to close out?</span>
-        <div class="rb-btns"><button class="btn btn-primary btn-sm" onclick="setStatus('${t._id}','closed')">Close out</button></div></div>`;
+        <div class="rb-btns"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();closeOutTicket('${t._id}')">✓ Close out</button></div></div>`;
     }else if(t.status==="closed"){
       below=`<div class="row-bar" onclick="event.stopPropagation()">
         <span><b>Closed</b> — reopen to?</span>
@@ -1383,17 +1359,15 @@ function ticketRow(t){
       <span>${t.status==="in_progress"?`<b>In progress</b> · ${elapsedHM(t.clockInAt)}`:"Quick actions"}</span>
       <div class="rb-btns">
         ${canProgress?`<button class="btn btn-ghost btn-sm" onclick="setStatus('${t._id}','in_progress')">▶ In progress</button>`:""}
-        <button class="btn btn-danger btn-sm" onclick="confirmClose('${t._id}')">✕ Close</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmClose('${t._id}')">✕ Mark closed</button>
       </div></div>`;
   }
-  // selection checkbox (select mode, finished/closed pages)
-  const showChk = selectMode && (curFilter==="finished"||curFilter==="closed");
-  const chk = showChk ? `<label class="row-chk" onclick="event.stopPropagation()"><input type="checkbox" ${selectedIds[t._id]?"checked":""} onchange="toggleSel('${t._id}',this.checked)"></label>` : "";
-  const rowClick = showChk ? `toggleSel('${t._id}',!selectedIds['${t._id}'])` : `openTicket('${t._id}')`;
+  const chk = "";
+  const rowClick = `openTicket('${t._id}')`;
   // On the OPEN page, tint each row subtly with its status color; sub-pages are mono-status already.
   const tint = (curFilter==="active") ? ` style="--rt:${st.color}"` : "";
   const tintClass = (curFilter==="active") ? " tinted" : "";
-  const selClass = (showChk && selectedIds[t._id]) ? " row-selected" : "";
+  const selClass = "";
   // Tech: an in-progress job is highlighted blue and sits at the top of the list.
   const progClass = (SESSION.role==="tech" && t.status==="in_progress") ? " row-prog" : "";
   // Tech: emergencies get a red treatment (unless the row is already the blue
@@ -1595,11 +1569,12 @@ function openTicket(id){
   const st=STATUSES[t.status]||STATUSES.open;
   const sid=t.storeId;
   const dir=storeDirector(sid), coach=storeCoach(sid), tech=storeTech(sid);
-  // assignee: explicit tech dispatch > vendor > store's live tech (default routing)
+  // assignee reflects ONLY what's actually on the ticket. An unassigned ticket
+  // shows nothing here — we do NOT fall back to the store's default tech, or an
+  // unassigned ticket would look assigned.
   let assignee=null;
   if(t.assignedTechId){const n=techName(t.assignedTechId);assignee=n?("🔧 "+n+" (in-house)"):"Tech (removed)"}
   else if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];assignee=v?("🏢 "+v.name+" (third-party)"):"Tech (removed)"}
-  else if(tech)assignee="🔧 "+tech.name+" (store tech)";
   const activity=(t.activity||[]).slice().reverse().map(a=>`
     <div class="tl-item"><div class="tl-dot" style="background:${(STATUSES[a.toStatus]||{}).color||'var(--amber)'}"></div>
       <div class="tl-c"><div class="tl-act">${esc(actionText(a))}</div>
@@ -1636,7 +1611,7 @@ function openTicket(id){
       <div class="section-label">Activity<span class="ln"></span></div>
       <div class="timeline">${activity||'<div style="color:var(--ink-dim);font-size:13px">No activity yet.</div>'}</div>
     </div>
-    <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="closeModal()">Close</button></div>`);
+    <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="closeModal()">Exit</button></div>`);
 }
 function actionText(a){
   if(a.action==="created")return"Ticket created";
@@ -1714,7 +1689,7 @@ function ticketControls(t){
     h+=`<div class="section-label">Update job<span class="ln"></span></div><div style="display:flex;flex-direction:column;gap:9px">`;
     if(t.status!=="in_progress" && t.status!=="finished")
       h+=`<button class="btn btn-ghost btn-block" onclick="setStatus('${t._id}','in_progress')">▶ Mark in progress</button>`;
-    h+=`<button class="btn btn-danger btn-block" onclick="confirmClose('${t._id}')">✕ Close ticket</button>`;
+    h+=`<button class="btn btn-danger btn-block" onclick="confirmClose('${t._id}')">✕ Mark closed</button>`;
     h+=`</div><div style="font-size:11px;color:var(--ink-dim);margin-top:8px">Closing removes the ticket from all views except Overwatch.</div>`;
     // Overwatch + area coaches can correct the ticket's text, category, and urgency.
     if(canEditContent())
@@ -1760,7 +1735,7 @@ async function setStatus(id,status){
    so confirm first. Works from the detail sheet or straight from a list row. */
 function confirmClose(id){
   const t=TICKETS[id];if(!t)return;
-  modal(`<div class="sheet-head"><h2>Close this ticket?</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+  modal(`<div class="sheet-head"><h2>Mark this ticket closed?</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
     <div class="sheet-body">
       <p style="margin:0;color:var(--ink-mid);font-size:14px">${esc(storeName(t.storeId))} · ${esc(t.shortId||"")}</p>
       <p style="margin:10px 0 0;font-size:14px">${esc(t.description||"")}</p>
@@ -1768,177 +1743,23 @@ function confirmClose(id){
     </div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-danger" style="flex:1" id="closeConfirm" onclick="doClose('${id}')">✕ Close ticket</button>
+      <button class="btn btn-danger" style="flex:1" id="closeConfirm" onclick="doClose('${id}')">✕ Mark closed</button>
     </div>`);
 }
 async function doClose(id){
   const btn=$("closeConfirm");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Closing…'}
   if(await patchTicket(id,{status:"closed"},{action:"status",toStatus:"closed"})){
     toast("Ticket closed");closeModal();render();
-  }else if(btn){btn.disabled=false;btn.innerHTML="✕ Close ticket"}
+  }else if(btn){btn.disabled=false;btn.innerHTML="✕ Mark closed"}
+}
+/* One-click close-out from the Finished list (overwatch). Immediately sets that
+   one ticket to Closed and shows a fading confirmation. */
+async function closeOutTicket(id){
+  if(await patchTicket(id,{status:"closed"},{action:"status",toStatus:"closed"})){
+    toast("Closed out ✓");render();
+  }
 }
 
-/* ============================================================ BULK ACTIONS (admin, finished/closed pages) */
-function startSelect(){selectMode=true;selectedIds={};render()}
-function endSelect(){selectMode=false;selectedIds={};render()}
-function toggleSel(id,on){if(on)selectedIds[id]=true;else delete selectedIds[id];render()}
-function toggleAllVisible(on){
-  // current visible rows under the active filter+store+search
-  const rows=currentVisibleRows();
-  selectedIds={}; if(on)rows.forEach(t=>selectedIds[t._id]=true);
-  render();
-}
-function currentVisibleRows(){
-  let rows=[]; myStoreIds().forEach(sid=>rows=rows.concat(ticketsForStore(sid)));
-  if(curStore!=="all")rows=rows.filter(t=>t.storeId===curStore);
-  return applyFilterSearch(rows);
-}
-// run a status change across many tickets — batched, idempotent, resumable.
-// Safe against double-clicks (a run-lock) and interruptions (already-done
-// tickets are skipped, so re-running finishes the rest).
-let _bulkRunning=false;
-function bulkProgressModal(label,total){
-  modal(`<div class="sheet-head"><h2>${esc(label)}</h2></div>
-    <div class="sheet-body">
-      <div class="bulk-prog">
-        <div class="bp-count" id="bpCount">0 / ${total}</div>
-        <div class="bp-track"><div class="bp-fill" id="bpFill" style="width:0%"></div></div>
-        <div class="bp-note" id="bpNote">Working… you can leave this open.</div>
-      </div>
-    </div>`);
-}
-function bulkProgressUpdate(done,total,failed){
-  const f=$("bpFill"),c=$("bpCount"),n=$("bpNote");
-  if(c)c.textContent=`${done} / ${total}`;
-  if(f)f.style.width=Math.round(done/Math.max(1,total)*100)+"%";
-  if(n&&failed)n.textContent=`${failed} couldn't be updated — you can re-run to retry them.`;
-}
-async function bulkSetStatus(ids,status){
-  if(_bulkRunning){toast("Already working on a batch…");return}
-  // Idempotent filter: only touch tickets not already at the target status.
-  const todo=ids.filter(id=>TICKETS[id] && TICKETS[id].status!==status);
-  if(!todo.length){toast("Nothing to do — already done");closeModal();return}
-  _bulkRunning=true;
-  bulkProgressModal(`${STATUSES[status].label==="Closed"?"Closing out":"Updating"} ${todo.length} ticket${todo.length===1?"":"s"}`,todo.length);
-  let done=0,failed=0;
-  const CHUNK=25;
-  for(let i=0;i<todo.length;i+=CHUNK){
-    const slice=todo.slice(i,i+CHUNK);
-    const updates={};
-    for(const id of slice){
-      const t=TICKETS[id]; if(!t){failed++;continue}
-      const activity=Array.isArray(t.activity)?t.activity.slice():[];
-      activity.push({ts:now(),by:SESSION.name,role:SESSION.role,action:"status",toStatus:status,note:"bulk"});
-      updates[`${TICKETS_NODE}/${id}`]={...t,status,activity,updatedAt:now()};
-    }
-    try{
-      await apiWriteMulti(updates);
-      // reflect locally so a resume/re-run sees them as done immediately
-      for(const id of slice){ if(TICKETS[id]) TICKETS[id].status=status; }
-      done+=Object.keys(updates).length;
-    }catch(e){ failed+=Object.keys(updates).length; }
-    bulkProgressUpdate(done,todo.length,failed);
-  }
-  _bulkRunning=false;
-  await refresh();
-  selectMode=false;selectedIds={};
-  closeModal();render();
-  toast(`${done} → ${STATUSES[status].label}${failed?` · ${failed} failed (re-run to retry)`:""}`);
-}
-// confirmation wrappers
-/* Close out finished tickets older than N days. Asks for an integer, computes
-   the set of finished tickets past that age, then runs the robust batch engine
-   (which shows a progress bar and is safe to re-click / resume). */
-function openCloseOldFinished(){
-  const total=currentVisibleRows().filter(t=>t.status==="finished").length;
-  modal(`<div class="sheet-head"><h2>Close out finished tickets</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
-    <div class="sheet-body">
-      <p style="color:var(--ink-mid);font-size:14px;margin-top:0">There ${total===1?"is":"are"} <b>${total}</b> finished ticket${total===1?"":"s"}. Close out the ones older than:</p>
-      <div class="field"><label class="label">Days old</label>
-        <input class="input" id="closeDays" type="number" inputmode="numeric" min="0" step="1" value="0" style="font-size:18px">
-        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">0 = close out all finished, regardless of age.</div>
-      </div>
-    </div>
-    <div class="sheet-foot">
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" style="flex:1" onclick="runCloseOldFinished()">Continue</button>
-    </div>`);
-  setTimeout(()=>{const el=$("closeDays");if(el){el.focus();el.select();}},60);
-}
-function finishedAge(t){return t.finishedAt||t.updatedAt||t.createdAt||0;}
-function runCloseOldFinished(){
-  let days=parseInt(($("closeDays")||{}).value,10); if(!isFinite(days)||days<0)days=0;
-  const cutoff=now()-days*86400000;
-  const ids=currentVisibleRows()
-    .filter(t=>t.status==="finished" && (days===0 || finishedAge(t)<=cutoff))
-    .map(t=>t._id);
-  if(!ids.length){toast(days===0?"No finished tickets":`No finished tickets older than ${days} day${days===1?"":"s"}`,"err");return}
-  closeModal();
-  _closeOldIds=ids;
-  const label=days===0?`Close out all ${ids.length} finished?`:`Close out ${ids.length} finished ticket${ids.length===1?"":"s"} older than ${days} day${days===1?"":"s"}?`;
-  modal(`<div class="sheet-head"><h2>Confirm</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
-    <div class="sheet-body"><p style="font-size:15px">${esc(label)}</p>
-      <p style="color:var(--ink-dim);font-size:13px">Closed tickets leave every board except Overwatch. You can re-run this safely if it's interrupted.</p></div>
-    <div class="sheet-foot">
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" style="flex:1" onclick="bulkSetStatus(_closeOldIds.slice(),'closed')">Close them out</button>
-    </div>`);
-}
-let _closeOldIds=[];
-function confirmBulk(kind){
-  const visible=currentVisibleRows();
-  const selIds=visible.filter(t=>selectedIds[t._id]).map(t=>t._id);
-  let ids,status,msg;
-  if(kind==="closeAll"){ids=visible.map(t=>t._id);status="closed";msg=`Close out all ${ids.length} finished tickets?`;}
-  else if(kind==="closeSel"){ids=selIds;status="closed";msg=`Close out ${ids.length} selected ticket(s)?`;}
-  else if(kind==="toFinished"){ids=selIds;status="finished";msg=`Move ${ids.length} ticket(s) back to Finished?`;}
-  else if(kind==="toUnassigned"){ids=selIds;status="unassigned";msg=`Reopen ${ids.length} ticket(s) to Unassigned?`;}
-  if(!ids.length){toast("Nothing to do","err");return}
-  modal(`<div class="sheet-head"><h2>Are you sure?</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
-    <div class="sheet-body"><p style="font-size:15px">${esc(msg)}</p></div>
-    <div class="sheet-foot">
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">No</button>
-      <button class="btn btn-primary" style="flex:1" onclick="closeModal();bulkSetStatus(${JSON.stringify(ids)},'${status}')">Yes</button>
-    </div>`);
-}
-// reopen-all-by-date (closed page) — window picker + second confirm
-function openReopenAll(){
-  modal(`<div class="sheet-head"><h2>Reopen closed tickets</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
-    <div class="sheet-body">
-      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">This reopens closed tickets within a time window. Choose how far back, then confirm.</p>
-      <div class="field"><label class="label">How far back?</label>
-        <select class="input" id="reopenWindow">
-          <option value="30">Last month (30 days)</option>
-          <option value="120">Last quarter (120 days)</option>
-          <option value="365">Last year (365 days)</option>
-        </select></div>
-      <div class="field" style="margin-top:14px"><label class="label">Reopen to</label>
-        <select class="input" id="reopenTarget"><option value="finished">Finished</option><option value="unassigned">Unassigned</option></select></div>
-    </div>
-    <div class="sheet-foot">
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" style="flex:1" onclick="confirmReopenAll()">Continue</button>
-    </div>`);
-}
-let _reopenIds=[];
-function confirmReopenAll(){
-  const days=parseInt($("reopenWindow").value,10), target=$("reopenTarget").value;
-  const cutoff=now()-days*86400000;
-  // closed tickets whose close happened within the window (use updatedAt as the close time)
-  _reopenIds=currentVisibleRows().filter(t=>t.status==="closed" && (t.updatedAt||t.createdAt||0)>=cutoff).map(t=>t._id);
-  _reopenTarget=target;
-  const winLabel={30:"last 30 days",120:"last 120 days",365:"last year"}[days]||`last ${days} days`;
-  closeModal();
-  if(!_reopenIds.length){toast(`No closed tickets in the ${winLabel}`,"err");return}
-  modal(`<div class="sheet-head"><h2>Confirm — this is a big change</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
-    <div class="sheet-body"><p style="font-size:15px">Reopen <b>${_reopenIds.length}</b> tickets closed in the <b>${winLabel}</b> to <b>${STATUSES[target].label}</b>?</p>
-      <p style="color:var(--red);font-size:13px">They will return to active boards across the app.</p></div>
-    <div class="sheet-foot">
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">No, cancel</button>
-      <button class="btn btn-danger" style="flex:1" onclick="bulkSetStatus(_reopenIds.slice(),_reopenTarget)">Yes, reopen ${_reopenIds.length}</button>
-    </div>`);
-}
-let _reopenTarget="finished";
 async function doAssign(id){
   const val=$("assignSel").value;
   let patch,note;
