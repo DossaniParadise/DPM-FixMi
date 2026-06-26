@@ -1418,12 +1418,19 @@ function contactBtns(t,who){
   }
   return b;
 }
-// shared message body (ticket + store + address + photo links + reply-to)
+// shared message body (vendor-friendly: store, issue, optional address, optional photos)
 function draftBody(t,who){
-  const addr=store(t.storeId).address||"";
+  const addr=(store(t.storeId).address||"").trim();
   const photos=(t.photos||[]);
-  const photoBlock=photos.length?("\n\nPhotos:\n"+photos.join("\n")):"";
-  return `Hi ${who.name}, regarding ticket ${t.shortId} at ${storeName(t.storeId)}${addr?(" — "+addr):""}: ${t.description||""}${photoBlock}`;
+  const desc=(t.description||"").trim();
+  let msg=`Hi ${who.name}, we have an issue at ${storeName(t.storeId)} that we need your help with.`;
+  if(desc){ msg+=` ${desc}`; if(!/[.!?]$/.test(desc)) msg+="."; }
+  if(addr) msg+=` The address for the store is ${addr}.`;
+  if(photos.length){
+    msg+=` Here ${photos.length===1?"is a photo":"are some photos"} for reference:\n`+photos.join("\n");
+  }
+  msg+=`${photos.length?"\n\n":" "}Please let me know when you can address this. Thank you.`;
+  return msg;
 }
 function fmtDateShort(ts){if(!ts)return"";const d=new Date(ts);return d.toLocaleDateString("en-US",{month:"numeric",day:"numeric"})}
 // inline assign from a row (admin)
