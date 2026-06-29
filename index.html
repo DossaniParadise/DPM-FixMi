@@ -1340,12 +1340,15 @@ function ticketRow(t){
   // ----- right side -----
   let right;
   if(isAdmin && t.status==="unassigned"){
+    const sTechId=store(t.storeId).assignedRepairTechnicianId;
+    const sTech=(MASTER.repairTechnicians||{})[sTechId];
+    const techOpt=sTech?`<option value="tech:${sTechId}">${esc(sTech.name)}</option>`:'<option disabled>None assigned to this store</option>';
     right=`<div class="row-assign" onclick="event.stopPropagation()">
       <select class="input row-sel" id="rsel_${t._id}" onchange="if(this.value==='__add__'){this.value='';openVendors();}">
         <option value="">Assign to…</option>
-        <optgroup label="In-house techs">${Object.entries(MASTER.repairTechnicians||{}).map(([id,v])=>`<option value="tech:${id}">${esc(v.name)}</option>`).join("")}</optgroup>
+        <optgroup label="In-house tech for this store">${techOpt}</optgroup>
         <optgroup label="Third-party techs">${Object.entries(VENDORS).map(([id,v])=>`<option value="vendor:${id}">${esc(v.name)}</option>`).join("")||'<option disabled>None added</option>'}</optgroup>
-        <option value="__add__">＋ Add new tech…</option>
+        <option value="__add__">＋ Add new vendor…</option>
       </select>
       <button class="btn btn-primary btn-sm" onclick="rowAssign('${t._id}')">Assign</button>
     </div>`;
@@ -1780,13 +1783,18 @@ function statusGrid(t,targets){
 }
 function assignControls(t){
   const vendors=Object.entries(VENDORS);
-  const techs=Object.entries(MASTER.repairTechnicians||{});
+  // In-house techs are tied to a store. Only show the tech assigned to THIS
+  // store (plus, defensively, whoever is already on the ticket if different),
+  // not the whole roster. Third-party vendors are available for any store.
+  const storeTechId=store(t.storeId).assignedRepairTechnicianId;
+  const techIds=[...new Set([storeTechId,t.assignedTechId].filter(Boolean))];
+  const techs=techIds.map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([id,v])=>v);
   const venOpts=vendors.map(([id,v])=>`<option value="vendor:${id}"${t.assignedVendorId===id?" selected":""}>🏢 ${esc(v.name)}</option>`).join("");
   const techOpts=techs.map(([id,v])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(v.name)}</option>`).join("");
   return `<div style="display:flex;gap:10px">
     <select class="input" id="assignSel">
       <option value="">— Unassigned (pool) —</option>
-      <optgroup label="In-house techs">${techOpts||'<option disabled>None</option>'}</optgroup>
+      <optgroup label="In-house tech for this store">${techOpts||'<option disabled>None assigned to this store</option>'}</optgroup>
       <optgroup label="Third-party vendors → Assigned">${venOpts||'<option disabled>No vendors added</option>'}</optgroup>
     </select>
     <button class="btn btn-primary" onclick="doAssign('${t._id}')">Set</button></div>
