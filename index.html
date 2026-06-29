@@ -1667,7 +1667,7 @@ function ticketControls(t){
   if(role==="admin"){
     h+=`<div class="section-label">Assign<span class="ln"></span></div>${assignControls(t)}`;
     h+=`<div class="section-label">Set status<span class="ln"></span></div>${statusGrid(t,STATUS_ORDER)}`;
-    h+=`<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="openEdit('${t._id}')">✎ Edit details &amp; urgency</button>`;
+    h+=`<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="openEdit('${t._id}')">✎ Edit all details</button>`;
     return h;
   }
 
@@ -1927,14 +1927,22 @@ function openEdit(id){
   const t=TICKETS[id];editPhotos=(t.photos||[]).slice();
   const catOpts=Object.entries(CATEGORIES).map(([k,v])=>`<option value="${k}"${t.category===k?" selected":""}>${v}</option>`).join("");
   const priOpts=Object.entries(PRIORITIES).map(([k,v])=>`<option value="${k}"${t.priority===k?" selected":""}>${v}</option>`).join("");
+  // Overwatch can also move a misfiled ticket to the correct store; other roles
+  // can't change the store (their tickets are scoped to stores in their purview).
+  const canMoveStore = SESSION.role==="admin";
+  const storeOpts = canMoveStore
+    ? Object.keys(RESTAURANTS).slice().sort((a,b)=>storeName(a).localeCompare(storeName(b)))
+        .map(rid=>`<option value="${rid}"${t.storeId===rid?" selected":""}>${esc(storeName(rid))}</option>`).join("")
+    : "";
   modal(`<div class="sheet-head"><h2>Edit ticket</h2><button class="x-btn" onclick="openTicket('${id}')">✕</button></div>
     <div class="sheet-body">
-      <div style="display:flex;gap:12px">
+      ${canMoveStore?`<div class="field"><label class="label">Store</label><select class="input" id="eStore">${storeOpts}</select></div>`:""}
+      <div style="display:flex;gap:12px${canMoveStore?";margin-top:14px":""}">
         <div class="field" style="flex:1"><label class="label">Category</label><select class="input" id="eCat">${catOpts}</select></div>
         <div class="field" style="flex:1"><label class="label">Priority</label><select class="input" id="ePri">${priOpts}</select></div></div>
-      <div class="field" style="margin-top:14px"><label class="label">Description</label><textarea class="input" id="eDesc">${esc(t.description||"")}</textarea></div>
+      <div class="field" style="margin-top:14px"><label class="label">Description</label><textarea class="input" id="eDesc" rows="4">${esc(t.description||"")}</textarea></div>
       <div class="field" style="margin-top:14px"><label class="label">Photos</label>
-        <div class="upload-zone" onclick="$('eFile').click()"><div class="uz-ic">📷</div><div class="uz-t">Add photos</div></div>
+        <div class="upload-zone" onclick="$('eFile').click()"><div class="uz-ic">📷</div><div class="uz-t">Add photos</div><div class="uz-h mono">take one or pick from your gallery</div></div>
         <input type="file" id="eFile" accept="image/*" multiple style="display:none" onchange="addEditPhotos(this)">
         <div class="preview-strip" id="ePreview"></div></div>
     </div>
@@ -1951,7 +1959,11 @@ async function addEditPhotos(input){
 }
 async function saveEdit(id){
   const btn=$("eSave");btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Saving…';
-  if(await patchTicket(id,{description:$("eDesc").value.trim(),category:$("eCat").value,priority:$("ePri").value,photos:editPhotos.slice()},{action:"edit"})){toast("Ticket updated");openTicket(id)}
+  const patch={description:$("eDesc").value.trim(),category:$("eCat").value,priority:$("ePri").value,photos:editPhotos.slice()};
+  // Overwatch only: allow moving the ticket to a different store.
+  const eStore=$("eStore");
+  if(eStore && eStore.value && eStore.value!==TICKETS[id].storeId) patch.storeId=eStore.value;
+  if(await patchTicket(id,patch,{action:"edit"})){toast("Ticket updated");openTicket(id)}
   else{btn.disabled=false;btn.textContent="Save changes"}
 }
 
