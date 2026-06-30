@@ -356,6 +356,7 @@ body.simulating .wrap{padding-bottom:40px}
 @keyframes sp{to{transform:rotate(360deg)}}
 .inline-spin{width:15px;height:15px;border:2px solid rgba(0,0,0,.25);border-top-color:#1a1305;border-radius:50%;animation:sp .7s linear infinite;display:inline-block}
 .poll-dot{position:fixed;left:14px;bottom:14px;z-index:50;font-family:var(--mono);font-size:10px;color:var(--ink-dim);display:flex;align-items:center;gap:6px}
+.app-version{position:fixed;right:12px;bottom:11px;z-index:50;font-family:var(--mono);font-size:10px;color:var(--ink-dim);opacity:.6;pointer-events:none;user-select:none}
 .poll-dot .d{width:6px;height:6px;border-radius:50%;background:var(--green)}
 .poll-dot.busy .d{background:var(--amber)}
 @media(max-width:600px){
@@ -408,6 +409,7 @@ body.simulating .wrap{padding-bottom:40px}
   .va-list{max-height:54vh}
   .fab{right:14px;bottom:16px;padding:13px 16px}
   .poll-dot{left:10px;bottom:10px}
+  .app-version{right:10px;bottom:8px}
   .login-card{max-width:100%}
   /* --- Overwatch management on mobile --- */
   .board-controls{flex-direction:column;align-items:stretch;gap:8px}
@@ -485,6 +487,7 @@ body.simulating .wrap{padding-bottom:40px}
 <div class="poll-dot hidden" id="pollDot"><span class="d"></span><span id="pollTxt">live</span></div>
 <div class="toast" id="toast"></div>
 <div class="loader hidden" id="loader"><div class="spin"></div></div>
+<div class="app-version" id="appVersion"></div>
 
 <script>
 /* ============================================================
@@ -496,6 +499,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
+const APP_VERSION = "2.7.1";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2295,6 +2299,7 @@ function toggleTags(){SHOW_REF_TAGS=!SHOW_REF_TAGS;applyTags();toast(SHOW_REF_TA
 
 /* ============================================================ BOOT */
 (function init(){
+  document.getElementById("appVersion").textContent="v"+APP_VERSION;
   ["emailIn","pwIn"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()}));
   window.addEventListener("resize",()=>{if(SESSION)applyTags()});
   tryRestoreSession(); // stay logged in across refresh
