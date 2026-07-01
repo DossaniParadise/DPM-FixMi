@@ -632,6 +632,16 @@ const $=id=>document.getElementById(id);
 const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints>1 && /Mac/.test(navigator.platform));
 function telLink(num){return "tel:"+String(num).replace(/[^0-9+]/g,"");}
 function smsLink(num,body){return "sms:"+String(num).replace(/[^0-9+]/g,"")+(body?("?&body="+encodeURIComponent(body)):"");}
+// Format a phone for DISPLAY only as (XXX) XXX - XXXX. Links/storage keep raw
+// digits. Falls back to the original string if it isn't a standard 10-digit (or
+// 11-digit leading-1) US number.
+function fmtPhone(num){
+  if(!num)return "";
+  const d=String(num).replace(/\D/g,"");
+  const ten = d.length===11&&d[0]==="1" ? d.slice(1) : d;
+  if(ten.length===10) return `(${ten.slice(0,3)}) ${ten.slice(3,6)} - ${ten.slice(6)}`;
+  return String(num); // non-standard — show as-is
+}
 function mailtoLink(to,subject,body,replyTo){
   // mailto can't set true Reply-To, so we surface it in the body for now
   const params=[]; if(subject)params.push("subject="+encodeURIComponent(subject)); if(body)params.push("body="+encodeURIComponent(body));
@@ -1480,7 +1490,7 @@ function contactBtns(t,who){
   if(!b){
     // No email on file, and on desktop there's nothing tappable to offer.
     b = who.phone
-      ? `<span class="rb-none">${esc(who.phone)} — call or text from your phone</span>`
+      ? `<span class="rb-none">${esc(fmtPhone(who.phone))} — call or text from your phone</span>`
       : `<span class="rb-none">No contact info on file</span>`;
   }
   return b;
@@ -2163,7 +2173,7 @@ function openVendors(){
   const rows=Object.entries(VENDORS).map(([id,v])=>`
     <div class="vrow"><div style="flex:1;min-width:0">
       <div class="v-name">${esc(v.name)}</div>
-      <div class="v-meta">${esc([v.category,v.phone,v.email].filter(Boolean).join(" · ")||"No contact on file")}</div></div>
+      <div class="v-meta">${esc([v.category,fmtPhone(v.phone),v.email].filter(Boolean).join(" · ")||"No contact on file")}</div></div>
       <button class="btn btn-ghost btn-sm" onclick="editVendor('${id}')">Edit</button>
       <button class="btn btn-danger btn-sm" onclick="removeVendor('${id}')">Remove</button></div>`).join("");
   modal(`<div class="sheet-head"><h2>Third-party techs</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
