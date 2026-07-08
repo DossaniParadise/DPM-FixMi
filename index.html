@@ -1938,7 +1938,7 @@ function openFinish(id,opts){
   const cancelAct = finishThenStart ? `closeModal()` : `openTicket('${id}')`;
   modal(`<div class="sheet-head"><h2>Finish job</h2><button class="x-btn" onclick="${cancelAct}">✕</button></div>
     <div class="sheet-body">
-      <p style="margin:0 0 14px;color:var(--ink-mid);font-size:14px">Add a photo of the completed work before you close this out.</p>
+      <p style="margin:0 0 14px;color:var(--ink-mid);font-size:14px">Add a photo of the completed work if you can — it's recommended but not required.</p>
       <div class="upload-zone" id="finUz" onclick="$('finFile').click()">
         <div class="uz-ic">📸</div><div class="uz-t">Add a photo</div>
         <div class="uz-h mono">${IS_MOBILE?"take one or pick from your gallery":"tap to choose a photo"}</div>
@@ -1948,7 +1948,7 @@ function openFinish(id,opts){
     </div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="${cancelAct}">Cancel</button>
-      <button class="btn btn-primary fin" style="flex:1" id="finConfirm" disabled onclick="confirmFinish('${id}')">✓ Mark finished</button>
+      <button class="btn btn-primary fin" style="flex:1" id="finConfirm" onclick="confirmFinish('${id}')">✓ Mark finished</button>
     </div>`);
 }
 async function addFinishPhotos(id,input){
@@ -1975,24 +1975,37 @@ function renderFinishPreview(){
       ${p.failed?`<button class="pv-retry" onclick="retryFinishPhoto(${i})">↻ Retry</button>`:""}
       <button class="pv-x" onclick="finishPhotos.splice(${i},1);renderFinishPreview()">✕</button>
     </div>`).join("");
-  // Ready only when there's at least one SUCCESSFUL upload and nothing still uploading.
+  // Photo is optional: only block the button while an upload is in flight.
   const anyUploading=finishPhotos.some(p=>p.uploading);
-  const anyDone=finishPhotos.some(p=>p.url);
-  const btn=$("finConfirm");if(btn)btn.disabled=anyUploading||!anyDone;
+  const btn=$("finConfirm");if(btn)btn.disabled=anyUploading;
   applyTags();
 }
 async function confirmFinish(id){
   const urls=finishPhotos.filter(p=>p.url).map(p=>p.url);
-  if(!urls.length){toast("Add a photo first","err");return}
+  if(!urls.length){
+    // No photo: remind once, but let them proceed if they insist.
+    modal(`<div class="sheet-head"><h2>Finish without a photo?</h2><button class="x-btn" onclick="openFinish('${id}'${finishThenStart?`,{thenStart:'${finishThenStart}'}`:""})">✕</button></div>
+      <div class="sheet-body"><p style="font-size:14px;color:var(--ink-mid);margin:0">A photo of the completed work is recommended. Are you sure you want to mark this finished without one?</p></div>
+      <div class="sheet-foot">
+        <button class="btn btn-ghost" style="flex:1" onclick="openFinish('${id}'${finishThenStart?`,{thenStart:'${finishThenStart}'}`:""})">Add a photo</button>
+        <button class="btn btn-primary fin" style="flex:1" onclick="finalizeFinish('${id}')">Finish anyway</button>
+      </div>`);
+    return;
+  }
+  finalizeFinish(id);
+}
+async function finalizeFinish(id){
+  const urls=finishPhotos.filter(p=>p.url).map(p=>p.url);
   const btn=$("finConfirm");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Finishing…'}
   const t=TICKETS[id];const photos=(t&&Array.isArray(t.photos)?t.photos.slice():[]).concat(urls);
   const patch={status:"finished",finishedAt:now(),photos};
   if(t&&t.clockInAt&&!t.clockOutAt)patch.clockOutAt=now();
-  if(await patchTicket(id,patch,{action:"clockout",toStatus:"finished",note:`Finished with ${urls.length} photo${urls.length>1?"s":""}`})){
+  const noteTxt = urls.length ? `Finished with ${urls.length} photo${urls.length>1?"s":""}` : "Finished (no photo)";
+  if(await patchTicket(id,patch,{action:"clockout",toStatus:"finished",note:noteTxt})){
     finishPhotos=[];
     const next=finishThenStart;finishThenStart=null;
     if(next){toast("Finished · starting next job");doTechStart(next);}
-    else{toast("Finished · photo added");openTicket(id);}
+    else{toast(urls.length?"Finished · photo added":"Finished");openTicket(id);}
   }else if(btn){btn.disabled=false;btn.innerHTML="✓ Mark finished"}
 }
 let waitReason=null;
