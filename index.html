@@ -146,6 +146,27 @@ body.no-reftags .reftag{display:none}
 .loc-note.ask{background:var(--panel-2);color:var(--amber-deep);border-color:color-mix(in srgb,var(--amber) 40%,var(--line));font-weight:600;cursor:pointer}
 .loc-note.ask:hover{border-color:var(--amber);background:#fff7e6}
 .tl-card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.rp-empty{color:var(--ink-dim);font-size:13px;padding:18px;text-align:center;background:var(--panel-2);border-radius:10px}
+.rp-head{font-weight:800;font-size:16px;margin-bottom:12px}
+.rp-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.rp-stat{flex:1;min-width:64px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 8px;text-align:center}
+.rp-stat .rp-n{font-family:var(--disp);font-weight:800;font-size:22px;color:var(--amber-deep)}
+.rp-stat .rp-l{font-size:10px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+.rp-map-wrap{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel-2)}
+.rp-map{display:block;width:100%;height:auto}
+.rp-stop:hover circle{fill:var(--amber)}
+.rp-legend{display:flex;gap:14px;flex-wrap:wrap;padding:9px 12px;font-size:11px;color:var(--ink-mid);border-top:1px solid var(--line)}
+.rp-legend i{display:inline-block;width:11px;height:11px;border-radius:50%;vertical-align:middle;margin-right:4px}
+.rp-legend .lg-store{background:var(--amber-deep)}
+.rp-legend .lg-ping{background:var(--blue);opacity:.55}
+.rp-legend .lg-route{border-radius:0;height:3px;width:14px;background:var(--amber)}
+.rp-timeline{display:flex;flex-direction:column;gap:2px}
+.rp-row{display:flex;gap:12px;padding:10px 8px;border-radius:8px;align-items:flex-start}
+.rp-row:hover{background:var(--panel-2)}
+.rp-time{font-size:12px;color:var(--ink-dim);min-width:62px;padding-top:2px}
+.rp-act{font-weight:700;font-size:13.5px}
+.rp-store{font-size:12.5px;color:var(--ink-mid);margin-top:1px}
+.rp-note{font-size:12.5px;color:var(--ink-dim);margin-top:3px;font-style:italic}
 .tl-name{font-weight:700;font-size:15px;margin-bottom:9px}
 .tl-none{color:var(--ink-dim);font-size:13px}
 .tl-last{display:flex;align-items:center;justify-content:space-between;gap:10px;text-decoration:none;color:inherit;
@@ -477,6 +498,7 @@ body.simulating .wrap{padding-bottom:40px}
     <button class="icon-btn" id="refreshBtn" title="Refresh now" onclick="manualRefresh()">⟳</button>
     <button class="icon-btn hidden" id="viewAsBtn" title="View as another person" onclick="openViewAs()">👁</button>
     <button class="icon-btn hidden" id="techLocBtn" title="Tech locations" onclick="openTechLocations()">📍</button>
+    <button class="icon-btn hidden" id="techReportBtn" title="Tech day report" onclick="openTechReport()">📊</button>
     <button class="icon-btn hidden" id="vendorTopBtn" title="Third-party techs" onclick="openVendors()">🏢</button>
     <button class="icon-btn hidden" id="settingsBtn" title="Settings" onclick="openSettings()">⚙</button>
     <button class="icon-btn" title="Sign out" onclick="logout()">⏻</button>
@@ -499,7 +521,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "2.7.1";
+const APP_VERSION = "2.7.3";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -968,6 +990,7 @@ function enterAppChrome(){
   $("viewAsBtn").classList.toggle("hidden",!realAdmin);
   // Tech-location overwatch: any overwatch/admin (real or simulated) can view.
   $("techLocBtn").classList.toggle("hidden",SESSION.role!=="admin");
+  $("techReportBtn").classList.toggle("hidden",SESSION.role!=="admin");
   $("settingsBtn").classList.toggle("hidden",!realAdmin);
   document.body.classList.toggle("no-reftags",!SHOW_REF_TAGS);
 }
@@ -1938,7 +1961,7 @@ function openFinish(id,opts){
   const cancelAct = finishThenStart ? `closeModal()` : `openTicket('${id}')`;
   modal(`<div class="sheet-head"><h2>Finish job</h2><button class="x-btn" onclick="${cancelAct}">✕</button></div>
     <div class="sheet-body">
-      <p style="margin:0 0 14px;color:var(--ink-mid);font-size:14px">Add a photo of the completed work if you can — it's recommended but not required.</p>
+      <p style="margin:0 0 14px;color:var(--ink-mid);font-size:14px">Add a photo of the completed work before you close this out.</p>
       <div class="upload-zone" id="finUz" onclick="$('finFile').click()">
         <div class="uz-ic">📸</div><div class="uz-t">Add a photo</div>
         <div class="uz-h mono">${IS_MOBILE?"take one or pick from your gallery":"tap to choose a photo"}</div>
@@ -1948,7 +1971,7 @@ function openFinish(id,opts){
     </div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="${cancelAct}">Cancel</button>
-      <button class="btn btn-primary fin" style="flex:1" id="finConfirm" onclick="confirmFinish('${id}')">✓ Mark finished</button>
+      <button class="btn btn-primary fin" style="flex:1" id="finConfirm" disabled onclick="confirmFinish('${id}')">✓ Mark finished</button>
     </div>`);
 }
 async function addFinishPhotos(id,input){
@@ -1975,37 +1998,24 @@ function renderFinishPreview(){
       ${p.failed?`<button class="pv-retry" onclick="retryFinishPhoto(${i})">↻ Retry</button>`:""}
       <button class="pv-x" onclick="finishPhotos.splice(${i},1);renderFinishPreview()">✕</button>
     </div>`).join("");
-  // Photo is optional: only block the button while an upload is in flight.
+  // Ready only when there's at least one SUCCESSFUL upload and nothing still uploading.
   const anyUploading=finishPhotos.some(p=>p.uploading);
-  const btn=$("finConfirm");if(btn)btn.disabled=anyUploading;
+  const anyDone=finishPhotos.some(p=>p.url);
+  const btn=$("finConfirm");if(btn)btn.disabled=anyUploading||!anyDone;
   applyTags();
 }
 async function confirmFinish(id){
   const urls=finishPhotos.filter(p=>p.url).map(p=>p.url);
-  if(!urls.length){
-    // No photo: remind once, but let them proceed if they insist.
-    modal(`<div class="sheet-head"><h2>Finish without a photo?</h2><button class="x-btn" onclick="openFinish('${id}'${finishThenStart?`,{thenStart:'${finishThenStart}'}`:""})">✕</button></div>
-      <div class="sheet-body"><p style="font-size:14px;color:var(--ink-mid);margin:0">A photo of the completed work is recommended. Are you sure you want to mark this finished without one?</p></div>
-      <div class="sheet-foot">
-        <button class="btn btn-ghost" style="flex:1" onclick="openFinish('${id}'${finishThenStart?`,{thenStart:'${finishThenStart}'}`:""})">Add a photo</button>
-        <button class="btn btn-primary fin" style="flex:1" onclick="finalizeFinish('${id}')">Finish anyway</button>
-      </div>`);
-    return;
-  }
-  finalizeFinish(id);
-}
-async function finalizeFinish(id){
-  const urls=finishPhotos.filter(p=>p.url).map(p=>p.url);
+  if(!urls.length){toast("Add a photo first","err");return}
   const btn=$("finConfirm");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Finishing…'}
   const t=TICKETS[id];const photos=(t&&Array.isArray(t.photos)?t.photos.slice():[]).concat(urls);
   const patch={status:"finished",finishedAt:now(),photos};
   if(t&&t.clockInAt&&!t.clockOutAt)patch.clockOutAt=now();
-  const noteTxt = urls.length ? `Finished with ${urls.length} photo${urls.length>1?"s":""}` : "Finished (no photo)";
-  if(await patchTicket(id,patch,{action:"clockout",toStatus:"finished",note:noteTxt})){
+  if(await patchTicket(id,patch,{action:"clockout",toStatus:"finished",note:`Finished with ${urls.length} photo${urls.length>1?"s":""}`})){
     finishPhotos=[];
     const next=finishThenStart;finishThenStart=null;
     if(next){toast("Finished · starting next job");doTechStart(next);}
-    else{toast(urls.length?"Finished · photo added":"Finished");openTicket(id);}
+    else{toast("Finished · photo added");openTicket(id);}
   }else if(btn){btn.disabled=false;btn.innerHTML="✓ Mark finished"}
 }
 let waitReason=null;
@@ -2131,6 +2141,158 @@ function openTechLocations(){
       ${techs.length?cards:`<div class="empty"><div class="empty-mark">🔧</div><h3>No in-house techs</h3></div>`}
     </div>
     <div class="sheet-foot"><button class="btn btn-primary btn-block" onclick="manualRefresh();closeModal();setTimeout(openTechLocations,400)">⟳ Refresh</button></div>`);
+}
+
+/* ============================================================ TECH DAY REPORT (overwatch)
+   Pick a tech + a date → every action that tech took that day (comments, status
+   changes, finishes, in-progress, waiting), across all tickets, in time order,
+   plus an interactive map of where they were: job-site store locations and the
+   day's location pings, connected in time order so you can see the route and the
+   distances between stops. */
+let _reportTech="", _reportDate="";
+function ymdLocal(ts){const d=new Date(ts);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
+function todayYmd(){return ymdLocal(now());}
+function dayBounds(ymd){
+  const [y,m,d]=ymd.split("-").map(Number);
+  const start=new Date(y,m-1,d,0,0,0,0).getTime();
+  const end=new Date(y,m-1,d,23,59,59,999).getTime();
+  return [start,end];
+}
+function fmtClock(ts){return new Date(ts).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});}
+
+function openTechReport(){
+  const techs=Object.entries(MASTER.repairTechnicians||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
+  if(!_reportDate)_reportDate=todayYmd();
+  const techOpts=`<option value="">— Choose a tech —</option>`+techs.map(([id,t])=>`<option value="${id}"${_reportTech===id?" selected":""}>${esc(t.name)}</option>`).join("");
+  modal(`<div class="sheet-head"><h2>Tech day report</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body">
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div class="field" style="flex:2;min-width:150px"><label class="label">Technician</label>
+          <select class="input" id="rTech" onchange="_reportTech=this.value">${techOpts}</select></div>
+        <div class="field" style="flex:1;min-width:130px"><label class="label">Date</label>
+          <input class="input" id="rDate" type="date" value="${_reportDate}" max="${todayYmd()}" onchange="_reportDate=this.value"></div>
+      </div>
+      <button class="btn btn-primary btn-block" style="margin-top:6px" onclick="runTechReport()">Run report</button>
+      <div id="reportOut" style="margin-top:18px"></div>
+    </div>`);
+}
+
+// Gather a tech's actions for a day. Actions are matched by name+tech role,
+// since ticket logs stamp the actor name and role (not an id).
+function gatherTechDay(techId,ymd){
+  const tech=(MASTER.repairTechnicians||{})[techId];
+  if(!tech)return null;
+  const name=tech.name;
+  const [start,end]=dayBounds(ymd);
+  const events=[];
+  Object.keys(TICKETS).forEach(tid=>{
+    const t=TICKETS[tid];
+    (Array.isArray(t.activity)?t.activity:[]).forEach(a=>{
+      if(a.role==="tech" && a.by===name && a.ts>=start && a.ts<=end)
+        events.push({ts:a.ts,kind:"action",action:a.action,toStatus:a.toStatus,note:a.note||"",ticketId:tid,storeId:t.storeId});
+    });
+    (Array.isArray(t.comments)?t.comments:[]).forEach(c=>{
+      if(c.role==="tech" && c.by===name && c.ts>=start && c.ts<=end)
+        events.push({ts:c.ts,kind:"comment",text:c.text||"",ticketId:tid,storeId:t.storeId});
+    });
+  });
+  events.sort((a,b)=>a.ts-b.ts);
+  // location pings for that day
+  const rec=((MASTER.admins||{}).techLocations||{})[techId];
+  const pings=(rec&&Array.isArray(rec.pings)?rec.pings:[]).filter(p=>p.ts>=start&&p.ts<=end).sort((a,b)=>a.ts-b.ts);
+  return {tech,name,events,pings};
+}
+
+function actionLabel(e){
+  if(e.kind==="comment")return `💬 Commented`;
+  const map={clockin:"▶ Started (in progress)",clockout:"✓ Marked finished",status:e.toStatus?`→ ${(STATUSES[e.toStatus]||{}).label||e.toStatus}`:"Status change",created:"Created",assign:"Assigned",edit:"Edited"};
+  return map[e.action]||e.action||"Action";
+}
+
+function runTechReport(){
+  const techId=$("rTech").value, ymd=$("rDate").value;
+  const out=$("reportOut");
+  if(!techId){out.innerHTML=`<div class="rp-empty">Choose a technician above.</div>`;return}
+  _reportTech=techId;_reportDate=ymd;
+  const data=gatherTechDay(techId,ymd);
+  if(!data){out.innerHTML=`<div class="rp-empty">Tech not found.</div>`;return}
+  const {name,events,pings}=data;
+  const dateLabel=new Date(dayBounds(ymd)[0]).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
+
+  // Build map stops: unique job-site stores touched (in first-touch time order)
+  // plus location pings. Distance is summed along the store route in time order.
+  const storeSeq=[];const seen={};
+  events.forEach(e=>{const c=storeCoords(e.storeId);if(c&&!seen[e.storeId]){seen[e.storeId]=true;storeSeq.push({storeId:e.storeId,...c,firstTs:e.ts});}});
+  let drove=0;
+  for(let i=1;i<storeSeq.length;i++)drove+=distanceMiles(storeSeq[i-1],storeSeq[i])||0;
+
+  const finishedN=events.filter(e=>e.action==="clockout").length;
+  const startedN=events.filter(e=>e.action==="clockin").length;
+  const commentN=events.filter(e=>e.kind==="comment").length;
+
+  const summary=`<div class="rp-summary">
+    <div class="rp-stat"><div class="rp-n">${events.length}</div><div class="rp-l">actions</div></div>
+    <div class="rp-stat"><div class="rp-n">${finishedN}</div><div class="rp-l">finished</div></div>
+    <div class="rp-stat"><div class="rp-n">${startedN}</div><div class="rp-l">started</div></div>
+    <div class="rp-stat"><div class="rp-n">${storeSeq.length}</div><div class="rp-l">stores</div></div>
+    <div class="rp-stat"><div class="rp-n">~${drove<10?drove.toFixed(1):Math.round(drove)}</div><div class="rp-l">mi between stops</div></div>
+  </div>`;
+
+  const map=reportMap(storeSeq,pings);
+
+  const timeline = events.length
+    ? `<div class="rp-timeline">`+events.map(e=>{
+        const gps=storeGeoUrl(e.storeId);
+        return `<div class="rp-row" ${gps?`onclick="window.open('${escA(gps)}','_blank')" style="cursor:pointer"`:""}>
+          <div class="rp-time mono">${fmtClock(e.ts)}</div>
+          <div class="rp-body">
+            <div class="rp-act">${actionLabel(e)}</div>
+            <div class="rp-store">${esc(storeName(e.storeId))}</div>
+            ${e.kind==="comment"?`<div class="rp-note">"${esc(e.text)}"</div>`:(e.note?`<div class="rp-note">${esc(e.note)}</div>`:"")}
+          </div>
+        </div>`;}).join("")+`</div>`
+    : `<div class="rp-empty">No tracked actions by ${esc(name)} on this day.</div>`;
+
+  out.innerHTML=`
+    <div class="rp-head">${esc(name)} · ${esc(dateLabel)}</div>
+    ${summary}
+    ${map}
+    <div class="section-label" style="margin-top:20px">Timeline<span class="ln"></span></div>
+    ${timeline}`;
+}
+
+// Interactive SVG map: normalizes lat/lng of all points into the viewbox, draws
+// the store route in time order (so you can see the path driven), plots pings as
+// small dots, and makes each store stop clickable to open in Google Maps.
+function reportMap(storeSeq,pings){
+  const pts=[...storeSeq.map(s=>({...s,type:"store"})),...pings.map(p=>({...p,type:"ping"}))];
+  if(!pts.length)return `<div class="rp-empty">No mapped locations for this day (stores may be missing coordinates, and no location pings were recorded).</div>`;
+  const lats=pts.map(p=>p.lat),lngs=pts.map(p=>p.lng);
+  let minLat=Math.min(...lats),maxLat=Math.max(...lats),minLng=Math.min(...lngs),maxLng=Math.max(...lngs);
+  // pad so single-point or tight clusters aren't on the edge
+  const padLat=Math.max((maxLat-minLat)*0.15,0.01), padLng=Math.max((maxLng-minLng)*0.15,0.01);
+  minLat-=padLat;maxLat+=padLat;minLng-=padLng;maxLng+=padLng;
+  const W=600,H=360;
+  const X=lng=>((lng-minLng)/(maxLng-minLng||1))*W;
+  const Y=lat=>H-((lat-minLat)/(maxLat-minLat||1))*H; // invert: north up
+  // route line through stores in order
+  let path="";
+  storeSeq.forEach((s,i)=>{path+=(i?" L":"M")+X(s.lng).toFixed(1)+" "+Y(s.lat).toFixed(1);});
+  const routeLine=storeSeq.length>1?`<path d="${path}" fill="none" stroke="var(--amber)" stroke-width="2.5" stroke-dasharray="5 5" opacity="0.8"/>`:"";
+  const pingDots=pings.map(p=>`<circle cx="${X(p.lng).toFixed(1)}" cy="${Y(p.lat).toFixed(1)}" r="4" fill="var(--blue)" opacity="0.55"/>`).join("");
+  const storeDots=storeSeq.map((s,i)=>{
+    const gps=storeGeoUrl(s.storeId);
+    return `<g class="rp-stop" onclick="window.open('${escA(gps)}','_blank')" style="cursor:pointer">
+      <circle cx="${X(s.lng).toFixed(1)}" cy="${Y(s.lat).toFixed(1)}" r="11" fill="var(--amber-deep)"/>
+      <text x="${X(s.lng).toFixed(1)}" y="${(Y(s.lat)+4).toFixed(1)}" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">${i+1}</text>
+      <title>${esc(storeName(s.storeId))} — tap to open in maps</title>
+    </g>`;}).join("");
+  const legend=`<div class="rp-legend"><span><i class="lg-store"></i> Job stop (numbered by order)</span><span><i class="lg-ping"></i> Location ping</span>${storeSeq.length>1?'<span><i class="lg-route"></i> Route</span>':""}</div>`;
+  return `<div class="rp-map-wrap">
+    <svg viewBox="0 0 ${W} ${H}" class="rp-map" preserveAspectRatio="xMidYMid meet">
+      <rect x="0" y="0" width="${W}" height="${H}" fill="var(--panel-2)"/>
+      ${routeLine}${pingDots}${storeDots}
+    </svg>${legend}</div>`;
 }
 
 /* ============================================================ VENDORS */
