@@ -526,7 +526,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "2.7.4";
+const APP_VERSION = "2.7.5";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1613,6 +1613,10 @@ let activeModal=null;
 function modal(html){
   let o=$("modalOverlay");
   if(!o){o=document.createElement("div");o.id="modalOverlay";o.className="overlay";document.body.appendChild(o);o.addEventListener("click",e=>{if(e.target===o)closeModal()})}
+  // A closeModal() schedules a delayed content wipe (for the fade-out). If a
+  // new modal opens before that timer fires, the wipe would erase it — cancel
+  // any pending wipe so back-to-back close→open is always safe.
+  if(o._wipeTimer){clearTimeout(o._wipeTimer);o._wipeTimer=null;}
   // Guarantee a close affordance: if the modal's own markup doesn't include an
   // X button, inject a floating one in the top-right that dismisses the modal.
   const hasOwnX = /class="x-btn"/.test(html);
@@ -1621,7 +1625,7 @@ function modal(html){
   requestAnimationFrame(()=>{o.classList.add("on");applyTags()});
   activeModal=o;
 }
-function closeModal(){const o=$("modalOverlay");if(o){o.classList.remove("on");setTimeout(()=>{if(o)o.innerHTML=""},220)}activeModal=null}
+function closeModal(){const o=$("modalOverlay");if(o){o.classList.remove("on");o._wipeTimer=setTimeout(()=>{if(o){o.innerHTML="";o._wipeTimer=null;}},220)}activeModal=null}
 
 /* ============================================================ CREATE */
 let draftPhotos=[];
