@@ -3,11 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<!-- Discourage HTML caching so devices don't get stuck on old app versions.
-     (The in-app version check below is the hard guarantee; these are hints.) -->
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
 <title>Dossani Maintenance</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -526,7 +521,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "2.7.5";
+const APP_VERSION = "2.7.6";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -565,6 +560,18 @@ let openGroups={};          // storeId -> bool (expanded)
 let managerScreen="hub";
 let coachScreen="hub";   // "hub" (store tiles) or a storeId (drilled into one store)
 let pollTimer=null;
+/* ---- lazy closed-ticket cache (v2.7.4) ----------------------------------
+   The API no longer sends closed tickets by default (they were ~72% of the
+   payload). Instead every normal GET carries a tiny `closedTicketCount`, and
+   the full closed set is fetched with ?closed=only ONLY when the Closed tab
+   is actually opened, then cached for the session (re-fetched if older than
+   CLOSED_TTL_MS). Tickets closed locally are added to the cache immediately
+   so the Closed tab is instantly correct even while the CDN copy lags. */
+let CLOSED_TICKETS={};      // id -> ticket (fetched on demand + locally closed)
+let CLOSED_COUNT=0;         // server-reported count; drives the tile number
+let CLOSED_LOADED=false;    // has ?closed=only been fetched this session?
+let CLOSED_FETCHED_AT=0;    // ms timestamp of that fetch
+const CLOSED_TTL_MS=60000;  // matches the API's CDN s-maxage
 
 /* ============================================================ API */
 async function apiGet(){
@@ -586,45 +593,25 @@ async function apiWriteMulti(updates){
 async function refresh(){
   MASTER=await apiGet();
   RESTAURANTS=MASTER.restaurants||{};
-  TICKETS=MASTER[TICKETS_NODE]||{};
+  // Merge the lazy closed-cache over the server payload. Per ticket, the copy
+  // with the newer updatedAt wins: a ticket just closed here keeps its closed
+  // state even if the CDN serves a ≤60s-stale "open" copy, while a ticket
+  // reopened by someone else evicts our stale closed copy.
+  const serverTickets=MASTER[TICKETS_NODE]||{};
+  const merged={...serverTickets};
+  for(const [id,t] of Object.entries(CLOSED_TICKETS)){
+    const s=serverTickets[id];
+    if(!s || (t.updatedAt||0)>=(s.updatedAt||0)) merged[id]=t;
+    else delete CLOSED_TICKETS[id];
+  }
+  TICKETS=merged;
+  if(typeof MASTER.closedTicketCount==="number") CLOSED_COUNT=MASTER.closedTicketCount;
   VENDORS=MASTER[VENDORS_NODE]||{};
   // reply numbers are stored as contact info on each Overwatch admin record
   REPLY_NUMBERS={};
   Object.values(MASTER.admins||{}).forEach(a=>{
     if(a.email&&a.replyNumber)REPLY_NUMBERS[a.email.toLowerCase()]=a.replyNumber;
   });
-  checkAppVersion();
-}
-/* ---- single source of truth for the APP CODE itself ----
-   The DB was always shared, but browsers cache the HTML, so different devices
-   could run different app versions (that's how a tech ends up seeing different
-   numbers than overwatch). Fix: the newest client publishes its version to
-   admins/appMeta; every client compares on load + every poll, and a stale
-   client force-reloads itself with a cache-busting URL. */
-let _versionPublished=false;
-function cmpVer(a,b){ // 1 if a>b, -1 if a<b, 0 equal
-  const pa=String(a||"0").split(".").map(Number), pb=String(b||"0").split(".").map(Number);
-  for(let i=0;i<Math.max(pa.length,pb.length);i++){const x=pa[i]||0,y=pb[i]||0;if(x!==y)return x>y?1:-1;}
-  return 0;
-}
-function checkAppVersion(){
-  const server=((MASTER.admins||{}).appMeta||{}).version;
-  if(!server || cmpVer(APP_VERSION,server)>0){
-    // I'm the newest build seen so far — publish (once per session).
-    if(!_versionPublished){
-      _versionPublished=true;
-      apiWrite("admins/appMeta",{version:APP_VERSION,updatedAt:now()}).catch(()=>{_versionPublished=false;});
-    }
-  }else if(cmpVer(server,APP_VERSION)>0){
-    // A newer build exists — pull it. Guard against reload loops: only try once
-    // per server version per tab.
-    let done=null;try{done=sessionStorage.getItem("reloadedFor");}catch(e){}
-    if(done!==server){
-      try{sessionStorage.setItem("reloadedFor",server);}catch(e){}
-      toast("Updating app to v"+server+"…");
-      setTimeout(()=>{location.replace(location.pathname+"?v="+encodeURIComponent(server));},900);
-    }
-  }
 }
 
 /* ============================================================ IMGBB */
@@ -1217,7 +1204,7 @@ function renderBoard(){
   const activeN=allTickets.filter(t=>ACTIVE_STATUSES.includes(t.status)).length;
 
   let title,meta;
-  if(SESSION.role==="tech"){title="My dispatched jobs";meta=`${esc(SESSION.name)} · ${allTickets.length} job${allTickets.length===1?"":"s"} across ${storeIds.length} store${storeIds.length===1?"":"s"}`}
+  if(SESSION.role==="tech"){title="My dispatched stores";meta=`${esc(SESSION.name)} · ${storeIds.length} stores · ${allTickets.length} tickets`}
   else if(SESSION.role==="admin"){title="All stores";meta=`${storeIds.length} locations · overwatch`}
   else if(SESSION.role==="manager"){title=storeName(SESSION.storeId);meta="Your store"}
   else{title=ROLE_LABEL[SESSION.role]+" board";meta=`${storeIds.length} stores in your area`}
@@ -1300,7 +1287,7 @@ function renderBoard(){
         <span class="exp-chevs">⟨ ⟩</span><span class="exp-hint">statuses</span>
       </button>
       <div class="tiles-mid">${midTiles}</div>
-      ${tile("closed",cnt("closed"),"CLOSED","No follow-up","var(--s-closed)")}
+      ${tile("closed",(SESSION.role==="admin"&&!CLOSED_LOADED)?CLOSED_COUNT:cnt("closed"),"CLOSED","No follow-up","var(--s-closed)")}
     </div>`;
 
   const head=`
@@ -1344,7 +1331,30 @@ function renderBoard(){
 function pickStatus(key){
   curFilter=key; curAssignee="all";
   if(key==="active"||key==="closed"){_tilePinned=false;tilesExpanded=false;}
+  // Closed details are NOT downloaded until this moment (v2.7.4). Admin "All"
+  // also includes closed rows, so it triggers the same lazy load.
+  if(key==="closed"||(key==="all"&&SESSION.role==="admin")) ensureClosedLoaded();
   render();
+}
+/* Fetch the closed-ticket details on demand and cache them for the session.
+   Only Overwatch ever renders closed rows, so everyone else skips the fetch
+   entirely. Re-fetches when the cache is older than CLOSED_TTL_MS so the tab
+   stays honest without ever being polled. */
+async function ensureClosedLoaded(){
+  if(SESSION.role!=="admin") return;
+  if(CLOSED_LOADED && (Date.now()-CLOSED_FETCHED_AT)<CLOSED_TTL_MS) return;
+  showLoader(true);
+  try{
+    const r=await fetchWithTimeout(API_BASE_URL+"?closed=only",{cache:"no-store"},25000);
+    if(!r.ok) throw new Error("Could not load closed tickets");
+    const data=await r.json();
+    CLOSED_TICKETS={...CLOSED_TICKETS,...(data[TICKETS_NODE]||{})};
+    if(typeof data.closedTicketCount==="number") CLOSED_COUNT=data.closedTicketCount;
+    CLOSED_LOADED=true; CLOSED_FETCHED_AT=Date.now();
+    TICKETS={...TICKETS,...CLOSED_TICKETS};
+    render();
+  }catch(e){toast(e.message||"Could not load closed tickets","err")}
+  finally{showLoader(false)}
 }
 // expand the middle status tiles. Hover toggles on desktop; tap (the ⟨ ⟩ button)
 // pins it open/closed for touch devices. We avoid re-render to keep the CSS animation.
@@ -1492,19 +1502,9 @@ function ticketRow(t){
   // without opening each ticket. No finish button here (tech/overwatch only).
   if(["coach","manager","director"].includes(SESSION.role) && t.status!=="closed"){
     const canProgress = t.status!=="in_progress" && t.status!=="finished";
-    // Coach/director only: one-tap dispatch of an unassigned job to the store's tech.
-    let reqBtn="";
-    if((SESSION.role==="coach"||SESSION.role==="director") && t.status==="unassigned"){
-      const sTid=store(t.storeId).assignedRepairTechnicianId, sTech=(MASTER.repairTechnicians||{})[sTid];
-      if(sTech){
-        const first=esc((sTech.name||"").trim().split(/\s+/)[0]||sTech.name);
-        reqBtn=`<button class="btn btn-primary btn-sm" onclick="dispatchToStoreTech('${t._id}','${sTid}')">🔧 Request ${first}</button>`;
-      }
-    }
     below=`<div class="row-bar" onclick="event.stopPropagation()">
       <span>${t.status==="in_progress"?`<b>In progress</b> · ${elapsedHM(t.clockInAt)}`:"Quick actions"}</span>
       <div class="rb-btns">
-        ${reqBtn}
         ${canProgress?`<button class="btn btn-ghost btn-sm" onclick="setStatus('${t._id}','in_progress')">▶ In progress</button>`:""}
         <button class="btn btn-danger btn-sm" onclick="confirmClose('${t._id}')">✕ Mark closed</button>
       </div></div>`;
@@ -1613,10 +1613,6 @@ let activeModal=null;
 function modal(html){
   let o=$("modalOverlay");
   if(!o){o=document.createElement("div");o.id="modalOverlay";o.className="overlay";document.body.appendChild(o);o.addEventListener("click",e=>{if(e.target===o)closeModal()})}
-  // A closeModal() schedules a delayed content wipe (for the fade-out). If a
-  // new modal opens before that timer fires, the wipe would erase it — cancel
-  // any pending wipe so back-to-back close→open is always safe.
-  if(o._wipeTimer){clearTimeout(o._wipeTimer);o._wipeTimer=null;}
   // Guarantee a close affordance: if the modal's own markup doesn't include an
   // X button, inject a floating one in the top-right that dismisses the modal.
   const hasOwnX = /class="x-btn"/.test(html);
@@ -1625,7 +1621,7 @@ function modal(html){
   requestAnimationFrame(()=>{o.classList.add("on");applyTags()});
   activeModal=o;
 }
-function closeModal(){const o=$("modalOverlay");if(o){o.classList.remove("on");o._wipeTimer=setTimeout(()=>{if(o){o.innerHTML="";o._wipeTimer=null;}},220)}activeModal=null}
+function closeModal(){const o=$("modalOverlay");if(o){o.classList.remove("on");setTimeout(()=>{if(o)o.innerHTML=""},220)}activeModal=null}
 
 /* ============================================================ CREATE */
 let draftPhotos=[];
@@ -1700,39 +1696,7 @@ async function submitTicket(){
     if(SESSION.role==="manager")managerScreen="list";
     if(SESSION.role==="coach"||SESSION.role==="director")coachScreen=sid;   // drop them onto the store they just filed for
     openGroups[sid]=true;render();
-    // Area coach: offer to dispatch straight to the store's in-house tech.
-    if(SESSION.role==="coach"||SESSION.role==="director") askDispatchToTech(id,sid);
   }catch(e){toast(e.message||"Could not create ticket","err");btn.disabled=false;btn.textContent="Create ticket"}
-}
-
-/* ---- coach post-create prompt: request the store's tech? ----
-   Yes → the job goes straight to Dispatched with that tech on it (one patch, so
-   the person + status move together per the integrity rule). No → it stays
-   Unassigned for overwatch to route. Skipped if the store has no tech. */
-function askDispatchToTech(id,sid){
-  const techId=store(sid).assignedRepairTechnicianId;
-  const tech=(MASTER.repairTechnicians||{})[techId];
-  if(!tech) return; // no in-house tech on this store — stays unassigned, no prompt
-  const first=esc((tech.name||"").trim().split(/\s+/)[0]||tech.name);
-  modal(`<div class="sheet-head"><h2>Request your technician?</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
-    <div class="sheet-body">
-      <p style="font-size:15px;margin:0">Would you like to request our technician <b>${first}</b> to do this job?</p>
-      <p style="color:var(--ink-dim);font-size:13px;margin:12px 0 0">Yes sends it straight to ${first}'s job list. No leaves it Unassigned for dispatch to route.</p>
-    </div>
-    <div class="sheet-foot">
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">No, leave unassigned</button>
-      <button class="btn btn-primary" style="flex:1" id="reqTechBtn" onclick="dispatchToStoreTech('${id}','${techId}')">Yes, request ${first}</button>
-    </div>`);
-}
-async function dispatchToStoreTech(id,techId){
-  const tech=(MASTER.repairTechnicians||{})[techId];
-  if(!tech){toast("That tech no longer exists — left unassigned","err");closeModal();return}
-  const btn=$("reqTechBtn");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>'}
-  if(await patchTicket(id,
-      {assignedTechId:techId,assignedVendorId:null,status:"dispatched",dispatchedAt:now()},
-      {action:"status",toStatus:"dispatched",note:"Coach requested "+tech.name})){
-    toast("Dispatched to "+tech.name);closeModal();render();
-  }else if(btn){btn.disabled=false;btn.textContent="Yes, request tech"}
 }
 
 /* ============================================================ DETAIL */
@@ -1886,15 +1850,6 @@ function ticketControls(t){
   // overwatch action only. Closing is available to all store-access roles.
   if(hasStoreAccess()){
     h+=`<div class="section-label">Update job<span class="ln"></span></div><div style="display:flex;flex-direction:column;gap:9px">`;
-    // Coach / director: one-tap dispatch to THIS store's in-house tech (their
-    // only assignment option — no vendor roster; that's overwatch's job).
-    if((role==="coach"||role==="director") && t.status==="unassigned"){
-      const sTech=(MASTER.repairTechnicians||{})[store(t.storeId).assignedRepairTechnicianId];
-      if(sTech){
-        const first=esc((sTech.name||"").trim().split(/\s+/)[0]||sTech.name);
-        h+=`<button class="btn btn-primary btn-block" onclick="dispatchToStoreTech('${t._id}','${store(t.storeId).assignedRepairTechnicianId}')">🔧 Request ${first} (dispatch)</button>`;
-      }
-    }
     if(t.status!=="in_progress" && t.status!=="finished")
       h+=`<button class="btn btn-ghost btn-block" onclick="setStatus('${t._id}','in_progress')">▶ Mark in progress</button>`;
     h+=`<button class="btn btn-danger btn-block" onclick="confirmClose('${t._id}')">✕ Mark closed</button>`;
@@ -1937,7 +1892,15 @@ async function patchTicket(id,patch,activityEntry){
   if(activityEntry)activity.push({ts:now(),by:SESSION.name,role:SESSION.role,...activityEntry});
   const updated={...t,...patch,activity,updatedAt:now()};
   showLoader(true);
-  try{await apiWrite(`${TICKETS_NODE}/${id}`,updated);await refresh();showLoader(false);render();return true}
+  try{
+    await apiWrite(`${TICKETS_NODE}/${id}`,updated);
+    // Keep the lazy closed-cache coherent: a ticket closed right now must show
+    // on the Closed tab immediately (the CDN copy can lag up to 60s); a
+    // reopened one must leave the cache so a stale closed copy can't shadow it.
+    if(updated.status==="closed")CLOSED_TICKETS[id]=updated;
+    else delete CLOSED_TICKETS[id];
+    await refresh();showLoader(false);render();return true
+  }
   catch(e){showLoader(false);toast(e.message||"Update failed","err");return false}
 }
 async function setStatus(id,status){
