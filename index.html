@@ -526,7 +526,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "2.7.6";
+const APP_VERSION = "2.7.7";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -577,6 +577,15 @@ let CLOSED_COUNT=0;         // server-reported count; drives the tile number
 let CLOSED_LOADED=false;    // has ?closed=only been fetched this session?
 let CLOSED_FETCHED_AT=0;    // ms timestamp of that fetch
 const CLOSED_TTL_MS=60000;  // matches the API's CDN s-maxage
+/* ---- local write-echo (v2.7.7) -------------------------------------------
+   The API's GET is CDN-cached (~60s), so a re-read right after a write returns
+   PRE-write data — users stopped seeing their own actions for up to a minute.
+   Fix: every successful write is echoed into local state immediately and kept
+   in these overlays; refresh() merges them over the server payload with
+   newest-updatedAt-wins, and evicts each entry once the server copy catches
+   up. UI feedback is instant; the CDN lag becomes invisible to the writer. */
+let LOCAL_ECHO={};          // ticketId -> full ticket we just wrote
+let VENDOR_ECHO={};         // vendorId -> rec we just wrote, or {__deleted,updatedAt}
 
 /* ============================================================ API */
 async function apiGet(){
@@ -610,8 +619,29 @@ async function refresh(){
     else delete CLOSED_TICKETS[id];
   }
   TICKETS=merged;
+  // Merge the general write-echo the same way: our copy wins while it's newer
+  // than the (possibly CDN-stale) server copy; once the server catches up
+  // (its updatedAt >= ours), the echo entry is evicted.
+  for(const [id,t] of Object.entries(LOCAL_ECHO)){
+    const s=serverTickets[id];
+    if(!s || (t.updatedAt||0)>(s.updatedAt||0)) TICKETS[id]=t;
+    else delete LOCAL_ECHO[id];
+  }
   if(typeof MASTER.closedTicketCount==="number") CLOSED_COUNT=MASTER.closedTicketCount;
-  VENDORS=MASTER[VENDORS_NODE]||{};
+  // Vendors get the same treatment (their list is in the same cached payload).
+  const serverVendors=MASTER[VENDORS_NODE]||{};
+  VENDORS={...serverVendors};
+  for(const [id,v] of Object.entries(VENDOR_ECHO)){
+    const s=serverVendors[id];
+    if(v.__deleted){
+      if(!s) delete VENDOR_ECHO[id];                       // server caught up with the delete
+      else if((v.updatedAt||0)>(s.updatedAt||0)) delete VENDORS[id]; // hide stale copy
+      else delete VENDOR_ECHO[id];                          // vendor was re-added elsewhere
+    }else{
+      if(!s || (v.updatedAt||0)>(s.updatedAt||0)) VENDORS[id]=v;
+      else delete VENDOR_ECHO[id];
+    }
+  }
   // reply numbers are stored as contact info on each Overwatch admin record
   REPLY_NUMBERS={};
   Object.values(MASTER.admins||{}).forEach(a=>{
@@ -1743,7 +1773,10 @@ async function submitTicket(){
       comments:[]
     };
     await apiWrite(`${TICKETS_NODE}/${id}`,ticket);
-    await refresh();closeModal();toast("Ticket created · "+shortId);
+    // Echo locally: the new ticket must appear NOW, not after the CDN copy catches up.
+    TICKETS[id]=ticket; LOCAL_ECHO[id]=ticket;
+    refreshInBackground();
+    closeModal();toast("Ticket created · "+shortId);
     if(SESSION.role==="manager")managerScreen="list";
     if(SESSION.role==="coach"||SESSION.role==="director")coachScreen=sid;   // drop them onto the store they just filed for
     openGroups[sid]=true;render();
@@ -1978,6 +2011,14 @@ function assignControls(t){
 }
 
 /* ============================================================ MUTATIONS */
+// Refresh without blocking the click that triggered it. Skips repainting over
+// an open modal (same guard the poll uses).
+function refreshInBackground(){
+  refresh().then(()=>{
+    const o=$("modalOverlay");
+    if(!o||!o.classList.contains("on"))render();
+  }).catch(()=>{});
+}
 async function patchTicket(id,patch,activityEntry){
   const t=TICKETS[id];if(!t){toast("Ticket not found","err");return}
   const activity=Array.isArray(t.activity)?t.activity.slice():[];
@@ -1986,12 +2027,13 @@ async function patchTicket(id,patch,activityEntry){
   showLoader(true);
   try{
     await apiWrite(`${TICKETS_NODE}/${id}`,updated);
-    // Keep the lazy closed-cache coherent: a ticket closed right now must show
-    // on the Closed tab immediately (the CDN copy can lag up to 60s); a
-    // reopened one must leave the cache so a stale closed copy can't shadow it.
+    // Keep the lazy closed-cache coherent (Closed tab must be instantly right).
     if(updated.status==="closed")CLOSED_TICKETS[id]=updated;
     else delete CLOSED_TICKETS[id];
-    await refresh();showLoader(false);render();return true
+    // Echo the write locally so the UI reflects it IMMEDIATELY — the CDN copy
+    // of the master can lag ~60s, and waiting on it made every click feel dead.
+    TICKETS[id]=updated; LOCAL_ECHO[id]=updated;
+    showLoader(false); render(); refreshInBackground(); return true
   }
   catch(e){showLoader(false);toast(e.message||"Update failed","err");return false}
 }
@@ -2488,7 +2530,10 @@ async function saveSettings(){
         await apiWrite(`admins/${newId}`,{id:newId,email,name:email.split("@")[0],tier:"overwatch",replyNumber:num||null});
       }
     }
-    await refresh();toast("Settings saved");closeModal();
+    // Apply locally right away; the CDN copy of admins/* can lag ~60s.
+    for(const i of inputs){const em=i.getAttribute("data-email").toLowerCase();const n=i.value.trim();if(n)REPLY_NUMBERS[em]=n;else delete REPLY_NUMBERS[em];}
+    refreshInBackground();
+    toast("Settings saved");closeModal();
   }catch(e){toast(e.message||"Could not save","err");btn.disabled=false;btn.textContent="Save"}
 }
 function openVendors(){
@@ -2524,12 +2569,22 @@ async function saveVendor(id){
   const vid=id||uid();
   const rec={id:vid,name,category:$("vCat").value.trim(),phone:$("vPhone").value.trim(),email:$("vEmail").value.trim(),updatedAt:now()};
   const btn=$("vSave");btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>';
-  try{await apiWrite(`${VENDORS_NODE}/${vid}`,rec);await refresh();toast(id?"Vendor updated":"Vendor added");openVendors()}
+  try{
+    await apiWrite(`${VENDORS_NODE}/${vid}`,rec);
+    VENDORS[vid]=rec; VENDOR_ECHO[vid]=rec;   // instant local echo (CDN lags ~60s)
+    refreshInBackground();
+    toast(id?"Vendor updated":"Vendor added");openVendors();
+  }
   catch(e){toast(e.message||"Could not save vendor","err");btn.disabled=false;btn.textContent="Save"}
 }
 async function removeVendor(id){
   if(!confirm("Remove this third-party tech? Their tickets will fall back to the store's tech."))return;
-  try{await apiWrite(`${VENDORS_NODE}/${id}`,null);await refresh();toast("Vendor removed");openVendors()}
+  try{
+    await apiWrite(`${VENDORS_NODE}/${id}`,null);
+    delete VENDORS[id]; VENDOR_ECHO[id]={__deleted:true,updatedAt:now()}; // instant local echo
+    refreshInBackground();
+    toast("Vendor removed");openVendors();
+  }
   catch(e){toast(e.message||"Could not remove vendor","err")}
 }
 
