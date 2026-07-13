@@ -526,7 +526,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "2.7.7";
+const APP_VERSION = "2.7.8";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1632,7 +1632,12 @@ function contactBtns(t,who){
   }
   if(who.email){
     const replyTo=SESSION.email;
-    b+=`<a class="btn btn-ghost btn-sm" href="${escA(mailtoLink(who.email,subj,msg+"\n\nReply to: "+replyTo,replyTo))}">@ Email</a>`;
+    // To: vendor/tech + the store's director + area coach, so everyone
+    // responsible is on the thread from the first email (deduped).
+    const dir=storeDirector(t.storeId), coach=storeCoach(t.storeId);
+    const to=[...new Set([who.email,dir&&dir.email,coach&&coach.email]
+      .filter(Boolean).map(e=>String(e).trim().toLowerCase()))].join(",");
+    b+=`<a class="btn btn-ghost btn-sm" href="${escA(mailtoLink(to,subj,msg+"\n\nReply to: "+replyTo,replyTo))}">@ Email</a>`;
   }
   if(!b){
     // No email on file, and on desktop there's nothing tappable to offer.
