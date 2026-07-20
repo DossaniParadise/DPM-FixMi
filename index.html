@@ -559,7 +559,7 @@ const ROLE_PREFIX = {admin:"o",director:"d",coach:"a",tech:"r",manager:"m"};
 let MASTER=null, SESSION=null;
 let REPLY_NUMBERS={}; // email(lowercased) -> reply phone number, stored in master
 let TICKETS={}, VENDORS={}, RESTAURANTS={};
-let curFilter="active", curSearch="", curStore="all", tilesExpanded=false, curAssignee="all";
+let curFilter="active", curSearch="", curStore="all", tilesExpanded=false, curAssignee="all", curCategory="all";
 /* bulk select removed */
 let openGroups={};          // storeId -> bool (expanded)
 let managerScreen="hub";
@@ -1369,6 +1369,7 @@ function renderBoard(){
         ${storeIds.slice().sort((a,b)=>storeName(a).localeCompare(storeName(b))).map(id=>`<option value="${id}"${curStore===id?" selected":""}>${esc(storeName(id))}</option>`).join("")}
       </select>`:""}
       ${(curFilter==="dispatched"||curFilter==="assigned")?assigneeFilterSelect(allTickets):""}
+      ${SESSION.role==="admin"?categoryFilterSelect():""}
       <input class="input search" placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="onSearchInput(this)">
     </div>`;
 
@@ -1396,7 +1397,7 @@ function renderBoard(){
 }
 // choosing OPEN or CLOSED unpins the strip; a middle status keeps it open
 function pickStatus(key){
-  curFilter=key; curAssignee="all";
+  curFilter=key; curAssignee="all"; curCategory="all";
   if(key==="active"||key==="closed"){_tilePinned=false;tilesExpanded=false;}
   // Closed details are NOT downloaded until this moment (v2.7.6). Admin "All"
   // also includes closed rows, so it triggers the same lazy load.
@@ -1448,6 +1449,7 @@ function applyFilterSearch(list){
   if((curFilter==="dispatched"||curFilter==="assigned")&&curAssignee!=="all"){
     out=out.filter(t=>{const w=ticketAssignee(t);return w&&(w.kind+":"+w.id)===curAssignee});
   }
+  if(curCategory!=="all")out=out.filter(t=>t.category===curCategory);
   if(curSearch){const q=curSearch.toLowerCase();
     out=out.filter(t=>(t.description||"").toLowerCase().includes(q)||(CATEGORIES[t.category]||"").toLowerCase().includes(q)||(t.shortId||"").toLowerCase().includes(q)||storeName(t.storeId).toLowerCase().includes(q)||storeNum(t.storeId).toLowerCase().includes(q))}
   out.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
@@ -1463,6 +1465,15 @@ function assigneeFilterSelect(allTickets){
   const lbl=curFilter==="dispatched"?"dispatched to":"assigned to";
   return `<select class="input loc-select" onchange="curAssignee=this.value;render()">
     <option value="all"${curAssignee==="all"?" selected":""}>All (${lbl})</option>${opts}</select>`;
+}
+
+// dropdown to filter by category — auto-populated from CATEGORIES, future additions are free
+function categoryFilterSelect(){
+  const opts=Object.entries(CATEGORIES)
+    .sort((a,b)=>a[1].localeCompare(b[1]))
+    .map(([k,label])=>`<option value="${k}"${curCategory===k?" selected":""}>${esc(label)}</option>`).join("");
+  return `<select class="input loc-select" onchange="curCategory=this.value;render()">
+    <option value="all"${curCategory==="all"?" selected":""}>All categories</option>${opts}</select>`;
 }
 
 // compact horizontal ticket row
