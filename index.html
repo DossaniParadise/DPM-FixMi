@@ -364,6 +364,15 @@ body.simulating .wrap{padding-bottom:40px}
   padding:0 16px;box-shadow:0 2px 10px rgba(0,0,0,.15);
 }
 .sim-tag{font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.14em;background:#3a2600;color:var(--amber);padding:4px 8px;border-radius:5px}
+/* PayMi cross-app notice (invoice approvals waiting) */
+.paymi-note{display:flex;align-items:flex-start;gap:10px;background:#fff7ed;border:1px solid #fdba74;
+  border-radius:12px;padding:12px 14px;margin:0 0 18px}
+.paymi-note .pn-ic{font-size:18px;line-height:1.2}
+.paymi-note .pn-t{font-size:14px;color:#7c2d12;line-height:1.45}
+.paymi-note a{color:#c2410c;font-weight:700;text-decoration:underline}
+.paymi-note a:hover{color:#9a3412}
+@media (max-width:480px){.paymi-note{padding:10px 12px}.paymi-note .pn-t{font-size:13px}}
+
 .sim-who{display:flex;flex-direction:column;line-height:1.15;flex:1;min-width:0}
 .sim-who b{font-size:14px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sim-who span{font-size:10px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;opacity:.8}
@@ -557,6 +566,70 @@ const ROLE_PREFIX = {admin:"o",director:"d",coach:"a",tech:"r",manager:"m"};
 
 /* ============================================================ STATE */
 let MASTER=null, SESSION=null;
+
+/* ============================================================
+   PayMi (invoice tracker) cross-app notice.
+   Reads the PayMi Firestore over REST — no SDK, read-only, and a
+   failure only means no banner. Counts invoices where a chain is
+   PENDING and its current step lists this person (SESSION.refId).
+   ============================================================ */
+const PAYMI_URL="https://dossaniparadise.github.io/invoice-tracker/";
+const PAYMI_FS="https://firestore.googleapis.com/v1/projects/gen-lang-client-0357067758/databases/(default)/documents/invoices?pageSize=300&key=AIzaSyAxW6wajL9PH1Wlw3_QuBXgAMFgYWjkJp8";
+let PAYMI_COUNT=null;   // null = unknown/not fetched; number once known
+
+/* Firestore REST returns typed JSON ({stringValue:..},{arrayValue:{values:[..]}}).
+   Decode just enough of it into plain JS. */
+function fsVal(v){
+  if(v==null)return null;
+  if("stringValue"in v)return v.stringValue;
+  if("integerValue"in v)return Number(v.integerValue);
+  if("doubleValue"in v)return v.doubleValue;
+  if("booleanValue"in v)return v.booleanValue;
+  if("nullValue"in v)return null;
+  if("mapValue"in v){const o={};const f=(v.mapValue&&v.mapValue.fields)||{};
+    for(const k in f)o[k]=fsVal(f[k]);return o}
+  if("arrayValue"in v)return ((v.arrayValue&&v.arrayValue.values)||[]).map(fsVal);
+  return null;
+}
+
+function paymiCountFor(refId,docs){
+  let n=0;
+  docs.forEach(d=>{
+    const f=d.fields||{};
+    const chains=fsVal(f.chains)||[];
+    const hit=chains.some(c=>{
+      if(!c||c.status!=="PENDING")return false;
+      const step=(c.steps||[]).find(st=>st&&st.role===c.currentStage);
+      return !!step&&(step.userIds||[]).includes(refId);
+    });
+    if(hit)n++;
+  });
+  return n;
+}
+
+async function refreshPaymiCount(){
+  try{
+    if(!SESSION||!SESSION.refId||(SESSION.role!=="coach"&&SESSION.role!=="director")){
+      PAYMI_COUNT=null;return;
+    }
+    const res=await fetch(PAYMI_FS);
+    if(!res.ok){PAYMI_COUNT=null;return}
+    const data=await res.json();
+    const prev=PAYMI_COUNT;
+    PAYMI_COUNT=paymiCountFor(SESSION.refId,data.documents||[]);
+    // Re-render only if the number changed and we're on a hub screen, so the
+    // banner appears without stomping on anything mid-interaction.
+    if(PAYMI_COUNT!==prev&&(SESSION.role==="coach"||SESSION.role==="director"))render();
+  }catch(e){PAYMI_COUNT=null}
+}
+
+function paymiBanner(){
+  if(!PAYMI_COUNT)return"";   // null or 0 -> nothing
+  const msg=PAYMI_COUNT===1
+    ?`You have an invoice to review, please visit the <a href="${PAYMI_URL}" target="_blank" rel="noopener noreferrer">PayMi</a> app to approve or deny.`
+    :`You have ${PAYMI_COUNT} invoices to approve, please visit the <a href="${PAYMI_URL}" target="_blank" rel="noopener noreferrer">PayMi</a> app to approve or deny.`;
+  return `<div class="paymi-note"><div class="pn-ic">🧾</div><div class="pn-t">${msg}</div></div>`;
+}
 let REPLY_NUMBERS={}; // email(lowercased) -> reply phone number, stored in master
 let TICKETS={}, VENDORS={}, RESTAURANTS={};
 let curFilter="active", curSearch="", curStore="all", tilesExpanded=false, curAssignee="all", curCategory="all";
@@ -1093,6 +1166,8 @@ function enterApp(){
   myStoreIds().forEach(id=>openGroups[id]=true);
   render();
   startPoll();
+  refreshPaymiCount();
+  if(!window.__paymiTimer)window.__paymiTimer=setInterval(refreshPaymiCount,5*60*1000);
 }
 function logout(){SESSION=null;REAL_SESSION=null;clearSession();stopPoll();location.reload()}
 /* ---- session persistence (stay logged in across refresh) ----
@@ -1129,7 +1204,8 @@ function render(){
   const v=$("mainView");
   if(SESSION.role==="manager"&&managerScreen==="hub"){v.innerHTML=renderManagerHub();applyTags();return}
   if(SESSION.role==="coach"||SESSION.role==="director"){
-    v.innerHTML = (coachScreen==="hub") ? renderCoachHub() : renderCoachStore(coachScreen);
+    v.innerHTML = paymiBanner() +
+      ((coachScreen==="hub") ? renderCoachHub() : renderCoachStore(coachScreen));
     applyTags();return;
   }
   v.innerHTML=renderBoard();
