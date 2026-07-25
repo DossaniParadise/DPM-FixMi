@@ -329,6 +329,30 @@ body.no-reftags .reftag{display:none}
 .wait-chip{border:1px solid var(--line);background:var(--panel-2);color:var(--ink-mid);border-radius:999px;padding:9px 14px;font-size:13px;font-weight:600;transition:.13s;min-height:40px}
 .wait-chip:hover{border-color:var(--ink-dim)}
 .wait-chip.on{border-color:var(--amber);background:rgba(29,118,187,.12);color:var(--amber-deep)}
+.ow-toggle{display:flex;gap:6px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:4px;margin-bottom:16px;width:fit-content}
+.ow-tab{border:none;background:none;color:var(--ink-mid);font-size:13px;font-weight:600;padding:8px 16px;border-radius:7px;cursor:pointer;min-height:38px}
+.ow-tab:hover{color:var(--ink)}
+.ow-tab.on{background:var(--amber);color:#fff}
+.ow-map-wrap{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel-2)}
+.ow-map{display:block;width:100%;height:auto}
+.ow-dot{cursor:pointer}
+.ow-dot:hover circle{stroke:var(--ink);stroke-width:2.5}
+.ow-legend{display:flex;flex-direction:column;gap:1px;padding:10px 12px;border-top:1px solid var(--line);background:var(--panel)}
+.ow-leg-row{display:flex;align-items:center;gap:9px;font-size:12.5px;padding:4px 2px}
+.ow-leg-row i{width:11px;height:11px;border-radius:50%;flex-shrink:0}
+.ow-leg-name{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ow-leg-n{font-weight:700;color:var(--ink)}
+.ow-leg-s{color:var(--ink-dim);font-size:11px;min-width:64px;text-align:right}
+.ow-unmapped{margin-top:14px;font-size:12.5px;color:var(--ink-mid);background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px}
+.ow-um{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 11px;margin:5px 5px 0 0;font-size:12px;cursor:pointer}
+.ow-um:hover{border-color:var(--amber);color:var(--amber-deep)}
+@media(max-width:600px){.ow-toggle{width:100%}.ow-tab{flex:1;padding:8px 6px}.ow-leg-s{display:none}}
+.cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:7px}
+.cat-chk{display:flex;align-items:center;gap:7px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-size:13px;cursor:pointer;min-height:40px}
+.cat-chk:hover{border-color:var(--amber)}
+.cat-chk input{width:17px;height:17px;flex-shrink:0;cursor:pointer}
+.cat-chk:has(input:checked){border-color:var(--amber);background:rgba(29,118,187,.10);font-weight:600}
+.cat-legacy{margin-top:9px;font-size:12px;color:var(--ink-mid);background:var(--panel-2);border-left:3px solid var(--amber);border-radius:6px;padding:8px 10px}
 .upload-zone:hover{border-color:var(--amber);color:var(--amber)}
 .upload-zone .uz-ic{font-size:24px;margin-bottom:6px}
 .upload-zone .uz-t{font-size:13px;font-weight:600}
@@ -541,7 +565,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "3.3";
+const APP_VERSION = "3.6";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -563,8 +587,53 @@ const STATUSES = {
 const STATUS_ORDER = ["unassigned","assigned","dispatched","waiting","in_progress","finished","closed"];
 // statuses that count as "still active" (not closed)
 const ACTIVE_STATUSES = ["unassigned","assigned","dispatched","waiting","in_progress","finished"];
-const CATEGORIES = {plumbing:"Plumbing",equipment:"Equipment",hvac:"HVAC",electrical:"Electrical",it:"IT / POS",structural:"Structural",safety:"Safety",other:"Other"};
-const CAT_PREFIX = {plumbing:"PLM",equipment:"EQP",hvac:"HVC",electrical:"ELE",it:"IT",structural:"STR",safety:"SAF",other:"GEN"};
+/* Selectable ticket categories. Key order IS the dropdown order: alphabetical
+   by label, with "Other" pinned last. */
+const CATEGORIES = {
+  cooling:"Cooling", electrical:"Electrical", equipment:"Equipment", heating:"Heating",
+  it:"IT", lighting:"Lighting", marketing:"Marketing", plumbing:"Plumbing",
+  safety:"Safety", structural:"Structural", other:"Other"
+};
+/* Retired categories. Existing tickets still display these correctly, but they
+   are never offered when creating a ticket or tagging a vendor.
+   HVAC was split into Heating + Cooling. Building/Facility were folded back
+   into Structural, which is a live category again. */
+const LEGACY_CATEGORIES = { hvac:"HVAC", building:"Building", facility:"Facility" };
+/* Use for any LOOKUP/display of a stored category (old or new). */
+const ALL_CATEGORIES = {...CATEGORIES, ...LEGACY_CATEGORIES};
+/* Short-ID segment per category, e.g. 23086-PLM-0004. Legacy kept so old IDs
+   stay reproducible. */
+const CAT_PREFIX = {
+  building:"BLD", cooling:"COL", electrical:"ELE", equipment:"EQP",
+  facility:"FAC", heating:"HTG", it:"IT", lighting:"LGT",
+  marketing:"MKT", plumbing:"PLM", safety:"SAF", other:"GEN",
+  hvac:"HVC", structural:"STR"
+};
+/* Does this vendor cover a given category key? Uses the new multi-select array
+   when present; falls back to a loose text match for vendors still carrying the
+   old free-text specialty so they still sort sensibly. */
+function vendorMatchesCategory(v,catKey){
+  if(!catKey)return false;
+  if(Array.isArray(v.categories)&&v.categories.length) return v.categories.includes(catKey);
+  const label=(ALL_CATEGORIES[catKey]||"").toLowerCase();
+  const txt=(v.category||"").toLowerCase();
+  return !!(label&&txt&&txt.includes(label));
+}
+/* Vendors split into "covers this ticket's category" and "everything else",
+   each alphabetical. DMs/DOs sometimes file under the wrong category, so we
+   never HIDE a vendor — we only push the less likely ones to the bottom. */
+function vendorGroupsFor(t){
+  const all=Object.entries(VENDORS).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
+  const match=all.filter(([,v])=>vendorMatchesCategory(v,t.category));
+  const rest =all.filter(([,v])=>!vendorMatchesCategory(v,t.category));
+  return {match,rest};
+}
+/* Label for a vendor's categories: new multi-select array, else legacy text. */
+function vendorCatLabel(v){
+  if(Array.isArray(v.categories)&&v.categories.length)
+    return v.categories.map(k=>ALL_CATEGORIES[k]||k).join(" · ");
+  return v.category||"";
+}
 const PRIORITIES = {normal:"Normal",urgent:"Urgent",emergency:"Emergency"};
 const WAITING_REASONS = ["Awaiting parts","Awaiting third-party tech","Awaiting approval","Awaiting access","Scheduled — future date","Other"];
 const ROLE_LABEL = {admin:"Overwatch",director:"Director",coach:"Area Coach",manager:"Store Manager",tech:"Repair Tech"};
@@ -701,6 +770,8 @@ let curFilter="active", curSearch="", curStore="all", tilesExpanded=false, curAs
 let openGroups={};          // storeId -> bool (expanded)
 let managerScreen="hub";
 let coachScreen="hub";   // "hub" (store tiles) or a storeId (drilled into one store)
+/* Overwatch-only 3-way home view: minimalist map (default) | ticket list | store tiles. */
+let owView="map";
 let pollTimer=null;
 /* ---- lazy closed-ticket cache (v2.7.6) ----------------------------------
    The API no longer sends closed tickets by default (they were ~72% of the
@@ -1200,6 +1271,20 @@ function ticketsForStore(sid){
     .filter(t=>SESSION.role!=="tech" || t.assignedTechId===SESSION.refId);
 }
 
+/* ---- tech zone colours ------------------------------------------------------
+   Colours are assigned from a fixed palette by walking the technician roster in
+   a stable order (name, then id). Nothing is hardcoded to a person: add, rename
+   or remove a tech in the directory and the zones follow automatically. */
+const ZONE_PALETTE=["#1d76bb","#e0761a","#2f9e57","#8b5cf6","#d9455f","#0d9488","#b45309","#6366f1"];
+function techZones(){
+  const techs=Object.entries(MASTER.repairTechnicians||{})
+    .sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||"")||a[0].localeCompare(b[0]));
+  const map={};
+  techs.forEach(([id,t],i)=>{map[id]={id,name:t.name||"Unnamed tech",color:ZONE_PALETTE[i%ZONE_PALETTE.length]}});
+  return map;
+}
+const NO_TECH_COLOR="#94a3b8";
+
 /* ============================================================ PERMISSIONS */
 function canCreate(){return SESSION.role!=="tech"}
 function canManageVendors(){return SESSION.role==="admin"}
@@ -1272,9 +1357,23 @@ function render(){
     v.innerHTML = (coachScreen==="hub") ? renderCoachHub() : renderCoachStore(coachScreen);
     applyTags();return;
   }
-  v.innerHTML=(SESSION.role==="admin"?paymiBanner():"")+renderBoard();
+  if(SESSION.role==="admin"){
+    let body;
+    if(owView==="map")        body=renderOverwatchMap();
+    else if(owView==="tiles") body=(coachScreen==="hub")?renderCoachHub():renderCoachStore(coachScreen);
+    else                      body=renderBoard();
+    v.innerHTML=paymiBanner()+owToggle()+body;
+    applyTags();return;
+  }
+  v.innerHTML=renderBoard();
   applyTags();
 }
+/* Overwatch-only view switcher. Other roles never see this. */
+function owToggle(){
+  const b=(k,label,ico)=>`<button class="ow-tab${owView===k?" on":""}" onclick="setOwView('${k}')">${ico} ${label}</button>`;
+  return `<div class="ow-toggle">${b("map","Map","🗺")}${b("list","List","☰")}${b("tiles","Tiles","▦")}</div>`;
+}
+function setOwView(k){owView=k;if(k==="tiles")coachScreen="hub";render();}
 /* Typing in a search box re-renders the view, which replaces the <input> node
    and drops focus after the first keystroke. This updates the term, re-renders,
    then restores focus + caret to the freshly-rendered search field. */
@@ -1592,7 +1691,7 @@ function applyFilterSearch(list){
   }
   if(curCategory!=="all")out=out.filter(t=>t.category===curCategory);
   if(curSearch){const q=curSearch.toLowerCase();
-    out=out.filter(t=>(t.description||"").toLowerCase().includes(q)||(CATEGORIES[t.category]||"").toLowerCase().includes(q)||(t.shortId||"").toLowerCase().includes(q)||storeName(t.storeId).toLowerCase().includes(q)||storeNum(t.storeId).toLowerCase().includes(q))}
+    out=out.filter(t=>(t.description||"").toLowerCase().includes(q)||(ALL_CATEGORIES[t.category]||"").toLowerCase().includes(q)||(t.shortId||"").toLowerCase().includes(q)||storeName(t.storeId).toLowerCase().includes(q)||storeNum(t.storeId).toLowerCase().includes(q))}
   out.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   return out;
 }
@@ -1610,8 +1709,12 @@ function assigneeFilterSelect(allTickets){
 
 // dropdown to filter by category — auto-populated from CATEGORIES, future additions are free
 function categoryFilterSelect(){
-  const opts=Object.entries(CATEGORIES)
-    .sort((a,b)=>a[1].localeCompare(b[1]))
+  // CATEGORIES is already in the intended order (alphabetical, Other last).
+  // Legacy categories are appended only if some ticket still uses them.
+  const used=new Set(Object.values(TICKETS).map(t=>t.category));
+  const list=[...Object.entries(CATEGORIES),
+              ...Object.entries(LEGACY_CATEGORIES).filter(([k])=>used.has(k))];
+  const opts=list
     .map(([k,label])=>`<option value="${k}"${curCategory===k?" selected":""}>${esc(label)}</option>`).join("");
   return `<select class="input loc-select" onchange="curCategory=this.value;render()">
     <option value="all"${curCategory==="all"?" selected":""}>All categories</option>${opts}</select>`;
@@ -1634,7 +1737,7 @@ function elapsedHM(ts){
 }
 function ticketRow(t){
   const st=STATUSES[t.status]||STATUSES.unassigned;
-  const cat=CATEGORIES[t.category]||"Other";
+  const cat=ALL_CATEGORIES[t.category]||"Other";
   const pri=t.priority||"normal";
   const priClass={normal:"n",urgent:"u",emergency:"e"}[pri]||"n";
   const photoN=(t.photos||[]).length;
@@ -1645,12 +1748,18 @@ function ticketRow(t){
   if(isAdmin && t.status==="unassigned"){
     const sTechId=store(t.storeId).assignedRepairTechnicianId;
     const sTech=(MASTER.repairTechnicians||{})[sTechId];
-    const techOpt=sTech?`<option value="tech:${sTechId}">${esc(sTech.name)}</option>`:'<option disabled>None assigned to this store</option>';
+    const techOpt=sTech?`<option value="tech:${sTechId}">🔧 ${esc(sTech.name)}</option>`:'<option disabled>None assigned to this store</option>';
+    // Same 3-tier order as the detail panel: store tech, then category-matched
+    // vendors, then the rest.
+    const {match,rest}=vendorGroupsFor(t);
+    const vOpt=([id,v])=>`<option value="vendor:${id}">🏢 ${esc(v.name)}</option>`;
+    const catLabel=ALL_CATEGORIES[t.category]||"category";
     right=`<div class="row-assign" onclick="event.stopPropagation()">
       <select class="input row-sel" id="rsel_${t._id}" onchange="if(this.value==='__add__'){this.value='';openVendors();}">
         <option value="">Assign to…</option>
         <optgroup label="In-house tech for this store">${techOpt}</optgroup>
-        <optgroup label="Third-party techs">${Object.entries(VENDORS).map(([id,v])=>`<option value="vendor:${id}">${esc(v.name)}</option>`).join("")||'<option disabled>None added</option>'}</optgroup>
+        ${match.length?`<optgroup label="Vendors — ${esc(catLabel)}">${match.map(vOpt).join("")}</optgroup>`:""}
+        ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
         <option value="__add__">＋ Add new vendor…</option>
       </select>
       <button class="btn btn-primary btn-sm" onclick="rowAssign('${t._id}')">Assign</button>
@@ -1727,7 +1836,7 @@ function ticketRow(t){
       const sTid=store(t.storeId).assignedRepairTechnicianId, sTech=(MASTER.repairTechnicians||{})[sTid];
       if(sTech){
         const first=esc((sTech.name||"").trim().split(/\s+/)[0]||sTech.name);
-        reqBtn=`<button class="btn btn-primary btn-sm" onclick="dispatchToStoreTech('${t._id}','${sTid}')">🔧 Request ${first}</button>`;
+        reqBtn=`<button class="btn btn-primary btn-sm" title="Requests ${esc(sTech.name)}" onclick="dispatchToStoreTech('${t._id}','${sTid}')">🔧 Request In-House Tech</button>`;
       }
     }
     below=`<div class="row-bar" onclick="event.stopPropagation()">
@@ -2029,7 +2138,7 @@ function openTicket(id){
       </div>
       <div class="detail-desc">${esc(t.description||"No description")}</div>
       ${photoThumbs(t)}
-      <div class="detail-row"><span class="k">Category</span><span class="v">${CATEGORIES[t.category]||"Other"}</span></div>
+      <div class="detail-row"><span class="k">Category</span><span class="v">${ALL_CATEGORIES[t.category]||"Other"}</span></div>
       <div class="detail-row"><span class="k">Priority</span><span class="v">${PRIORITIES[t.priority]||"Normal"}</span></div>
       <div class="detail-row"><span class="k">Assigned</span><span class="v">${assignee?esc(assignee):"<span style='color:var(--ink-dim)'>Unassigned</span>"}</span></div>
       <div class="detail-row"><span class="k">Director</span><span class="v">${dir?esc(dir.name):"—"}</span></div>
@@ -2129,7 +2238,8 @@ function ticketControls(t){
       const sTech=(MASTER.repairTechnicians||{})[store(t.storeId).assignedRepairTechnicianId];
       if(sTech){
         const first=esc((sTech.name||"").trim().split(/\s+/)[0]||sTech.name);
-        h+=`<button class="btn btn-primary btn-block" onclick="dispatchToStoreTech('${t._id}','${store(t.storeId).assignedRepairTechnicianId}')">🔧 Request ${first} (dispatch)</button>`;
+        h+=`<button class="btn btn-primary btn-block" onclick="dispatchToStoreTech('${t._id}','${store(t.storeId).assignedRepairTechnicianId}')">🔧 Request In-House Tech</button>
+        <div style="font-size:11px;color:var(--ink-dim);margin:-4px 0 4px">Dispatches to ${esc(sTech.name)}, the in-house tech for this store.</div>`;
       }
     }
     if(t.status!=="in_progress" && t.status!=="finished")
@@ -2148,23 +2258,27 @@ function statusGrid(t,targets){
     return `<button class="status-opt ${cur}" onclick="setStatus('${t._id}','${s}')"><span class="dot" style="background:${st.color}"></span>${st.label}${cur?" ·":""}</button>`}).join("")}</div>`;
 }
 function assignControls(t){
-  const vendors=Object.entries(VENDORS);
-  // In-house techs are tied to a store. Only show the tech assigned to THIS
-  // store (plus, defensively, whoever is already on the ticket if different),
-  // not the whole roster. Third-party vendors are available for any store.
+  // Order of preference: (1) the in-house tech for THIS store, (2) vendors who
+  // cover the ticket's category, (3) every other vendor at the bottom.
   const storeTechId=store(t.storeId).assignedRepairTechnicianId;
   const techIds=[...new Set([storeTechId,t.assignedTechId].filter(Boolean))];
-  const techs=techIds.map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([id,v])=>v);
-  const venOpts=vendors.map(([id,v])=>`<option value="vendor:${id}"${t.assignedVendorId===id?" selected":""}>🏢 ${esc(v.name)}</option>`).join("");
+  const techs=techIds.map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,v])=>v);
   const techOpts=techs.map(([id,v])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(v.name)}</option>`).join("");
+
+  const {match,rest}=vendorGroupsFor(t);
+  const vOpt=([id,v])=>`<option value="vendor:${id}"${t.assignedVendorId===id?" selected":""}>🏢 ${esc(v.name)}</option>`;
+  const catLabel=ALL_CATEGORIES[t.category]||"this category";
+
   return `<div style="display:flex;gap:10px">
     <select class="input" id="assignSel">
       <option value="">— Unassigned (pool) —</option>
       <optgroup label="In-house tech for this store">${techOpts||'<option disabled>None assigned to this store</option>'}</optgroup>
-      <optgroup label="Third-party vendors → Assigned">${venOpts||'<option disabled>No vendors added</option>'}</optgroup>
+      ${match.length?`<optgroup label="Vendors — ${esc(catLabel)}">${match.map(vOpt).join("")}</optgroup>`:""}
+      ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
+      ${!match.length&&!rest.length?`<optgroup label="Third-party vendors"><option disabled>No vendors added</option></optgroup>`:""}
     </select>
     <button class="btn btn-primary" onclick="doAssign('${t._id}')">Set</button></div>
-    <div style="font-size:11px;color:var(--ink-dim);margin-top:7px">Picking a tech sets the ticket to Assigned</div>`;
+    <div style="font-size:11px;color:var(--ink-dim);margin-top:7px">Vendors matching <b>${esc(catLabel)}</b> are listed first. Picking anyone sets the ticket to Assigned.</div>`;
 }
 
 /* ============================================================ MUTATIONS */
@@ -2417,7 +2531,12 @@ async function confirmWaiting(id){
 }
 function openEdit(id){
   const t=TICKETS[id];editPhotos=(t.photos||[]).slice();
-  const catOpts=Object.entries(CATEGORIES).map(([k,v])=>`<option value="${k}"${t.category===k?" selected":""}>${v}</option>`).join("");
+  // If this ticket still carries a retired category, keep it as an option so
+  // editing other fields can't silently reassign it.
+  const editCats=LEGACY_CATEGORIES[t.category]
+    ? [...Object.entries(CATEGORIES),[t.category,LEGACY_CATEGORIES[t.category]+" (retired)"]]
+    : Object.entries(CATEGORIES);
+  const catOpts=editCats.map(([k,v])=>`<option value="${k}"${t.category===k?" selected":""}>${v}</option>`).join("");
   const priOpts=Object.entries(PRIORITIES).map(([k,v])=>`<option value="${k}"${t.priority===k?" selected":""}>${v}</option>`).join("");
   // Overwatch can also move a misfiled ticket to the correct store; other roles
   // can't change the store (their tickets are scoped to stores in their purview).
@@ -2654,6 +2773,83 @@ function reportMap(storeSeq,pings){
     </svg>${legend}</div>`;
 }
 
+/* ============================================================ OVERWATCH MAP
+   Minimalist, dependency-free store map. Each store is a dot positioned by its
+   real lat/lng (normalised into the viewbox), coloured by the repair tech who
+   covers it, labelled with its OPEN ticket count. Tapping a dot jumps to that
+   store's ticket list. Stores without coordinates are listed underneath so they
+   are never silently dropped. */
+function renderOverwatchMap(){
+  const zones=techZones();
+  const ids=Object.keys(RESTAURANTS);
+  const openCount=sid=>ticketsForStore(sid).filter(t=>ACTIVE_STATUSES.includes(t.status)).length;
+
+  const mapped=[],unmapped=[];
+  ids.forEach(sid=>{
+    const c=storeCoords(sid), tid=store(sid).assignedRepairTechnicianId;
+    const z=zones[tid]||null;
+    const rec={sid,open:openCount(sid),color:z?z.color:NO_TECH_COLOR,techName:z?z.name:"No tech assigned",tid:tid||""};
+    (c?mapped:unmapped).push(c?{...rec,...c}:rec);
+  });
+
+  const totalOpen=ids.reduce((n,sid)=>n+openCount(sid),0);
+
+  // Legend: one row per tech that actually covers stores, plus unassigned.
+  const groups={};
+  [...mapped,...unmapped].forEach(r=>{
+    const k=r.tid||"__none";
+    (groups[k]=groups[k]||{name:r.techName,color:r.color,stores:0,open:0});
+    groups[k].stores++;groups[k].open+=r.open;
+  });
+  const legend=Object.entries(groups)
+    .sort((a,b)=>b[1].open-a[1].open||a[1].name.localeCompare(b[1].name))
+    .map(([k,g])=>`<div class="ow-leg-row">
+      <i style="background:${g.color}"></i>
+      <span class="ow-leg-name">${esc(g.name)}</span>
+      <span class="ow-leg-n">${g.open} open</span>
+      <span class="ow-leg-s">${g.stores} store${g.stores===1?"":"s"}</span>
+    </div>`).join("");
+
+  let svg=`<div class="rp-empty">No store coordinates available to map.</div>`;
+  if(mapped.length){
+    const lats=mapped.map(p=>p.lat),lngs=mapped.map(p=>p.lng);
+    let minLat=Math.min(...lats),maxLat=Math.max(...lats),minLng=Math.min(...lngs),maxLng=Math.max(...lngs);
+    const padLat=Math.max((maxLat-minLat)*0.12,0.05),padLng=Math.max((maxLng-minLng)*0.12,0.05);
+    minLat-=padLat;maxLat+=padLat;minLng-=padLng;maxLng+=padLng;
+    const W=760,H=520;
+    const X=l=>((l-minLng)/(maxLng-minLng||1))*W, Y=l=>H-((l-minLat)/(maxLat-minLat||1))*H;
+    // Draw quiet stores first so busy ones sit on top.
+    const dots=mapped.slice().sort((a,b)=>a.open-b.open).map(p=>{
+      const x=X(p.lng).toFixed(1),y=Y(p.lat).toFixed(1);
+      const r=p.open?Math.min(10+p.open*2.2,22):7;
+      return `<g class="ow-dot" onclick="owFocusStore('${p.sid}')">
+        <circle cx="${x}" cy="${y}" r="${r}" fill="${p.color}" fill-opacity="${p.open?0.92:0.34}" stroke="#fff" stroke-width="1.5"/>
+        ${p.open?`<text x="${x}" y="${(+y+4).toFixed(1)}" text-anchor="middle" fill="#fff" font-size="${p.open>9?11:12}" font-weight="700">${p.open}</text>`:""}
+        <title>${esc(storeName(p.sid))} — ${p.open} open · ${esc(p.techName)}</title>
+      </g>`;}).join("");
+    svg=`<svg viewBox="0 0 ${W} ${H}" class="ow-map" preserveAspectRatio="xMidYMid meet">
+      <rect x="0" y="0" width="${W}" height="${H}" fill="var(--panel-2)"/>${dots}</svg>`;
+  }
+
+  const unmappedBlock=unmapped.length?`
+    <div class="ow-unmapped">
+      <b>${unmapped.length} store${unmapped.length===1?"":"s"} without GPS coordinates</b> — not on the map:
+      ${unmapped.sort((a,b)=>b.open-a.open).map(r=>`<button class="ow-um" onclick="owFocusStore('${r.sid}')">${esc(storeName(r.sid))}${r.open?` <b>${r.open}</b>`:""}</button>`).join("")}
+    </div>`:"";
+
+  return `
+    <div class="page-head"><div>
+      <div class="page-title">Open tickets by zone</div>
+      <div class="page-meta">${totalOpen} open across ${ids.length} stores · coloured by repair tech</div>
+    </div></div>
+    <div class="ow-map-wrap">${svg}
+      <div class="ow-legend">${legend}</div>
+    </div>
+    ${unmappedBlock}`;
+}
+// Tap a store on the map -> its ticket list, filtered to that store.
+function owFocusStore(sid){owView="list";curStore=sid;curFilter="active";render();}
+
 /* ============================================================ VENDORS */
 function openSettings(){
   const adminEmails=[...new Set([...ADMIN_EMAILS,...Object.values(MASTER.admins||{}).map(a=>(a.email||"").toLowerCase()).filter(Boolean)])];
@@ -2710,7 +2906,7 @@ function openVendors(){
   const rows=Object.entries(VENDORS).map(([id,v])=>`
     <div class="vrow"><div style="flex:1;min-width:0">
       <div class="v-name">${esc(v.name)}</div>
-      <div class="v-meta">${esc([v.category,fmtPhone(v.phone),v.email].filter(Boolean).join(" · ")||"No contact on file")}</div></div>
+      <div class="v-meta">${esc([vendorCatLabel(v),fmtPhone(v.phone),v.email].filter(Boolean).join(" · ")||"No contact on file")}</div></div>
       <button class="btn btn-ghost btn-sm" onclick="editVendor('${id}')">Edit</button>
       <button class="btn btn-danger btn-sm" onclick="removeVendor('${id}')">Remove</button></div>`).join("");
   modal(`<div class="sheet-head"><h2>Third-party techs</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
@@ -2723,10 +2919,21 @@ function openVendors(){
 }
 function editVendor(id){
   const v=id?VENDORS[id]:{};
+  // Pre-check the new multi-select from the stored array. Legacy free-text
+  // categories can't be mapped reliably, so we show the old value for reference
+  // and require a fresh pick (per spec: force picking from the new list).
+  const preCats=Array.isArray(v.categories)?v.categories:[];
+  const legacyNote=(!preCats.length && v.category)
+    ? `<div class="cat-legacy">Previously: <b>${esc(v.category)}</b> — pick the matching categories above.</div>`
+    : "";
   modal(`<div class="sheet-head"><h2>${id?"Edit third-party tech":"Add third-party tech"}</h2><button class="x-btn" onclick="openVendors()">✕</button></div>
     <div class="sheet-body">
       <div class="field"><label class="label">Tech / company name</label><input class="input" id="vName" value="${escA(v.name||"")}" placeholder="e.g. Lone Star HVAC"></div>
-      <div class="field" style="margin-top:14px"><label class="label">Category / specialty</label><input class="input" id="vCat" value="${escA(v.category||"")}" placeholder="e.g. Refrigeration, Plumbing"></div>
+      <div class="field" style="margin-top:14px"><label class="label">Categories <span style="font-weight:400;color:var(--ink-dim)">(pick at least one)</span></label>
+        <div class="cat-grid" id="vCats">${Object.entries(CATEGORIES).map(([k,label])=>
+          `<label class="cat-chk"><input type="checkbox" value="${k}"${preCats.includes(k)?" checked":""}><span>${esc(label)}</span></label>`).join("")}</div>
+        ${legacyNote}
+      </div>
       <div style="display:flex;gap:12px;margin-top:14px">
         <div class="field" style="flex:1"><label class="label">Phone</label><input class="input" id="vPhone" value="${escA(v.phone||"")}"></div>
         <div class="field" style="flex:1"><label class="label">Email</label><input class="input" id="vEmail" value="${escA(v.email||"")}"></div></div>
@@ -2736,26 +2943,42 @@ function editVendor(id){
 }
 async function saveVendor(id){
   const name=$("vName").value.trim();if(!name){toast("Vendor name is required","err");return}
+  const cats=[...document.querySelectorAll("#vCats input:checked")].map(c=>c.value);
+  if(!cats.length){toast("Pick at least one category","err");return}
   const vid=id||uid();
-  const rec={id:vid,name,category:$("vCat").value.trim(),phone:$("vPhone").value.trim(),email:$("vEmail").value.trim(),updatedAt:now()};
-  const btn=$("vSave");btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>';
-  try{
-    await apiWrite(`${VENDORS_NODE}/${vid}`,rec);
-    VENDORS[vid]=rec; VENDOR_ECHO[vid]=rec;   // instant local echo (CDN lags ~60s)
-    refreshInBackground();
-    toast(id?"Vendor updated":"Vendor added");openVendors();
-  }
-  catch(e){toast(e.message||"Could not save vendor","err");btn.disabled=false;btn.textContent="Save"}
+  const rec={id:vid,name,categories:cats,
+             category:cats.map(k=>CATEGORIES[k]||k).join(" · "),   // readable mirror for legacy readers
+             phone:$("vPhone").value.trim(),email:$("vEmail").value.trim(),updatedAt:now()};
+  const prev=id?VENDORS[id]:null;
+  /* Optimistic save. Vendors are edited rarely, so this API endpoint is almost
+     always cold-starting (Vercel boots the Firebase SDK first) — awaiting it
+     made the form sit frozen for seconds. Show the result now, write in the
+     background, and roll back only if the write actually fails. */
+  VENDORS[vid]=rec; VENDOR_ECHO[vid]=rec;
+  toast(id?"Vendor updated":"Vendor added");
+  openVendors();
+  apiWrite(`${VENDORS_NODE}/${vid}`,rec)
+    .then(()=>refreshInBackground())
+    .catch(e=>{
+      if(prev){VENDORS[vid]=prev;VENDOR_ECHO[vid]=prev;}
+      else{delete VENDORS[vid];delete VENDOR_ECHO[vid];}
+      toast((e.message||"Could not save vendor")+" — not saved","err");
+      if($("vendorRows"))openVendors();
+    });
 }
 async function removeVendor(id){
   if(!confirm("Remove this third-party tech? Their tickets will fall back to the store's tech."))return;
-  try{
-    await apiWrite(`${VENDORS_NODE}/${id}`,null);
-    delete VENDORS[id]; VENDOR_ECHO[id]={__deleted:true,updatedAt:now()}; // instant local echo
-    refreshInBackground();
-    toast("Vendor removed");openVendors();
-  }
-  catch(e){toast(e.message||"Could not remove vendor","err")}
+  const prev=VENDORS[id];
+  delete VENDORS[id]; VENDOR_ECHO[id]={__deleted:true,updatedAt:now()};
+  toast("Vendor removed");
+  openVendors();
+  apiWrite(`${VENDORS_NODE}/${id}`,null)
+    .then(()=>refreshInBackground())
+    .catch(e=>{
+      if(prev){VENDORS[id]=prev;VENDOR_ECHO[id]=prev;}
+      toast((e.message||"Could not remove vendor")+" — not removed","err");
+      if($("vendorRows"))openVendors();
+    });
 }
 
 /* ============================================================ REFERENCE TAG SYSTEM
