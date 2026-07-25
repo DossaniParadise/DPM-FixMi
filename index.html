@@ -358,6 +358,14 @@ body.no-reftags .reftag{display:none}
 .ow-um{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 11px;margin:5px 5px 0 0;font-size:12px;cursor:pointer}
 .ow-um:hover{border-color:var(--amber);color:var(--amber-deep)}
 @media(max-width:600px){.ow-toggle{width:100%}.ow-tab{flex:1;padding:8px 6px}.ow-leg-s{display:none}}
+.v-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;margin-right:2px;box-shadow:0 0 0 1px rgba(0,0,0,.12)}
+.v-tag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;background:var(--panel-2);border:1px solid var(--line);
+  color:var(--ink-dim);border-radius:99px;padding:2px 7px;font-weight:700;vertical-align:middle;margin-left:5px}
+.sw-row{display:flex;gap:8px;flex-wrap:wrap}
+.sw{width:32px;height:32px;border-radius:50%;border:3px solid transparent;cursor:pointer;padding:0;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+.sw.on{border-color:var(--ink);transform:scale(1.08)}
+.cat-row{display:flex;gap:8px;align-items:center;margin-bottom:7px}
+.cat-row .cat-label{flex:1}
 .tech-pick{display:flex;align-items:center;gap:11px;text-align:left;padding:12px 13px}
 .tech-pick .tp-dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 1px rgba(0,0,0,.12)}
 .tech-pick .tp-body{display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -556,9 +564,8 @@ body.simulating .wrap{padding-bottom:40px}
     </div>
     <button class="icon-btn" id="refreshBtn" title="Refresh now" onclick="manualRefresh()">⟳</button>
     <button class="icon-btn hidden" id="viewAsBtn" title="View as another person" onclick="openViewAs()">👁</button>
-    <button class="icon-btn hidden" id="techLocBtn" title="Tech locations" onclick="openTechLocations()">📍</button>
     <button class="icon-btn hidden" id="techReportBtn" title="Tech day report" onclick="openTechReport()">📊</button>
-    <button class="icon-btn hidden" id="vendorTopBtn" title="Third-party techs" onclick="openVendors()">🏢</button>
+    <button class="icon-btn hidden" id="vendorTopBtn" title="Techs &amp; vendors" onclick="openVendors()">🏢</button>
     <button class="icon-btn hidden" id="settingsBtn" title="Settings" onclick="openSettings()">⚙</button>
     <button class="icon-btn" title="Sign out" onclick="logout()">⏻</button>
   </div>
@@ -580,7 +587,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "3.8";
+const APP_VERSION = "4.0";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -602,20 +609,38 @@ const STATUSES = {
 const STATUS_ORDER = ["unassigned","assigned","dispatched","waiting","in_progress","finished","closed"];
 // statuses that count as "still active" (not closed)
 const ACTIVE_STATUSES = ["unassigned","assigned","dispatched","waiting","in_progress","finished"];
-/* Selectable ticket categories. Key order IS the dropdown order: alphabetical
-   by label, with "Other" pinned last. */
-const CATEGORIES = {
+/* Ticket categories are SHARED CONFIG, not code. They live at
+   admins/ticketCategories so DPM FindMi reads the identical list, and they are
+   editable from Settings here. DEFAULT_CATEGORIES is only the seed used when
+   that node doesn't exist yet. Key order = dropdown order. */
+const DEFAULT_CATEGORIES = {
   cooling:"Cooling", electrical:"Electrical", equipment:"Equipment", heating:"Heating",
   it:"IT", lighting:"Lighting", marketing:"Marketing", plumbing:"Plumbing",
   safety:"Safety", structural:"Structural", other:"Other"
 };
+let CATEGORIES = {...DEFAULT_CATEGORIES};
+/* Rebuild CATEGORIES + ALL_CATEGORIES from the directory after every refresh. */
+function loadCategories(){
+  const stored=(MASTER.admins||{}).ticketCategories;
+  const out={};
+  if(Array.isArray(stored)&&stored.length){
+    stored.forEach(c=>{if(c&&c.key)out[c.key]=c.label||c.key});
+  }else if(stored&&typeof stored==="object"){
+    Object.entries(stored).forEach(([k,v])=>{out[k]=typeof v==="string"?v:(v&&v.label)||k});
+  }
+  CATEGORIES = Object.keys(out).length ? out : {...DEFAULT_CATEGORIES};
+  ALL_CATEGORIES = {...CATEGORIES, ...LEGACY_CATEGORIES};
+}
+function catKeyFrom(label){
+  return String(label||"").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"")||("cat"+Date.now().toString(36));
+}
 /* Retired categories. Existing tickets still display these correctly, but they
    are never offered when creating a ticket or tagging a vendor.
    HVAC was split into Heating + Cooling. Building/Facility were folded back
    into Structural, which is a live category again. */
 const LEGACY_CATEGORIES = { hvac:"HVAC", building:"Building", facility:"Facility" };
 /* Use for any LOOKUP/display of a stored category (old or new). */
-const ALL_CATEGORIES = {...CATEGORIES, ...LEGACY_CATEGORIES};
+let ALL_CATEGORIES = {...CATEGORIES, ...LEGACY_CATEGORIES};
 /* Short-ID segment per category, e.g. 23086-PLM-0004. Legacy kept so old IDs
    stay reproducible. */
 const CAT_PREFIX = {
@@ -870,6 +895,7 @@ async function refresh(){
   Object.values(MASTER.admins||{}).forEach(a=>{
     if(a.email&&a.replyNumber)REPLY_NUMBERS[a.email.toLowerCase()]=a.replyNumber;
   });
+  loadCategories();
   checkAppVersion();
 }
 /* ---- single source of truth for the APP CODE itself ----
@@ -991,7 +1017,7 @@ function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2
 // and bump. Caller re-reads fresh right before this to minimize collision window.
 function nextShortId(sid,category){
   const digits=String(storeNum(sid)).replace(/\D/g,"")||"00000";
-  const pfx=CAT_PREFIX[category]||"GEN";
+  const pfx=CAT_PREFIX[category]||String(category||"GEN").slice(0,3).toUpperCase();
   const stem=`${digits}-${pfx}-`;
   let max=0;
   Object.values(TICKETS).forEach(t=>{
@@ -1294,15 +1320,18 @@ function ticketsForStore(sid){
    The palette is fixed rather than divided by the tech count, so adding a
    technician never re-shuffles anyone else's colour. */
 const ZONE_PALETTE=["#e8091b","#16a34a","#2b64c6","#8b5cf6","#ea580c","#0d9488","#db2777","#ca8a04"];
+function techMeta(techId){return ((MASTER.admins||{}).techMeta||{})[techId]||{}}
 function techColorFor(techId){
   const techs=MASTER.repairTechnicians||{};
   const t=techs[techId];
-  if(t&&t.color)return t.color;                        // locked value wins
+  const locked=techMeta(techId).color || (t&&t.color);
+  if(locked)return locked;                             // locked value wins
   // Identical fallback to FindMi: first palette slot no LOCKED tech owns,
   // walking unlocked techs alphabetically. FindMi locks these on load, so this
   // is only ever a brief transitional state.
-  const taken=new Set(Object.values(techs).map(x=>x&&x.color?String(x.color).toLowerCase():null).filter(Boolean));
-  const unlocked=Object.keys(techs).filter(id=>!(techs[id]||{}).color)
+  const colOf=id=>techMeta(id).color||((techs[id]||{}).color);
+  const taken=new Set(Object.keys(techs).map(id=>colOf(id)).filter(Boolean).map(c=>String(c).toLowerCase()));
+  const unlocked=Object.keys(techs).filter(id=>!colOf(id))
     .sort((a,b)=>((techs[a]||{}).name||"").localeCompare((techs[b]||{}).name||"")||a.localeCompare(b));
   const free=ZONE_PALETTE.filter(c=>!taken.has(c.toLowerCase()));
   const pool=free.length?free:ZONE_PALETTE;
@@ -1328,7 +1357,14 @@ function storeTechIds(rid){
   return [...new Set(ids.filter(id=>id&&techs[id]))];
 }
 /* Specialties. An empty list means general-purpose. */
-function techCategories(t){return Array.isArray(t&&t.categories)?t.categories:[]}
+function techCategories(t){
+  // Prefer the shared admins/techMeta record (writable by BOTH apps); fall back
+  // to anything stored directly on the technician record.
+  const id=t&&t.id;
+  const m=id?techMeta(id):{};
+  if(Array.isArray(m.categories))return m.categories;
+  return Array.isArray(t&&t.categories)?t.categories:[];
+}
 function techHandlesCategory(t,catKey){
   const c=techCategories(t);
   return c.length===0 || (catKey&&c.includes(catKey));   // untagged tech = handles everything
@@ -1337,7 +1373,7 @@ function techHandlesCategory(t,catKey){
 function eligibleTechsFor(t){
   const techs=MASTER.repairTechnicians||{};
   return storeTechIds(t.storeId)
-    .filter(id=>techHandlesCategory(techs[id],t.category))
+    .filter(id=>techHandlesCategory({...techs[id],id},t.category))
     .map(id=>[id,techs[id]]);
 }
 const NO_TECH_COLOR="#94a3b8";
@@ -1360,7 +1396,6 @@ function enterAppChrome(){
   const realAdmin = (REAL_SESSION?REAL_SESSION:SESSION).role==="admin" && !SESSION._sim;
   $("viewAsBtn").classList.toggle("hidden",!realAdmin);
   // Tech-location overwatch: any overwatch/admin (real or simulated) can view.
-  $("techLocBtn").classList.toggle("hidden",SESSION.role!=="admin");
   $("techReportBtn").classList.toggle("hidden",SESSION.role!=="admin");
   $("settingsBtn").classList.toggle("hidden",!realAdmin);
   document.body.classList.toggle("no-reftags",!SHOW_REF_TAGS);
@@ -2875,6 +2910,22 @@ function reportMap(storeSeq,pings){
    covers it, labelled with its OPEN ticket count. Tapping a dot jumps to that
    store's ticket list. Stores without coordinates are listed underneath so they
    are never silently dropped. */
+let __owBubbleUid=0;
+/* One bubble per store. A store covered by several techs is split into equal
+   colour bands (half/half for two) rather than being attributed to just the
+   first tech — that merge is what made FixMi show fewer techs than FindMi. */
+function owBubble(x,y,r,cols,open){
+  const stroke=open?1.8:1, op=open?0.95:0.32;
+  if(cols.length<=1){
+    return `<circle cx="${x}" cy="${y}" r="${r}" fill="${cols[0]||NO_TECH_COLOR}" fill-opacity="${op}" stroke="#fff" stroke-width="${stroke}"/>`;
+  }
+  const id="owb"+(++__owBubbleUid), w=(2*r)/cols.length;
+  const bands=cols.map((c,i)=>
+    `<rect x="${(+x-r+i*w).toFixed(2)}" y="${(+y-r).toFixed(2)}" width="${(w+0.05).toFixed(2)}" height="${(2*r).toFixed(2)}" fill="${c}" fill-opacity="${op}"/>`).join("");
+  return `<defs><clipPath id="${id}"><circle cx="${x}" cy="${y}" r="${r}"/></clipPath></defs>`+
+         `<g clip-path="url(#${id})">${bands}</g>`+
+         `<circle cx="${x}" cy="${y}" r="${r}" fill="none" stroke="#fff" stroke-width="${stroke}"/>`;
+}
 function renderOverwatchMap(){
   const zones=techZones();
   const ids=Object.keys(RESTAURANTS);
@@ -2882,29 +2933,37 @@ function renderOverwatchMap(){
 
   const mapped=[],unmapped=[];
   ids.forEach(sid=>{
-    const c=storeCoords(sid), tid=storeTechIds(sid)[0]||"";
-    const z=zones[tid]||null;
-    const rec={sid,open:openCount(sid),color:z?z.color:NO_TECH_COLOR,techName:z?z.name:"No tech assigned",tid:tid||""};
+    const c=storeCoords(sid);
+    const tids=storeTechIds(sid);                     // ALL techs, not just the first
+    const cols=tids.length?tids.map(id=>(zones[id]||{}).color||NO_TECH_COLOR):[NO_TECH_COLOR];
+    const names=tids.length?tids.map(id=>(zones[id]||{}).name||"Unknown tech"):["No tech assigned"];
+    const rec={sid,open:openCount(sid),tids,cols,techName:names.join(" + ")};
     (c?mapped:unmapped).push(c?{...rec,...c}:rec);
   });
 
   const totalOpen=ids.reduce((n,sid)=>n+openCount(sid),0);
 
-  // Legend: one row per tech that actually covers stores, plus unassigned.
+  /* Legend covers EVERY technician in the directory — including any with no
+     stores yet — so the roster here always matches FindMi. A shared store is
+     counted under each tech that covers it. */
   const groups={};
+  Object.entries(zones).forEach(([id,z])=>{groups[id]={name:z.name,color:z.color,stores:0,open:0}});
   [...mapped,...unmapped].forEach(r=>{
-    const k=r.tid||"__none";
-    (groups[k]=groups[k]||{name:r.techName,color:r.color,stores:0,open:0});
-    groups[k].stores++;groups[k].open+=r.open;
+    const keys=r.tids.length?r.tids:["__none"];
+    keys.forEach(k=>{
+      if(!groups[k])groups[k]={name:k==="__none"?"No tech assigned":"Unknown tech",color:NO_TECH_COLOR,stores:0,open:0};
+      groups[k].stores++;groups[k].open+=r.open;
+    });
   });
   const legend=Object.entries(groups)
-    .sort((a,b)=>b[1].open-a[1].open||a[1].name.localeCompare(b[1].name))
+    .sort((a,b)=>b[1].open-a[1].open||b[1].stores-a[1].stores||a[1].name.localeCompare(b[1].name))
     .map(([k,g])=>`<div class="ow-leg-row">
       <i style="background:${g.color}"></i>
       <span class="ow-leg-name">${esc(g.name)}</span>
       <span class="ow-leg-n">${g.open} open</span>
       <span class="ow-leg-s">${g.stores} store${g.stores===1?"":"s"}</span>
     </div>`).join("");
+  const techCount=Object.keys(zones).length;
 
   let svg=`<div class="rp-empty">No store coordinates available to map.</div>`;
   if(mapped.length){
@@ -2914,20 +2973,16 @@ function renderOverwatchMap(){
     minLat-=padLat;maxLat+=padLat;minLng-=padLng;maxLng+=padLng;
     const W=760,H=520;
     const X=l=>((l-minLng)/(maxLng-minLng||1))*W, Y=l=>H-((l-minLat)/(maxLat-minLat||1))*H;
-    // Uniform bubble size — the NUMBER carries the load, not the radius.
-    // Stores with nothing open stay as small faded dots for geographic context.
-    // Quiet stores draw first so busy ones sit on top.
     const R_ACTIVE=13, R_IDLE=5;
     const dots=mapped.slice().sort((a,b)=>a.open-b.open).map(p=>{
       const x=X(p.lng).toFixed(1),y=Y(p.lat).toFixed(1);
-      const active=p.open>0;
-      const r=active?R_ACTIVE:R_IDLE;
+      const active=p.open>0, r=active?R_ACTIVE:R_IDLE;
       const badge=active
         ? `<text x="${x}" y="${(+y+4.2).toFixed(1)}" text-anchor="middle" fill="#fff" font-size="${p.open>99?9:p.open>9?11:12.5}" font-weight="800" pointer-events="none">${p.open}</text>`
         : "";
       return `<g class="ow-dot${active?" on":""}" data-sid="${p.sid}" data-name="${escA(storeName(p.sid))}" data-open="${p.open}" data-tech="${escA(p.techName)}"
               onmousemove="owTip(event,this)" onmouseleave="owTipHide()" onclick="owDotClick(this)">
-        <circle cx="${x}" cy="${y}" r="${r}" fill="${p.color}" fill-opacity="${active?0.95:0.32}" stroke="#fff" stroke-width="${active?1.8:1}"/>
+        ${owBubble(x,y,r,p.cols,active)}
         ${badge}
       </g>`;}).join("");
     svg=`<svg viewBox="0 0 ${W} ${H}" class="ow-map" preserveAspectRatio="xMidYMid meet">
@@ -2943,7 +2998,7 @@ function renderOverwatchMap(){
   return `
     <div class="page-head"><div>
       <div class="page-title">Open tickets by zone</div>
-      <div class="page-meta">${totalOpen} open across ${ids.length} stores · coloured by repair tech</div>
+      <div class="page-meta">${totalOpen} open across ${ids.length} stores · ${techCount} in-house tech${techCount===1?"":"s"}</div>
     </div></div>
     <div class="ow-map-wrap">${svg}
       <div class="ow-tip" id="owTip"></div>
@@ -3005,6 +3060,14 @@ function openSettings(){
       <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Saved as contact info on each Overwatch account. When you text or email a tech, replies route back to whoever sent it.</p>
       ${rows}
       <div class="contact-note">Used as the reply-to / callback when SMS (Twilio) and email (SendGrid) are wired up.</div>
+      <div class="section-label" style="margin-top:22px">Ticket categories<span class="ln"></span></div>
+      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Shared with FindMi. Renaming is safe; removing one only hides it from new tickets.</p>
+      <div id="catRows">${Object.entries(CATEGORIES).map(([k,label])=>`
+        <div class="cat-row" data-key="${escA(k)}">
+          <input class="input cat-label" value="${escA(label)}">
+          <button class="btn btn-danger btn-sm" onclick="this.closest('.cat-row').remove()">✕</button>
+        </div>`).join("")}</div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addCatRow()">＋ Add category</button>
     </div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
@@ -3016,6 +3079,13 @@ function adminIdByEmail(email){
   const lc=(email||"").toLowerCase();
   const admins=MASTER.admins||{};
   return Object.keys(admins).find(id=>(admins[id].email||"").toLowerCase()===lc)||null;
+}
+function addCatRow(){
+  const host=$("catRows");if(!host)return;
+  const d=document.createElement("div");d.className="cat-row";d.setAttribute("data-key","");
+  d.innerHTML=`<input class="input cat-label" placeholder="New category name">
+    <button class="btn btn-danger btn-sm" onclick="this.closest('.cat-row').remove()">✕</button>`;
+  host.appendChild(d);d.querySelector("input").focus();
 }
 async function saveSettings(){
   const inputs=[...document.querySelectorAll(".reply-in")];
@@ -3036,6 +3106,17 @@ async function saveSettings(){
         await apiWrite(`admins/${newId}`,{id:newId,email,name:email.split("@")[0],tier:"overwatch",replyNumber:num||null});
       }
     }
+    // Ticket categories (shared with FindMi) — stored as an ordered array.
+    const catList=[...document.querySelectorAll("#catRows .cat-row")].map(r=>{
+      const label=(r.querySelector(".cat-label").value||"").trim();
+      if(!label)return null;
+      return {key:r.getAttribute("data-key")||catKeyFrom(label),label};
+    }).filter(Boolean);
+    if(catList.length){
+      await apiWrite("admins/ticketCategories",catList);
+      MASTER.admins=MASTER.admins||{};MASTER.admins.ticketCategories=catList;
+      loadCategories();
+    }
     // Apply locally right away; the CDN copy of admins/* can lag ~60s.
     for(const i of inputs){const em=i.getAttribute("data-email").toLowerCase();const n=i.value.trim();if(n)REPLY_NUMBERS[em]=n;else delete REPLY_NUMBERS[em];}
     refreshInBackground();
@@ -3043,6 +3124,23 @@ async function saveSettings(){
   }catch(e){toast(e.message||"Could not save","err");btn.disabled=false;btn.textContent="Save"}
 }
 function openVendors(){
+  // In-house techs come from the directory (read-only identity); their
+  // specialties + zone colour live in admins/techMeta so BOTH apps can edit.
+  const techs=Object.entries(MASTER.repairTechnicians||{})
+    .sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
+  const techRows=techs.map(([id,t])=>{
+    const cats=techCategories({...t,id});
+    const spec=cats.length?cats.map(k=>ALL_CATEGORIES[k]||k).join(" · "):"General — handles everything";
+    const meta=[spec,fmtPhone(t.phone),t.email].filter(Boolean).join(" · ");
+    return `<div class="vrow">
+      <span class="v-dot" style="background:${techColorFor(id)}"></span>
+      <div style="flex:1;min-width:0">
+        <div class="v-name">${esc(t.name)} <span class="v-tag">in-house</span></div>
+        <div class="v-meta">${esc(meta)}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="editTechMeta('${id}')">Edit</button>
+    </div>`;}).join("");
+
   const rows=Object.entries(VENDORS).map(([id,v])=>`
     <div class="vrow"><div style="flex:1;min-width:0">
       <div class="v-name">${esc(v.name)}</div>
@@ -3050,13 +3148,55 @@ function openVendors(){
       ${v.notes?`<div class="v-notes">${esc(v.notes)}</div>`:""}</div>
       <button class="btn btn-ghost btn-sm" onclick="editVendor('${id}')">Edit</button>
       <button class="btn btn-danger btn-sm" onclick="removeVendor('${id}')">Remove</button></div>`).join("");
-  modal(`<div class="sheet-head"><h2>Third-party techs</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+
+  modal(`<div class="sheet-head"><h2>Techs &amp; vendors</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
     <div class="sheet-body">
-      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Outside techs available for assignment.</p>
-      <div id="vendorRows">${rows||'<div class="empty" style="padding:34px"><div class="empty-mark">🏢</div><h3>No third-party techs yet</h3><p>Add your first outside techdor below.</p></div>'}</div>
-      <button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="editVendor(null)">＋ Add tech</button>
+      <div class="section-label" style="margin-top:0">In-house techs · ${techs.length}<span class="ln"></span></div>
+      <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 10px">Names and contact details come from FindMi. Specialties and zone colour are shared by both apps.</p>
+      ${techRows||'<div class="rp-empty">No in-house techs in the directory.</div>'}
+      <div class="section-label" style="margin-top:20px">Third-party vendors · ${Object.keys(VENDORS).length}<span class="ln"></span></div>
+      <div id="vendorRows">${rows||'<div class="rp-empty">No third-party vendors yet.</div>'}</div>
+      <button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="editVendor(null)">＋ Add vendor</button>
     </div>
     <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="closeModal()">Done</button></div>`);
+}
+/* Edit an in-house tech's specialties + colour. Identity stays in FindMi. */
+function editTechMeta(id){
+  const t=(MASTER.repairTechnicians||{})[id]||{};
+  const cur=techCategories({...t,id});
+  const curColor=techColorFor(id);
+  modal(`<div class="sheet-head"><h2>${esc(t.name||"Technician")}</h2><button class="x-btn" onclick="openVendors()">✕</button></div>
+    <div class="sheet-body">
+      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Name, email and phone are managed in FindMi. Specialties and colour save to both apps.</p>
+      <div class="field"><label class="label">Specialties <span style="font-weight:400;color:var(--ink-dim)">(none ticked = general, handles everything)</span></label>
+        <div class="cat-grid" id="tmCats">${Object.entries(CATEGORIES).map(([k,label])=>
+          `<label class="cat-chk"><input type="checkbox" value="${k}"${cur.includes(k)?" checked":""}><span>${esc(label)}</span></label>`).join("")}</div></div>
+      <div class="field" style="margin-top:14px"><label class="label">Zone colour</label>
+        <div class="sw-row" id="tmSw">${ZONE_PALETTE.map(c=>
+          `<button type="button" class="sw${c.toLowerCase()===String(curColor).toLowerCase()?" on":""}" style="background:${c}" data-c="${c}" onclick="pickTmColor('${c}')"></button>`).join("")}</div>
+        <input type="hidden" id="tmColor" value="${escA(curColor)}"></div>
+    </div>
+    <div class="sheet-foot"><button class="btn btn-ghost" style="flex:1" onclick="openVendors()">Cancel</button>
+      <button class="btn btn-primary" style="flex:1" id="tmSave" onclick="saveTechMeta('${id}')">Save</button></div>`);
+}
+function pickTmColor(c){
+  $("tmColor").value=c;
+  document.querySelectorAll("#tmSw .sw").forEach(b=>b.classList.toggle("on",(b.getAttribute("data-c")||"").toLowerCase()===c.toLowerCase()));
+}
+async function saveTechMeta(id){
+  const cats=[...document.querySelectorAll("#tmCats input:checked")].map(c=>c.value);
+  const color=$("tmColor").value||techColorFor(id);
+  const rec={categories:cats,color,updatedAt:now()};
+  const btn=$("tmSave");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>'}
+  // optimistic — this endpoint is rarely warm
+  MASTER.admins=MASTER.admins||{};MASTER.admins.techMeta=MASTER.admins.techMeta||{};
+  const prev=MASTER.admins.techMeta[id];
+  MASTER.admins.techMeta[id]=rec;
+  toast("Technician updated");openVendors();
+  apiWrite(`admins/techMeta/${id}`,rec).then(()=>refreshInBackground()).catch(e=>{
+    if(prev)MASTER.admins.techMeta[id]=prev;else delete MASTER.admins.techMeta[id];
+    toast((e.message||"Could not save")+" — not saved","err");openVendors();
+  });
 }
 function editVendor(id){
   const v=id?VENDORS[id]:{};
