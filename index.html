@@ -333,7 +333,18 @@ body.no-reftags .reftag{display:none}
 .ow-tab{border:none;background:none;color:var(--ink-mid);font-size:13px;font-weight:600;padding:8px 16px;border-radius:7px;cursor:pointer;min-height:38px}
 .ow-tab:hover{color:var(--ink)}
 .ow-tab.on{background:var(--amber);color:#fff}
-.ow-map-wrap{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel-2)}
+.ow-tip{position:absolute;z-index:5;pointer-events:none;opacity:0;transition:opacity .12s;
+  background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 11px;
+  box-shadow:0 6px 20px rgba(20,30,45,.16);max-width:230px}
+.ow-tip.on{opacity:1;pointer-events:auto}
+.ow-tip .owt-name{font-weight:700;font-size:13px;line-height:1.25}
+.ow-tip .owt-sub{font-size:12px;color:var(--ink-mid);margin-top:2px}
+.ow-dot{cursor:pointer}
+.ow-dot.on circle{transition:r .12s}
+.ow-dot:hover circle{stroke:var(--ink);stroke-width:2.2}
+.v-notes{font-size:12px;color:var(--ink-mid);margin-top:5px;white-space:pre-wrap;
+  background:var(--panel-2);border-left:3px solid var(--line);border-radius:5px;padding:6px 9px}
+.ow-map-wrap{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel-2)}
 .ow-map{display:block;width:100%;height:auto}
 .ow-dot{cursor:pointer}
 .ow-dot:hover circle{stroke:var(--ink);stroke-width:2.5}
@@ -565,7 +576,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "3.6";
+const APP_VERSION = "3.7";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1786,6 +1797,12 @@ function ticketRow(t){
         <div class="rb-btns">${contactBtns(t,who)}
           <button class="btn btn-primary btn-sm" onclick="confirmContact('${t._id}')">Already done</button>
         </div></div>`;
+    }else if(t.status==="dispatched" && who){
+      // Dispatched jobs used to have no admin bar at all. Now that in-house
+      // techs land here directly, keep contact options available.
+      below=`<div class="row-bar" onclick="event.stopPropagation()">
+        <span>Dispatched to <b>${esc(who.name)}</b>${t.dispatchedAt?` · ${fmtDateShort(t.dispatchedAt)}`:""}</span>
+        <div class="rb-btns">${contactBtns(t,who)}</div></div>`;
     }else if(t.status==="waiting" && who){
       below=`<div class="row-bar" onclick="event.stopPropagation()">
         <span><b>Waiting:</b> ${esc(t.waitingReason||"reason not set")}</span>
@@ -1930,13 +1947,16 @@ async function rowAssign(id){
   if(val.startsWith("tech:")){
     const tid=val.slice(5); const x=(MASTER.repairTechnicians||{})[tid];
     if(!x){toast("That tech no longer exists — left unassigned","err");return}
-    patch={assignedTechId:tid,assignedVendorId:null,status:"assigned"};note="🔧 "+x.name;
+    // In-house techs see dispatched jobs in their own app, so there is nobody to
+    // phone first — skip "assigned" and dispatch immediately. Vendors still go
+    // to "assigned" because someone has to actually contact them.
+    patch={assignedTechId:tid,assignedVendorId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
   }else if(val.startsWith("vendor:")){
     const vid=val.slice(7); const v=VENDORS[vid];
     if(!v){toast("That vendor no longer exists — left unassigned","err");return}
     patch={assignedVendorId:vid,assignedTechId:null,status:"assigned"};note="🏢 "+v.name;
   }else{toast("Pick a person to assign to","err");return}
-  if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status}))toast("Assigned · "+note);
+  if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status}))toast((patch.status==="dispatched"?"Dispatched · ":"Assigned · ")+note);
 }
 // Yes, contacted → dispatched (with timestamp). A ticket can only be dispatched
 // if it actually has a person attached; otherwise it stays put.
@@ -2352,7 +2372,10 @@ async function doAssign(id){
   if(val.startsWith("tech:")){
     const tid=val.slice(5); const x=(MASTER.repairTechnicians||{})[tid];
     if(!x){toast("That tech no longer exists — left unassigned","err");return}
-    patch={assignedTechId:tid,assignedVendorId:null,status:"assigned"};note="🔧 "+x.name;
+    // In-house techs see dispatched jobs in their own app, so there is nobody to
+    // phone first — skip "assigned" and dispatch immediately. Vendors still go
+    // to "assigned" because someone has to actually contact them.
+    patch={assignedTechId:tid,assignedVendorId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
   }
   else if(val.startsWith("vendor:")){
     const vid=val.slice(7); const v=VENDORS[vid];
@@ -2360,7 +2383,7 @@ async function doAssign(id){
     patch={assignedVendorId:vid,assignedTechId:null,status:"assigned"};note="🏢 "+v.name;
   }
   else{patch={assignedVendorId:null,assignedTechId:null,status:"unassigned"};note="unassigned (pool)"}
-  if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status})){toast("Assignment updated");openTicket(id)}
+  if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status})){toast(patch.status==="dispatched"?"Dispatched · "+note:"Assignment updated");openTicket(id)}
 }
 async function techClockIn(id){
   techStart(id);
@@ -2818,14 +2841,21 @@ function renderOverwatchMap(){
     minLat-=padLat;maxLat+=padLat;minLng-=padLng;maxLng+=padLng;
     const W=760,H=520;
     const X=l=>((l-minLng)/(maxLng-minLng||1))*W, Y=l=>H-((l-minLat)/(maxLat-minLat||1))*H;
-    // Draw quiet stores first so busy ones sit on top.
+    // Uniform bubble size — the NUMBER carries the load, not the radius.
+    // Stores with nothing open stay as small faded dots for geographic context.
+    // Quiet stores draw first so busy ones sit on top.
+    const R_ACTIVE=13, R_IDLE=5;
     const dots=mapped.slice().sort((a,b)=>a.open-b.open).map(p=>{
       const x=X(p.lng).toFixed(1),y=Y(p.lat).toFixed(1);
-      const r=p.open?Math.min(10+p.open*2.2,22):7;
-      return `<g class="ow-dot" onclick="owFocusStore('${p.sid}')">
-        <circle cx="${x}" cy="${y}" r="${r}" fill="${p.color}" fill-opacity="${p.open?0.92:0.34}" stroke="#fff" stroke-width="1.5"/>
-        ${p.open?`<text x="${x}" y="${(+y+4).toFixed(1)}" text-anchor="middle" fill="#fff" font-size="${p.open>9?11:12}" font-weight="700">${p.open}</text>`:""}
-        <title>${esc(storeName(p.sid))} — ${p.open} open · ${esc(p.techName)}</title>
+      const active=p.open>0;
+      const r=active?R_ACTIVE:R_IDLE;
+      const badge=active
+        ? `<text x="${x}" y="${(+y+4.2).toFixed(1)}" text-anchor="middle" fill="#fff" font-size="${p.open>99?9:p.open>9?11:12.5}" font-weight="800" pointer-events="none">${p.open}</text>`
+        : "";
+      return `<g class="ow-dot${active?" on":""}" data-sid="${p.sid}" data-name="${escA(storeName(p.sid))}" data-open="${p.open}" data-tech="${escA(p.techName)}"
+              onmousemove="owTip(event,this)" onmouseleave="owTipHide()" onclick="owDotClick(this)">
+        <circle cx="${x}" cy="${y}" r="${r}" fill="${p.color}" fill-opacity="${active?0.95:0.32}" stroke="#fff" stroke-width="${active?1.8:1}"/>
+        ${badge}
       </g>`;}).join("");
     svg=`<svg viewBox="0 0 ${W} ${H}" class="ow-map" preserveAspectRatio="xMidYMid meet">
       <rect x="0" y="0" width="${W}" height="${H}" fill="var(--panel-2)"/>${dots}</svg>`;
@@ -2843,12 +2873,49 @@ function renderOverwatchMap(){
       <div class="page-meta">${totalOpen} open across ${ids.length} stores · coloured by repair tech</div>
     </div></div>
     <div class="ow-map-wrap">${svg}
+      <div class="ow-tip" id="owTip"></div>
       <div class="ow-legend">${legend}</div>
     </div>
     ${unmappedBlock}`;
 }
 // Tap a store on the map -> its ticket list, filtered to that store.
 function owFocusStore(sid){owView="list";curStore=sid;curFilter="active";render();}
+/* Hover card. The old SVG <title> was the browser's native tooltip: ~1s delay
+   and unstyleable. This one is instant and follows the cursor. */
+function owTip(e,g){
+  const tip=$("owTip"), wrap=g.closest(".ow-map-wrap");
+  if(!tip||!wrap)return;
+  const n=+g.getAttribute("data-open");
+  tip.innerHTML=`<div class="owt-name">${esc(g.getAttribute("data-name"))}</div>
+    <div class="owt-sub"><b>${n}</b> open ticket${n===1?"":"s"} · ${esc(g.getAttribute("data-tech"))}</div>`;
+  const r=wrap.getBoundingClientRect();
+  let x=e.clientX-r.left+14, y=e.clientY-r.top+14;
+  tip.classList.add("on");
+  // keep the card inside the map box
+  const tw=tip.offsetWidth, th=tip.offsetHeight;
+  if(x+tw>r.width-8) x=e.clientX-r.left-tw-14;
+  if(y+th>r.height-8) y=e.clientY-r.top-th-14;
+  tip.style.left=x+"px"; tip.style.top=y+"px";
+}
+function owTipHide(){const t=$("owTip");if(t)t.classList.remove("on")}
+/* Phones have no hover, so a tap shows the card pinned with an explicit
+   button rather than navigating away before it can be read. */
+function owDotClick(g){
+  const sid=g.getAttribute("data-sid");
+  if(!IS_MOBILE){owFocusStore(sid);return}
+  const tip=$("owTip"), wrap=g.closest(".ow-map-wrap");
+  if(!tip||!wrap){owFocusStore(sid);return}
+  const n=+g.getAttribute("data-open");
+  const box=g.getBoundingClientRect(), r=wrap.getBoundingClientRect();
+  tip.innerHTML=`<div class="owt-name">${esc(g.getAttribute("data-name"))}</div>
+    <div class="owt-sub"><b>${n}</b> open ticket${n===1?"":"s"} · ${esc(g.getAttribute("data-tech"))}</div>
+    <button class="btn btn-primary btn-sm" style="margin-top:8px;width:100%" onclick="owFocusStore('${sid}')">View tickets</button>`;
+  tip.classList.add("on");
+  let x=box.left-r.left+box.width/2-tip.offsetWidth/2, y=box.top-r.top+box.height+8;
+  x=Math.max(8,Math.min(x,r.width-tip.offsetWidth-8));
+  if(y+tip.offsetHeight>r.height-8) y=box.top-r.top-tip.offsetHeight-8;
+  tip.style.left=x+"px"; tip.style.top=y+"px";
+}
 
 /* ============================================================ VENDORS */
 function openSettings(){
@@ -2906,7 +2973,8 @@ function openVendors(){
   const rows=Object.entries(VENDORS).map(([id,v])=>`
     <div class="vrow"><div style="flex:1;min-width:0">
       <div class="v-name">${esc(v.name)}</div>
-      <div class="v-meta">${esc([vendorCatLabel(v),fmtPhone(v.phone),v.email].filter(Boolean).join(" · ")||"No contact on file")}</div></div>
+      <div class="v-meta">${esc([vendorCatLabel(v),fmtPhone(v.phone),v.email].filter(Boolean).join(" · ")||"No contact on file")}</div>
+      ${v.notes?`<div class="v-notes">${esc(v.notes)}</div>`:""}</div>
       <button class="btn btn-ghost btn-sm" onclick="editVendor('${id}')">Edit</button>
       <button class="btn btn-danger btn-sm" onclick="removeVendor('${id}')">Remove</button></div>`).join("");
   modal(`<div class="sheet-head"><h2>Third-party techs</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
@@ -2937,6 +3005,8 @@ function editVendor(id){
       <div style="display:flex;gap:12px;margin-top:14px">
         <div class="field" style="flex:1"><label class="label">Phone</label><input class="input" id="vPhone" value="${escA(v.phone||"")}"></div>
         <div class="field" style="flex:1"><label class="label">Email</label><input class="input" id="vEmail" value="${escA(v.email||"")}"></div></div>
+      <div class="field" style="margin-top:14px"><label class="label">Notes <span style="font-weight:400;color:var(--ink-dim)">(specialties, rates, hours, who to ask for…)</span></label>
+        <textarea class="input" id="vNotes" rows="4" placeholder="e.g. Walk-in cooler specialists. Ask for Danny. No weekend calls. $95/hr after 5pm.">${esc(v.notes||"")}</textarea></div>
     </div>
     <div class="sheet-foot"><button class="btn btn-ghost" style="flex:1" onclick="openVendors()">Cancel</button>
       <button class="btn btn-primary" style="flex:1" id="vSave" onclick="saveVendor('${id||""}')">${id?"Save":"Add vendor"}</button></div>`);
@@ -2948,7 +3018,8 @@ async function saveVendor(id){
   const vid=id||uid();
   const rec={id:vid,name,categories:cats,
              category:cats.map(k=>CATEGORIES[k]||k).join(" · "),   // readable mirror for legacy readers
-             phone:$("vPhone").value.trim(),email:$("vEmail").value.trim(),updatedAt:now()};
+             phone:$("vPhone").value.trim(),email:$("vEmail").value.trim(),
+             notes:$("vNotes").value.trim(),updatedAt:now()};
   const prev=id?VENDORS[id]:null;
   /* Optimistic save. Vendors are edited rarely, so this API endpoint is almost
      always cold-starting (Vercel boots the Firebase SDK first) — awaiting it
