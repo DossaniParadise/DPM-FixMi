@@ -535,7 +535,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "2.8.1";
+const APP_VERSION = "2.9";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1204,8 +1204,7 @@ function render(){
   const v=$("mainView");
   if(SESSION.role==="manager"&&managerScreen==="hub"){v.innerHTML=renderManagerHub();applyTags();return}
   if(SESSION.role==="coach"||SESSION.role==="director"){
-    v.innerHTML = paymiBanner() +
-      ((coachScreen==="hub") ? renderCoachHub() : renderCoachStore(coachScreen));
+    v.innerHTML = (coachScreen==="hub") ? renderCoachHub() : renderCoachStore(coachScreen);
     applyTags();return;
   }
   v.innerHTML=renderBoard();
@@ -1288,6 +1287,7 @@ function renderCoachHub(){
       <div class="hb-ic">📝</div><div class="hb-t">New ticket</div>
       <div class="hb-d">Open a ticket for any of your stores.</div>
     </button>
+    ${paymiBanner()}
     ${ids.length?`<div class="store-grid">${tiles}</div>`
       :`<div class="empty"><div class="empty-mark">🏪</div><h3>No stores in your area</h3><p>Managed in the master.</p></div>`}`;
 }
