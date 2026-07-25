@@ -535,7 +535,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "2.8.1";
+const APP_VERSION = "3.1";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -626,20 +626,35 @@ function paymiCommentsFor(refId,docs){
 async function refreshPaymiCount(){
   try{
     if(!SESSION||!SESSION.refId||(SESSION.role!=="coach"&&SESSION.role!=="director")){
-      PAYMI_COUNT=null;return;
+      PAYMI_COUNT=null;
+      if(SESSION)console.log("[PayMi] skipped — role "+SESSION.role+" doesn't get invoice notices");
+      return;
     }
     const res=await fetch(PAYMI_FS);
-    if(!res.ok){PAYMI_COUNT=null;return}
+    if(!res.ok){
+      PAYMI_COUNT=null;PAYMI_COMMENTS=null;
+      console.warn("[PayMi] Firestore read failed: HTTP "+res.status+
+        " — check PayMi database rules / network. No banner will show.");
+      return;
+    }
     const data=await res.json();
     const prevC=PAYMI_COUNT, prevM=PAYMI_COMMENTS;
     const docs=data.documents||[];
     PAYMI_COUNT=paymiCountFor(SESSION.refId,docs);
     PAYMI_COMMENTS=paymiCommentsFor(SESSION.refId,docs);
+    const withLog=docs.filter(d=>d.fields&&d.fields.commentLog).length;
+    console.log("[PayMi] "+docs.length+" invoices in DB · pending on me: "+PAYMI_COUNT+
+      " · unread comments: "+PAYMI_COMMENTS+" · docs with commentLog: "+withLog+
+      " · me="+SESSION.refId+
+      (docs.length&&!withLog?"  (0 commentLog docs = comments predate PayMi v2.5, or PayMi deploy is old — fresh comments will count)":""));
     // Re-render only when a number changed, so the banner appears without
     // stomping on anything mid-interaction.
     if((PAYMI_COUNT!==prevC||PAYMI_COMMENTS!==prevM)&&
        (SESSION.role==="coach"||SESSION.role==="director"))render();
-  }catch(e){PAYMI_COUNT=null;PAYMI_COMMENTS=null}
+  }catch(e){
+    PAYMI_COUNT=null;PAYMI_COMMENTS=null;
+    console.warn("[PayMi] check crashed: "+(e&&e.message||e));
+  }
 }
 
 function paymiBanner(){
