@@ -535,7 +535,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "2.9";
+const APP_VERSION = "2.8.1";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -576,6 +576,7 @@ let MASTER=null, SESSION=null;
 const PAYMI_URL="https://dossaniparadise.github.io/invoice-tracker/";
 const PAYMI_FS="https://firestore.googleapis.com/v1/projects/gen-lang-client-0357067758/databases/(default)/documents/invoices?pageSize=300&key=AIzaSyAxW6wajL9PH1Wlw3_QuBXgAMFgYWjkJp8";
 let PAYMI_COUNT=null;   // null = unknown/not fetched; number once known
+let PAYMI_COMMENTS=null; // unread finance/discussion comments for this person
 
 /* Firestore REST returns typed JSON ({stringValue:..},{arrayValue:{values:[..]}}).
    Decode just enough of it into plain JS. */
@@ -607,6 +608,21 @@ function paymiCountFor(refId,docs){
   return n;
 }
 
+function paymiCommentsFor(refId,docs){
+  let n=0;
+  docs.forEach(d=>{
+    const f=d.fields||{};
+    const chains=fsVal(f.chains)||[];
+    const inAudience=chains.some(c=>c&&(c.status==="PENDING"||c.status==="REJECTED")&&
+      (c.steps||[]).some(st=>st&&(st.userIds||[]).includes(refId)));
+    if(!inAudience)return;
+    const readAt=(fsVal(f.commentReads)||{})[refId]||0;
+    const log=fsVal(f.commentLog)||[];
+    n+=log.filter(e=>e&&e.by!==refId&&(e.ts||0)>readAt).length;
+  });
+  return n;
+}
+
 async function refreshPaymiCount(){
   try{
     if(!SESSION||!SESSION.refId||(SESSION.role!=="coach"&&SESSION.role!=="director")){
@@ -615,20 +631,29 @@ async function refreshPaymiCount(){
     const res=await fetch(PAYMI_FS);
     if(!res.ok){PAYMI_COUNT=null;return}
     const data=await res.json();
-    const prev=PAYMI_COUNT;
-    PAYMI_COUNT=paymiCountFor(SESSION.refId,data.documents||[]);
-    // Re-render only if the number changed and we're on a hub screen, so the
-    // banner appears without stomping on anything mid-interaction.
-    if(PAYMI_COUNT!==prev&&(SESSION.role==="coach"||SESSION.role==="director"))render();
-  }catch(e){PAYMI_COUNT=null}
+    const prevC=PAYMI_COUNT, prevM=PAYMI_COMMENTS;
+    const docs=data.documents||[];
+    PAYMI_COUNT=paymiCountFor(SESSION.refId,docs);
+    PAYMI_COMMENTS=paymiCommentsFor(SESSION.refId,docs);
+    // Re-render only when a number changed, so the banner appears without
+    // stomping on anything mid-interaction.
+    if((PAYMI_COUNT!==prevC||PAYMI_COMMENTS!==prevM)&&
+       (SESSION.role==="coach"||SESSION.role==="director"))render();
+  }catch(e){PAYMI_COUNT=null;PAYMI_COMMENTS=null}
 }
 
 function paymiBanner(){
-  if(!PAYMI_COUNT)return"";   // null or 0 -> nothing
-  const msg=PAYMI_COUNT===1
-    ?`You have an invoice to review, please visit the <a href="${PAYMI_URL}" target="_blank" rel="noopener noreferrer">PayMi</a> app to approve or deny.`
-    :`You have ${PAYMI_COUNT} invoices to approve, please visit the <a href="${PAYMI_URL}" target="_blank" rel="noopener noreferrer">PayMi</a> app to approve or deny.`;
-  return `<div class="paymi-note"><div class="pn-ic">🧾</div><div class="pn-t">${msg}</div></div>`;
+  if(!PAYMI_COUNT&&!PAYMI_COMMENTS)return"";   // nothing to say
+  const link=`<a href="${PAYMI_URL}" target="_blank" rel="noopener noreferrer">PayMi</a>`;
+  const lines=[];
+  if(PAYMI_COUNT)lines.push(PAYMI_COUNT===1
+    ?`You have an invoice to review, please visit the ${link} app to approve or deny.`
+    :`You have ${PAYMI_COUNT} invoices to approve, please visit the ${link} app to approve or deny.`);
+  if(PAYMI_COMMENTS)lines.push(PAYMI_COMMENTS===1
+    ?`You have 1 comment to view in the ${link} app.`
+    :`You have ${PAYMI_COMMENTS} comments to view in the ${link} app.`);
+  return `<div class="paymi-note"><div class="pn-ic">🧾</div><div class="pn-t">${
+    lines.map(l=>`<div>${l}</div>`).join("")}</div></div>`;
 }
 let REPLY_NUMBERS={}; // email(lowercased) -> reply phone number, stored in master
 let TICKETS={}, VENDORS={}, RESTAURANTS={};
