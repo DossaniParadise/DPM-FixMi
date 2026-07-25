@@ -358,6 +358,10 @@ body.no-reftags .reftag{display:none}
 .ow-um{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 11px;margin:5px 5px 0 0;font-size:12px;cursor:pointer}
 .ow-um:hover{border-color:var(--amber);color:var(--amber-deep)}
 @media(max-width:600px){.ow-toggle{width:100%}.ow-tab{flex:1;padding:8px 6px}.ow-leg-s{display:none}}
+.tech-pick{display:flex;align-items:center;gap:11px;text-align:left;padding:12px 13px}
+.tech-pick .tp-dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 1px rgba(0,0,0,.12)}
+.tech-pick .tp-body{display:flex;flex-direction:column;gap:2px;min-width:0}
+.tech-pick .tp-body span{font-size:12px;color:var(--ink-dim);font-weight:400}
 .cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:7px}
 .cat-chk{display:flex;align-items:center;gap:7px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-size:13px;cursor:pointer;min-height:40px}
 .cat-chk:hover{border-color:var(--amber)}
@@ -576,7 +580,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "3.7";
+const APP_VERSION = "3.8";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1017,7 +1021,7 @@ function storeName(rid){return store(rid).storeName||"Unknown store"}
 function storeNum(rid){return store(rid).storeNumber||""}
 function storeDirector(rid){const id=store(rid).assignedDirectorId;return (MASTER.directors||{})[id]||null}
 function storeCoach(rid){const id=store(rid).assignedAreaCoachId;return (MASTER.areaCoaches||{})[id]||null}
-function storeTech(rid){const id=store(rid).assignedRepairTechnicianId;return (MASTER.repairTechnicians||{})[id]||null}
+function storeTech(rid){const ids=storeTechIds(rid);return ids.length?(MASTER.repairTechnicians||{})[ids[0]]:null}
 function techName(tid){return (MASTER.repairTechnicians||{})[tid]?.name||null}
 function storeManagerName(rid){return store(rid).storeManager||""}
 /* ---- GPS link for a store. Coordinates are most precise; if a store has none
@@ -1282,17 +1286,59 @@ function ticketsForStore(sid){
     .filter(t=>SESSION.role!=="tech" || t.assignedTechId===SESSION.refId);
 }
 
-/* ---- tech zone colours ------------------------------------------------------
-   Colours are assigned from a fixed palette by walking the technician roster in
-   a stable order (name, then id). Nothing is hardcoded to a person: add, rename
-   or remove a tech in the directory and the zones follow automatically. */
-const ZONE_PALETTE=["#1d76bb","#e0761a","#2f9e57","#8b5cf6","#d9455f","#0d9488","#b45309","#6366f1"];
+/* ---- tech zones, specialties and colours -------------------------------------
+   MIRRORS DPM FindMi — keep in sync. All three live on the technician record in
+   the directory, so both apps read the identical values:
+     tech.color      locked zone colour (falls back to a fixed palette slot)
+     tech.categories specialties; EMPTY = general-purpose, handles everything
+   The palette is fixed rather than divided by the tech count, so adding a
+   technician never re-shuffles anyone else's colour. */
+const ZONE_PALETTE=["#e8091b","#16a34a","#2b64c6","#8b5cf6","#ea580c","#0d9488","#db2777","#ca8a04"];
+function techColorFor(techId){
+  const techs=MASTER.repairTechnicians||{};
+  const t=techs[techId];
+  if(t&&t.color)return t.color;                        // locked value wins
+  // Identical fallback to FindMi: first palette slot no LOCKED tech owns,
+  // walking unlocked techs alphabetically. FindMi locks these on load, so this
+  // is only ever a brief transitional state.
+  const taken=new Set(Object.values(techs).map(x=>x&&x.color?String(x.color).toLowerCase():null).filter(Boolean));
+  const unlocked=Object.keys(techs).filter(id=>!(techs[id]||{}).color)
+    .sort((a,b)=>((techs[a]||{}).name||"").localeCompare((techs[b]||{}).name||"")||a.localeCompare(b));
+  const free=ZONE_PALETTE.filter(c=>!taken.has(c.toLowerCase()));
+  const pool=free.length?free:ZONE_PALETTE;
+  const i=unlocked.indexOf(techId);
+  return pool[(i<0?0:i)%pool.length];
+}
 function techZones(){
-  const techs=Object.entries(MASTER.repairTechnicians||{})
-    .sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||"")||a[0].localeCompare(b[0]));
   const map={};
-  techs.forEach(([id,t],i)=>{map[id]={id,name:t.name||"Unnamed tech",color:ZONE_PALETTE[i%ZONE_PALETTE.length]}});
+  Object.entries(MASTER.repairTechnicians||{}).forEach(([id,t])=>{
+    map[id]={id,name:t.name||"Unnamed tech",color:techColorFor(id)};
+  });
   return map;
+}
+/* A store can carry several in-house techs. FindMi stores the canonical array
+   plus a legacy single-value mirror; read both so nothing is missed. */
+function storeTechIds(rid){
+  const s=store(rid);
+  let ids=[];
+  if(Array.isArray(s.assignedRepairTechnicianIds)) ids=s.assignedRepairTechnicianIds.slice();
+  else if(s.assignedRepairTechnicianIds&&typeof s.assignedRepairTechnicianIds==="object") ids=Object.values(s.assignedRepairTechnicianIds);
+  else if(s.assignedRepairTechnicianId) ids=[s.assignedRepairTechnicianId];
+  const techs=MASTER.repairTechnicians||{};
+  return [...new Set(ids.filter(id=>id&&techs[id]))];
+}
+/* Specialties. An empty list means general-purpose. */
+function techCategories(t){return Array.isArray(t&&t.categories)?t.categories:[]}
+function techHandlesCategory(t,catKey){
+  const c=techCategories(t);
+  return c.length===0 || (catKey&&c.includes(catKey));   // untagged tech = handles everything
+}
+/* Which of a store's in-house techs may take THIS ticket. */
+function eligibleTechsFor(t){
+  const techs=MASTER.repairTechnicians||{};
+  return storeTechIds(t.storeId)
+    .filter(id=>techHandlesCategory(techs[id],t.category))
+    .map(id=>[id,techs[id]]);
 }
 const NO_TECH_COLOR="#94a3b8";
 
@@ -1757,9 +1803,10 @@ function ticketRow(t){
   // ----- right side -----
   let right;
   if(isAdmin && t.status==="unassigned"){
-    const sTechId=store(t.storeId).assignedRepairTechnicianId;
-    const sTech=(MASTER.repairTechnicians||{})[sTechId];
-    const techOpt=sTech?`<option value="tech:${sTechId}">🔧 ${esc(sTech.name)}</option>`:'<option disabled>None assigned to this store</option>';
+    const sTechs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,v])=>v);
+    const techOpt=sTechs.length
+      ? sTechs.map(([id,v])=>`<option value="tech:${id}">🔧 ${esc(v.name)}</option>`).join("")
+      : '<option disabled>None assigned to this store</option>';
     // Same 3-tier order as the detail panel: store tech, then category-matched
     // vendors, then the rest.
     const {match,rest}=vendorGroupsFor(t);
@@ -1850,10 +1897,10 @@ function ticketRow(t){
     // Coach/director only: one-tap dispatch of an unassigned job to the store's tech.
     let reqBtn="";
     if((SESSION.role==="coach"||SESSION.role==="director") && t.status==="unassigned"){
-      const sTid=store(t.storeId).assignedRepairTechnicianId, sTech=(MASTER.repairTechnicians||{})[sTid];
-      if(sTech){
-        const first=esc((sTech.name||"").trim().split(/\s+/)[0]||sTech.name);
-        reqBtn=`<button class="btn btn-primary btn-sm" title="Requests ${esc(sTech.name)}" onclick="dispatchToStoreTech('${t._id}','${sTid}')">🔧 Request In-House Tech</button>`;
+      const elig=eligibleTechsFor(t);
+      if(elig.length){
+        const tip=elig.length===1?`Requests ${esc(elig[0][1].name)}`:`${elig.length} techs cover this store`;
+        reqBtn=`<button class="btn btn-primary btn-sm" title="${tip}" onclick="requestInHouse('${t._id}')">🔧 Request In-House Tech</button>`;
       }
     }
     below=`<div class="row-bar" onclick="event.stopPropagation()">
@@ -2090,6 +2137,28 @@ function askDispatchToTech(id,sid){
       <button class="btn btn-primary" style="flex:1" id="reqTechBtn" onclick="dispatchToStoreTech('${id}','${techId}')">Yes, request ${first}</button>
     </div>`);
 }
+/* One eligible tech -> dispatch straight through. Two or more -> let them
+   choose, since only a human knows which specialist the job really needs. */
+function requestInHouse(id){
+  const t=TICKETS[id]; if(!t)return;
+  const elig=eligibleTechsFor(t);
+  if(!elig.length){toast("No in-house tech covers this category","err");return}
+  if(elig.length===1){dispatchToStoreTech(id,elig[0][0]);return}
+  const catLabel=ALL_CATEGORIES[t.category]||"this job";
+  modal(`<div class="sheet-head"><h2>Which technician?</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body">
+      <p style="margin:0 0 12px;color:var(--ink-mid);font-size:14px">${esc(storeName(t.storeId))} has more than one in-house tech. Who should take this <b>${esc(catLabel)}</b> job?</p>
+      <div style="display:flex;flex-direction:column;gap:9px">
+        ${elig.map(([tid,tech])=>{
+          const cats=techCategories(tech);
+          const spec=cats.length?cats.map(k=>ALL_CATEGORIES[k]||k).join(" · "):"General — handles everything";
+          return `<button class="btn btn-ghost btn-block tech-pick" onclick="dispatchToStoreTech('${id}','${tid}')">
+            <span class="tp-dot" style="background:${techColorFor(tid)}"></span>
+            <span class="tp-body"><b>${esc(tech.name)}</b><span>${esc(spec)}</span></span></button>`;}).join("")}
+      </div>
+    </div>
+    <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="closeModal()">Cancel</button></div>`);
+}
 async function dispatchToStoreTech(id,techId){
   const tech=(MASTER.repairTechnicians||{})[techId];
   if(!tech){toast("That tech no longer exists — left unassigned","err");closeModal();return}
@@ -2255,11 +2324,15 @@ function ticketControls(t){
     // Coach / director: one-tap dispatch to THIS store's in-house tech (their
     // only assignment option — no vendor roster; that's overwatch's job).
     if((role==="coach"||role==="director") && t.status==="unassigned"){
-      const sTech=(MASTER.repairTechnicians||{})[store(t.storeId).assignedRepairTechnicianId];
-      if(sTech){
-        const first=esc((sTech.name||"").trim().split(/\s+/)[0]||sTech.name);
-        h+=`<button class="btn btn-primary btn-block" onclick="dispatchToStoreTech('${t._id}','${store(t.storeId).assignedRepairTechnicianId}')">🔧 Request In-House Tech</button>
-        <div style="font-size:11px;color:var(--ink-dim);margin:-4px 0 4px">Dispatches to ${esc(sTech.name)}, the in-house tech for this store.</div>`;
+      // Only offer the button when at least one of the store's in-house techs
+      // covers this ticket's category. If none do, Overwatch routes it.
+      const elig=eligibleTechsFor(t);
+      if(elig.length){
+        const sub=elig.length===1
+          ? `Dispatches to ${esc(elig[0][1].name)}, the in-house tech for this store.`
+          : `${elig.length} in-house techs cover this store — you'll pick one.`;
+        h+=`<button class="btn btn-primary btn-block" onclick="requestInHouse('${t._id}')">🔧 Request In-House Tech</button>
+        <div style="font-size:11px;color:var(--ink-dim);margin:-4px 0 4px">${sub}</div>`;
       }
     }
     if(t.status!=="in_progress" && t.status!=="finished")
@@ -2280,8 +2353,8 @@ function statusGrid(t,targets){
 function assignControls(t){
   // Order of preference: (1) the in-house tech for THIS store, (2) vendors who
   // cover the ticket's category, (3) every other vendor at the bottom.
-  const storeTechId=store(t.storeId).assignedRepairTechnicianId;
-  const techIds=[...new Set([storeTechId,t.assignedTechId].filter(Boolean))];
+  // Every in-house tech on this store (plus whoever is already on the ticket).
+  const techIds=[...new Set([...storeTechIds(t.storeId),t.assignedTechId].filter(Boolean))];
   const techs=techIds.map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,v])=>v);
   const techOpts=techs.map(([id,v])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(v.name)}</option>`).join("");
 
@@ -2809,7 +2882,7 @@ function renderOverwatchMap(){
 
   const mapped=[],unmapped=[];
   ids.forEach(sid=>{
-    const c=storeCoords(sid), tid=store(sid).assignedRepairTechnicianId;
+    const c=storeCoords(sid), tid=storeTechIds(sid)[0]||"";
     const z=zones[tid]||null;
     const rec={sid,open:openCount(sid),color:z?z.color:NO_TECH_COLOR,techName:z?z.name:"No tech assigned",tid:tid||""};
     (c?mapped:unmapped).push(c?{...rec,...c}:rec);
