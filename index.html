@@ -535,7 +535,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "3.1";
+const APP_VERSION = "3.2";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -578,6 +578,20 @@ const PAYMI_FS="https://firestore.googleapis.com/v1/projects/gen-lang-client-035
 let PAYMI_COUNT=null;   // null = unknown/not fetched; number once known
 let PAYMI_COMMENTS=null; // unread finance/discussion comments for this person
 
+/* Which PayMi ids this RM session answers to. Coaches/directors: their
+   directory id (chains embed it). Rahim + ITSupport sign PayMi's Rate
+   Verification step, but they log into THIS app as admins — map by email. */
+function paymiIdsFor(sess){
+  if(!sess)return[];
+  if(sess.role==="coach"||sess.role==="director")return sess.refId?[sess.refId]:[];
+  if(sess.role==="admin"){
+    const e=(sess.email||"").toLowerCase();
+    if(e==="rahim@dossaniparadise.com")return["rate:rahim"];
+    if(e==="itsupport@dossaniparadise.com")return["rate:it","admin:itsupport@dossaniparadise.com"];
+  }
+  return[];
+}
+
 /* Firestore REST returns typed JSON ({stringValue:..},{arrayValue:{values:[..]}}).
    Decode just enough of it into plain JS. */
 function fsVal(v){
@@ -593,7 +607,8 @@ function fsVal(v){
   return null;
 }
 
-function paymiCountFor(refId,docs){
+function paymiCountFor(myIds,docs){
+  const ids=Array.isArray(myIds)?myIds:[myIds];
   let n=0;
   docs.forEach(d=>{
     const f=d.fields||{};
@@ -601,33 +616,37 @@ function paymiCountFor(refId,docs){
     const hit=chains.some(c=>{
       if(!c||c.status!=="PENDING")return false;
       const step=(c.steps||[]).find(st=>st&&st.role===c.currentStage);
-      return !!step&&(step.userIds||[]).includes(refId);
+      return !!step&&(step.userIds||[]).some(u=>ids.includes(u));
     });
     if(hit)n++;
   });
   return n;
 }
 
-function paymiCommentsFor(refId,docs){
+function paymiCommentsFor(myIds,docs){
+  const ids=Array.isArray(myIds)?myIds:[myIds];
   let n=0;
   docs.forEach(d=>{
     const f=d.fields||{};
     const chains=fsVal(f.chains)||[];
     const inAudience=chains.some(c=>c&&(c.status==="PENDING"||c.status==="REJECTED")&&
-      (c.steps||[]).some(st=>st&&(st.userIds||[]).includes(refId)));
+      (c.steps||[]).some(st=>st&&(st.userIds||[]).some(u=>ids.includes(u))));
     if(!inAudience)return;
-    const readAt=(fsVal(f.commentReads)||{})[refId]||0;
+    const reads=fsVal(f.commentReads)||{};
+    // Mark-read from ANY of my identities counts.
+    const readAt=Math.max(0,...ids.map(id=>reads[id]||0));
     const log=fsVal(f.commentLog)||[];
-    n+=log.filter(e=>e&&e.by!==refId&&(e.ts||0)>readAt).length;
+    n+=log.filter(e=>e&&!ids.includes(e.by)&&(e.ts||0)>readAt).length;
   });
   return n;
 }
 
 async function refreshPaymiCount(){
   try{
-    if(!SESSION||!SESSION.refId||(SESSION.role!=="coach"&&SESSION.role!=="director")){
+    const myIds=paymiIdsFor(SESSION);
+    if(!myIds.length){
       PAYMI_COUNT=null;
-      if(SESSION)console.log("[PayMi] skipped — role "+SESSION.role+" doesn't get invoice notices");
+      if(SESSION)console.log("[PayMi] skipped — this account has no PayMi approver identity");
       return;
     }
     const res=await fetch(PAYMI_FS);
@@ -640,17 +659,16 @@ async function refreshPaymiCount(){
     const data=await res.json();
     const prevC=PAYMI_COUNT, prevM=PAYMI_COMMENTS;
     const docs=data.documents||[];
-    PAYMI_COUNT=paymiCountFor(SESSION.refId,docs);
-    PAYMI_COMMENTS=paymiCommentsFor(SESSION.refId,docs);
+    PAYMI_COUNT=paymiCountFor(myIds,docs);
+    PAYMI_COMMENTS=paymiCommentsFor(myIds,docs);
     const withLog=docs.filter(d=>d.fields&&d.fields.commentLog).length;
     console.log("[PayMi] "+docs.length+" invoices in DB · pending on me: "+PAYMI_COUNT+
       " · unread comments: "+PAYMI_COMMENTS+" · docs with commentLog: "+withLog+
-      " · me="+SESSION.refId+
+      " · me="+myIds.join("|")+
       (docs.length&&!withLog?"  (0 commentLog docs = comments predate PayMi v2.5, or PayMi deploy is old — fresh comments will count)":""));
     // Re-render only when a number changed, so the banner appears without
     // stomping on anything mid-interaction.
-    if((PAYMI_COUNT!==prevC||PAYMI_COMMENTS!==prevM)&&
-       (SESSION.role==="coach"||SESSION.role==="director"))render();
+    if(PAYMI_COUNT!==prevC||PAYMI_COMMENTS!==prevM)render();
   }catch(e){
     PAYMI_COUNT=null;PAYMI_COMMENTS=null;
     console.warn("[PayMi] check crashed: "+(e&&e.message||e));
@@ -1041,7 +1059,8 @@ function resolveSession(email,pw){
   if(ADMIN_EMAILS.includes(lc)||Object.keys(admins).some(id=>me(admins,id))){
     if(pw!==ROLE_PASSWORDS.admin)return{error:"That password doesn't match the admin role."};
     const a=Object.values(admins).find(x=>(x.email||"").toLowerCase()===lc);
-    return{email:lc,role:"admin",name:a?.name||"Administrator",scope:"all"};
+    const knownName={"rahim@dossaniparadise.com":"Rahim Virani"}[lc];
+    return{email:lc,role:"admin",name:a?.name||knownName||"Administrator",scope:"all"};
   }
   const dirs=MASTER.directors||{}, dId=Object.keys(dirs).find(id=>me(dirs,id));
   if(dId){if(pw!==ROLE_PASSWORDS.director)return{error:"That password doesn't match the director role."};
@@ -1247,7 +1266,7 @@ function render(){
     v.innerHTML = (coachScreen==="hub") ? renderCoachHub() : renderCoachStore(coachScreen);
     applyTags();return;
   }
-  v.innerHTML=renderBoard();
+  v.innerHTML=(SESSION.role==="admin"?paymiBanner():"")+renderBoard();
   applyTags();
 }
 /* Typing in a search box re-renders the view, which replaces the <input> node
