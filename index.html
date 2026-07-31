@@ -346,6 +346,12 @@ body.no-reftags .reftag{display:none}
 .ow-dot:hover circle{stroke:var(--ink);stroke-width:2.2}
 .v-notes{font-size:12px;color:var(--ink-mid);margin-top:5px;white-space:pre-wrap;
   background:var(--panel-2);border-left:3px solid var(--line);border-radius:5px;padding:6px 9px}
+.ow-leaflet{display:none;width:100%;height:460px;border-radius:14px 14px 0 0;z-index:1}
+.zm-wrap{background:none;border:none}
+.zm-pin{border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:grid;place-items:center;cursor:pointer}
+.zm-pin.on span{color:#fff;font-weight:800;font-size:12px;text-shadow:0 1px 2px rgba(0,0,0,.45)}
+.leaflet-container{font:inherit}
+@media(max-width:600px){.ow-leaflet{height:380px}}
 .ow-map-wrap{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel-2)}
 .ow-map{display:block;width:100%;height:auto}
 .ow-dot{cursor:pointer}
@@ -383,6 +389,8 @@ body.no-reftags .reftag{display:none}
 .imp-meta{font-size:11px;color:var(--ink-dim);margin-top:5px}
 .imp-note{font-size:12px;color:var(--ink-mid);margin-top:6px;background:var(--panel-2);border-left:3px solid var(--line);border-radius:5px;padding:6px 9px}
 .imp-ok{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:rgba(22,163,74,.14);color:var(--green,#16a34a);border-radius:99px;padding:3px 8px}
+.imp-extra{background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-top:12px;font-size:11.5px;color:var(--ink-mid);display:flex;flex-wrap:wrap;gap:4px 12px}
+.imp-extra b{width:100%;color:var(--ink);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
 .imp-step-head{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
 .imp-done{text-align:center;padding:26px 16px}
 .imp-done-ic{font-size:42px;color:var(--green,#16a34a)}
@@ -400,12 +408,20 @@ body.no-reftags .reftag{display:none}
 .ce-subs{border-top:1px solid var(--line);padding:10px 10px 10px 34px;background:var(--panel-2)}
 .ce-sub{display:flex;gap:7px;align-items:center;margin-bottom:6px}
 .ce-none{font-size:12px;color:var(--ink-dim);margin-bottom:8px}
+.vd-row{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+.vd-row .vd-name{flex:1;font-size:13.5px}
+.vd-row select{width:130px}
 .cat-row{display:flex;gap:8px;align-items:center;margin-bottom:7px}
 .cat-row .cat-label{flex:1}
 .tech-pick{display:flex;align-items:center;gap:11px;text-align:left;padding:12px 13px}
 .tech-pick .tp-dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 1px rgba(0,0,0,.12)}
 .tech-pick .tp-body{display:flex;flex-direction:column;gap:2px;min-width:0}
 .tech-pick .tp-body span{font-size:12px;color:var(--ink-dim);font-weight:400}
+.vcat-block{border:1px solid var(--line);border-radius:9px;padding:8px 9px;background:var(--panel)}
+.vcat-more{background:none;border:none;color:var(--amber-deep);font-size:11.5px;font-weight:600;cursor:pointer;padding:4px 0 0 26px;display:block}
+.vcat-subs{display:none;padding:6px 0 2px 22px;gap:5px;flex-direction:column}
+.vcat-subs.open{display:flex}
+.cat-chk.sub{padding:6px 9px;font-size:12.5px;min-height:32px}
 .cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:7px}
 .cat-chk{display:flex;align-items:center;gap:7px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-size:13px;cursor:pointer;min-height:40px}
 .cat-chk:hover{border-color:var(--amber)}
@@ -623,7 +639,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "4.4";
+const APP_VERSION = "4.7";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -735,9 +751,13 @@ const CAT_PREFIX = {
 /* Does this vendor cover a given category key? Uses the new multi-select array
    when present; falls back to a loose text match for vendors still carrying the
    old free-text specialty so they still sort sensibly. */
-function vendorMatchesCategory(v,catKey){
+function vendorMatchesCategory(v,catKey,subKey){
   if(!catKey)return false;
-  if(Array.isArray(v.categories)&&v.categories.length) return v.categories.includes(catKey);
+  if(Array.isArray(v.categories)&&v.categories.length){
+    if(v.categories.includes(catKey))return true;            // covers the whole category
+    if(subKey&&v.categories.includes(subKey))return true;    // covers this specific item
+    return false;
+  }
   const label=(ALL_CATEGORIES[catKey]||"").toLowerCase();
   const txt=(v.category||"").toLowerCase();
   return !!(label&&txt&&txt.includes(label));
@@ -747,14 +767,14 @@ function vendorMatchesCategory(v,catKey){
    never HIDE a vendor — we only push the less likely ones to the bottom. */
 function vendorGroupsFor(t){
   const all=Object.entries(VENDORS).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
-  const match=all.filter(([,v])=>vendorMatchesCategory(v,t.category));
-  const rest =all.filter(([,v])=>!vendorMatchesCategory(v,t.category));
+  const match=all.filter(([,v])=>vendorMatchesCategory(v,t.category,t.subcategory));
+  const rest =all.filter(([,v])=>!vendorMatchesCategory(v,t.category,t.subcategory));
   return {match,rest};
 }
 /* Label for a vendor's categories: new multi-select array, else legacy text. */
 function vendorCatLabel(v){
   if(Array.isArray(v.categories)&&v.categories.length)
-    return v.categories.map(k=>ALL_CATEGORIES[k]||k).join(" · ");
+    return v.categories.map(k=>ALL_CATEGORIES[k]||subLabel(k)||k).join(" · ");
   return v.category||"";
 }
 const PRIORITIES = {normal:"Normal",urgent:"Urgent",emergency:"Emergency"};
@@ -894,7 +914,20 @@ let openGroups={};          // storeId -> bool (expanded)
 let managerScreen="hub";
 let coachScreen="hub";   // "hub" (store tiles) or a storeId (drilled into one store)
 /* Overwatch-only 3-way home view: minimalist map (default) | ticket list | store tiles. */
-let owView="map";
+/* Every role now gets the same three views. The default per role is a shared
+   setting (admins/viewDefaults) that Overwatch can change; these are the
+   fallbacks. Tech deliberately defaults to LIST because their list is already
+   sorted by priority then distance. */
+const DEFAULT_VIEW_BY_ROLE={admin:"map",tech:"list",director:"tiles",coach:"tiles",manager:"tiles"};
+let VIEW_DEFAULTS={...DEFAULT_VIEW_BY_ROLE};
+let owView=null;                 // resolved on entry from the role default
+function loadViewDefaults(){
+  const st=(MASTER.admins||{}).viewDefaults;
+  VIEW_DEFAULTS={...DEFAULT_VIEW_BY_ROLE};
+  if(st&&typeof st==="object")
+    Object.entries(st).forEach(([k,v])=>{if(["map","list","tiles"].includes(v))VIEW_DEFAULTS[k]=v});
+}
+function defaultViewFor(role){return VIEW_DEFAULTS[role]||DEFAULT_VIEW_BY_ROLE[role]||"list"}
 let pollTimer=null;
 /* ---- lazy closed-ticket cache (v2.7.6) ----------------------------------
    The API no longer sends closed tickets by default (they were ~72% of the
@@ -979,6 +1012,7 @@ async function refresh(){
     if(a.email&&a.replyNumber)REPLY_NUMBERS[a.email.toLowerCase()]=a.replyNumber;
   });
   loadCategories();
+  loadViewDefaults();
   checkAppVersion();
 }
 /* ---- single source of truth for the APP CODE itself ----
@@ -1313,7 +1347,7 @@ function startViewAs(kind,id){
   if(!sim){toast("Couldn't load that view","err");return}
   if(!REAL_SESSION)REAL_SESSION=SESSION;       // remember the real admin session once
   SESSION=sim;
-  managerScreen="hub"; coachScreen="hub";
+  managerScreen="hub"; coachScreen="hub"; owView=null;
   openGroups={}; myStoreIds().forEach(s=>openGroups[s]=true);
   document.body.classList.add("simulating");
   enterAppChrome();
@@ -1325,7 +1359,7 @@ function returnToMyAccount(){
   SESSION=REAL_SESSION; REAL_SESSION=null;
   document.body.classList.remove("simulating");
   const b=$("simBanner"); if(b)b.remove();
-  managerScreen="hub"; coachScreen="hub";
+  managerScreen="hub"; coachScreen="hub"; owView=null;
   openGroups={}; myStoreIds().forEach(s=>openGroups[s]=true);
   enterAppChrome();
   render();
@@ -1487,7 +1521,7 @@ function enterApp(){
   enterAppChrome();
   if(SESSION.role==="tech" && (curFilter==="active"||curFilter==="all")) curFilter="dispatched";
   if(SESSION.role==="tech") requestTechLocation();
-  managerScreen="hub"; coachScreen="hub";
+  managerScreen="hub"; coachScreen="hub"; owView=null;
   myStoreIds().forEach(id=>openGroups[id]=true);
   render();
   startPoll();
@@ -1527,23 +1561,19 @@ async function manualRefresh(){const b=$("refreshBtn");b.style.transform="rotate
 /* ============================================================ RENDER ROOT */
 function render(){
   const v=$("mainView");
-  if(SESSION.role==="manager"&&managerScreen==="hub"){v.innerHTML=renderManagerHub();applyTags();return}
-  if(SESSION.role==="coach"||SESSION.role==="director"){
-    v.innerHTML = (coachScreen==="hub") ? renderCoachHub() : renderCoachStore(coachScreen);
-    applyTags();return;
-  }
-  if(SESSION.role==="admin"){
-    let body;
-    if(owView==="map")        body=renderOverwatchMap();
-    else if(owView==="tiles") body=(coachScreen==="hub")?renderCoachHub():renderCoachStore(coachScreen);
-    else                      body=renderBoard();
-    v.innerHTML=paymiBanner()+owToggle()+body;
-    applyTags();return;
-  }
-  v.innerHTML=renderBoard();
+  const role=SESSION.role;
+  if(owView===null)owView=defaultViewFor(role);
+  // Managers are single-store; map/tiles add nothing, so they keep their hub.
+  if(role==="manager"&&managerScreen==="hub"){v.innerHTML=renderManagerHub();applyTags();return}
+  let body;
+  if(owView==="map")        body=renderZoneMap();
+  else if(owView==="tiles") body=(coachScreen==="hub")?renderCoachHub():renderCoachStore(coachScreen);
+  else                      body=renderBoard();
+  v.innerHTML=(role==="admin"?paymiBanner():"")+owToggle()+body;
   applyTags();
+  if(owView==="map")setTimeout(initZoneMap,0);
 }
-/* Overwatch-only view switcher. Other roles never see this. */
+/* View switcher — available to every role. */
 function owToggle(){
   const b=(k,label,ico)=>`<button class="ow-tab${owView===k?" on":""}" onclick="setOwView('${k}')">${ico} ${label}</button>`;
   return `<div class="ow-toggle">${b("map","Map","🗺")}${b("list","List","☰")}${b("tiles","Tiles","▦")}</div>`;
@@ -2300,6 +2330,29 @@ function requestInHouse(id){
     </div>
     <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="closeModal()">Cancel</button></div>`);
 }
+/* Director assign — same integrity rules as Overwatch. */
+async function doDirectorAssign(id){
+  const val=($("doAssign")||{}).value||"";
+  if(!val){toast("Pick someone first","err");return}
+  let patch,note;
+  if(val.startsWith("tech:")){
+    const tid=val.slice(5), x=(MASTER.repairTechnicians||{})[tid];
+    if(!x){toast("That tech no longer exists","err");return}
+    patch={assignedTechId:tid,assignedVendorId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
+  }else{
+    const vid=val.slice(7), v=VENDORS[vid];
+    if(!v){toast("That vendor no longer exists","err");return}
+    patch={assignedVendorId:vid,assignedTechId:null,status:"assigned"};note="🏢 "+v.name;
+  }
+  if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status}))
+    toast((patch.status==="dispatched"?"Dispatched · ":"Assigned · ")+note);
+}
+/* DM asks for an outside vendor: stays unassigned so Overwatch chooses who. */
+async function requestThirdParty(id){
+  if(await patchTicket(id,{status:"unassigned",assignedTechId:null,assignedVendorId:null},
+      {action:"status",toStatus:"unassigned",note:"Third-party tech requested by "+SESSION.name}))
+    {toast("Flagged for Overwatch");openTicket(id)}
+}
 async function dispatchToStoreTech(id,techId){
   const tech=(MASTER.repairTechnicians||{})[techId];
   if(!tech){toast("That tech no longer exists — left unassigned","err");closeModal();return}
@@ -2465,15 +2518,34 @@ function ticketControls(t){
     // Coach / director: one-tap dispatch to THIS store's in-house tech (their
     // only assignment option — no vendor roster; that's overwatch's job).
     if((role==="coach"||role==="director") && t.status==="unassigned"){
-      // Only offer the button when at least one of the store's in-house techs
-      // covers this ticket's category. If none do, Overwatch routes it.
       const elig=eligibleTechsFor(t);
-      if(elig.length){
+      if(role==="director"){
+        // Directors route like Overwatch: in-house tech for the store first,
+        // then vendors covering this category, then everyone else.
+        const {match,rest}=vendorGroupsFor(t);
+        const vOpt=([id,v])=>`<option value="vendor:${id}">🏢 ${esc(v.name)}</option>`;
+        const catLabel=ALL_CATEGORIES[t.category]||"this category";
+        h+=`<div class="field"><label class="label">Assign to</label>
+          <select class="input" id="doAssign">
+            <option value="">— choose —</option>
+            ${elig.length?`<optgroup label="In-house tech for this store">${elig.map(([id,x])=>`<option value="tech:${id}">🔧 ${esc(x.name)}</option>`).join("")}</optgroup>`:""}
+            ${match.length?`<optgroup label="Vendors — ${esc(catLabel)}">${match.map(vOpt).join("")}</optgroup>`:""}
+            ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
+          </select></div>
+          <button class="btn btn-primary btn-block" style="margin-top:9px" onclick="doDirectorAssign('${t._id}')">Assign</button>`;
+      }else if(elig.length){
+        // DMs may only request their own in-house tech.
         const sub=elig.length===1
           ? `Dispatches to ${esc(elig[0][1].name)}, the in-house tech for this store.`
           : `${elig.length} in-house techs cover this store — you'll pick one.`;
         h+=`<button class="btn btn-primary btn-block" onclick="requestInHouse('${t._id}')">🔧 Request In-House Tech</button>
         <div style="font-size:11px;color:var(--ink-dim);margin:-4px 0 4px">${sub}</div>`;
+      }
+      if(role==="coach"){
+        // ...or flag that it needs an outside vendor, which leaves routing to
+        // Overwatch rather than giving DMs the vendor list.
+        h+=`<button class="btn btn-ghost btn-block" onclick="requestThirdParty('${t._id}')">🏢 Request third-party tech</button>
+        <div style="font-size:11px;color:var(--ink-dim);margin:-4px 0 4px">Stays unassigned and flags Overwatch to pick the vendor.</div>`;
       }
     }
     if(t.status!=="in_progress" && t.status!=="finished")
@@ -2778,9 +2850,17 @@ function openEdit(id){
     if(lbl)eList.push({key:t.category,label:lbl+" (retired)",subs:[]});
   }
   const catOpts=eList.map(c=>`<option value="${c.key}"${t.category===c.key?" selected":""}>${esc(c.label)}</option>`).join("");
+  const priOpts=Object.entries(PRIORITIES).map(([k,v])=>`<option value="${k}"${t.priority===k?" selected":""}>${esc(v)}</option>`).join("");
+  // Overwatch can move a misfiled ticket to the correct store; other roles can't
+  // (their tickets are scoped to stores in their own purview).
+  const canMoveStore = SESSION.role==="admin";
+  const storeOpts = canMoveStore
+    ? Object.keys(RESTAURANTS).slice().sort((a,b)=>storeName(a).localeCompare(storeName(b)))
+        .map(rid=>`<option value="${rid}"${t.storeId===rid?" selected":""}>${esc(storeName(rid))}</option>`).join("")
+    : "";
   modal(`<div class="sheet-head"><h2>Edit ticket</h2><button class="x-btn" onclick="openTicket('${id}')">✕</button></div>
     <div class="sheet-body">
-      ${canMoveStore?`<div class="field"><label class="label">Store</label><select class="input" id="eStore">${storeOpts}</select></div>`:""}
+      ${canMoveStore?`<div class="field"><label class="label">Store</label><select class="input" id="eStore" onchange="openEdit(EDIT_ID)">${storeOpts}</select></div>`:""}
       <div style="display:flex;gap:12px${canMoveStore?";margin-top:14px":""}">
         <div class="field" style="flex:1"><label class="label">Category</label><select class="input" id="eCat" onchange="syncEditSubs()">${catOpts}</select></div>
         <div class="field" style="flex:1"><label class="label">Priority</label><select class="input" id="ePri">${priOpts}</select></div></div>
@@ -3042,9 +3122,16 @@ function owBubble(x,y,r,cols,open){
          `<g clip-path="url(#${id})">${bands}</g>`+
          `<circle cx="${x}" cy="${y}" r="${r}" fill="none" stroke="#fff" stroke-width="${stroke}"/>`;
 }
-function renderOverwatchMap(){
+function renderZoneMap(){
   const zones=techZones();
-  const ids=Object.keys(RESTAURANTS);
+  // Overwatch sees every store; everyone else only their own scope. Techs see
+  // the stores they actually have work at.
+  let ids;
+  if(SESSION.role==="admin") ids=Object.keys(RESTAURANTS);
+  else if(SESSION.role==="tech")
+    ids=[...new Set(Object.values(TICKETS).filter(t=>t.assignedTechId===SESSION.refId
+        &&TECH_VISIBLE_STATUSES.includes(t.status)).map(t=>t.storeId))];
+  else ids=myStoreIds();
   const openCount=sid=>ticketsForStore(sid).filter(t=>ACTIVE_STATUSES.includes(t.status)).length;
 
   const mapped=[],unmapped=[];
@@ -3101,6 +3188,7 @@ function renderOverwatchMap(){
         ${owBubble(x,y,r,p.cols,active)}
         ${badge}
       </g>`;}).join("");
+    ZONEMAP_PTS=mapped.map(p=>({sid:p.sid,lat:p.lat,lng:p.lng,open:p.open,cols:p.cols,techName:p.techName}));
     svg=`<svg viewBox="0 0 ${W} ${H}" class="ow-map" preserveAspectRatio="xMidYMid meet">
       <rect x="0" y="0" width="${W}" height="${H}" fill="var(--panel-2)"/>${dots}</svg>`;
   }
@@ -3116,12 +3204,72 @@ function renderOverwatchMap(){
       <div class="page-title">Open tickets by zone</div>
       <div class="page-meta">${totalOpen} open across ${ids.length} stores · ${techCount} in-house tech${techCount===1?"":"s"}</div>
     </div></div>
-    <div class="ow-map-wrap">${svg}
+    <div class="ow-map-wrap">
+      <div id="owLeaflet" class="ow-leaflet"></div>
+      <div class="ow-svgfallback">${svg}</div>
       <div class="ow-tip" id="owTip"></div>
       <div class="ow-legend">${legend}</div>
     </div>
     ${unmappedBlock}`;
 }
+
+
+/* ---- real map tiles ---------------------------------------------------------
+   The SVG scatter is kept as a fallback (and is what renders if the tile layer
+   can't load), but when Leaflet is available we draw the same bubbles over an
+   actual basemap so you get terrain shading, highways and city names for
+   context. Tiles are pulled on demand — never on a normal page load. */
+let ZONEMAP_PTS=[], ZONEMAP=null;
+function ensureLeaflet(){
+  if(window.L&&window.L.map)return Promise.resolve(true);
+  return new Promise(res=>{
+    const css=document.createElement("link");
+    css.rel="stylesheet";css.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(css);
+    const sc=document.createElement("script");
+    sc.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    sc.onload=()=>res(!!(window.L&&window.L.map));
+    sc.onerror=()=>res(false);
+    document.head.appendChild(sc);
+  });
+}
+/* Bubble as an HTML marker so it matches the SVG look: split colour bands for
+   shared stores, count badge, faded dot when nothing is open. */
+function zoneMarkerHtml(p){
+  const active=p.open>0, size=active?28:12;
+  const bands=p.cols.length<=1
+    ? `background:${p.cols[0]||NO_TECH_COLOR}`
+    : `background:linear-gradient(90deg,${p.cols.map((c,i)=>{
+        const a=(i*100/p.cols.length).toFixed(2),b=((i+1)*100/p.cols.length).toFixed(2);
+        return `${c} ${a}%,${c} ${b}%`}).join(",")})`;
+  return `<div class="zm-pin${active?" on":""}" style="width:${size}px;height:${size}px;${bands};opacity:${active?0.95:0.5}">${
+    active?`<span>${p.open}</span>`:""}</div>`;
+}
+async function initZoneMap(){
+  const host=$("owLeaflet");
+  if(!host||!ZONEMAP_PTS.length)return;
+  if(!await ensureLeaflet())return;           // SVG fallback stays visible
+  document.querySelectorAll(".ow-svgfallback").forEach(e=>e.style.display="none");
+  host.style.display="block";
+  if(ZONEMAP){try{ZONEMAP.remove()}catch(e){}ZONEMAP=null}
+  ZONEMAP=L.map(host,{zoomControl:true,attributionControl:true,scrollWheelZoom:false});
+  // Voyager: subtle terrain + highway and city labels without the clutter of a
+  // full street map at low zoom.
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    {maxZoom:19,subdomains:"abcd",attribution:"© OpenStreetMap © CARTO"}).addTo(ZONEMAP);
+  const bounds=[];
+  ZONEMAP_PTS.forEach(p=>{
+    const size=p.open>0?28:12;
+    const m=L.marker([p.lat,p.lng],{icon:L.divIcon({className:"zm-wrap",html:zoneMarkerHtml(p),
+      iconSize:[size,size],iconAnchor:[size/2,size/2]}),riseOnHover:true}).addTo(ZONEMAP);
+    m.bindTooltip(`${storeName(p.sid)} — ${p.open} open · ${p.techName}`,{direction:"top",offset:[0,-10]});
+    m.on("click",()=>owFocusStore(p.sid));
+    bounds.push([p.lat,p.lng]);
+  });
+  if(bounds.length) ZONEMAP.fitBounds(bounds,{padding:[36,36],maxZoom:11});
+  setTimeout(()=>{try{ZONEMAP.invalidateSize()}catch(e){}},120);
+}
+
 // Tap a store on the map -> its ticket list, filtered to that store.
 function owFocusStore(sid){owView="list";curStore=sid;curFilter="active";render();}
 /* Hover card. The old SVG <title> was the browser's native tooltip: ~1s delay
@@ -3296,6 +3444,7 @@ async function handleImportFile(input){
       grid=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:""});
     }
     buildImportPreview(grid);
+    startImportReview();   // straight into one-at-a-time review, no list wall
   }catch(e){ out.innerHTML=`<div class="imp-err">Could not read that file: ${esc(e.message||"unknown error")}</div>`; }
 }
 
@@ -3334,6 +3483,35 @@ function impResolveCat(owlCat,asset,sid){
   const oc=norm(owlCat);
   const hit=tree.find(c=>norm(c.label)===oc)||tree.find(c=>oc&&norm(c.label).includes(oc));
   return hit?{cat:hit.key,sub:"",how:"category"}:{cat:"",sub:"",how:""};
+}
+/* Resolve an OwlOps assignee name against the live directory. Checks in-house
+   techs first, then vendors. Tolerant of case, punctuation, nicknames in quotes
+   and middle names; falls back to a first+last match so "Ray Wickware" still
+   finds "Ravay 'Ray' Wickware". Returns null when there is no confident match —
+   never guesses. */
+function impNorm(x){return String(x||"").toLowerCase().replace(/['"()]/g,"").replace(/[^a-z0-9]+/g," ").trim()}
+function impMatchPerson(name){
+  const n=impNorm(name);
+  if(!n||n.length<3)return null;
+  // a store name in the Assign column is not a person
+  if(/^bk\s*\d/.test(n))return null;
+  const techs=Object.entries(MASTER.repairTechnicians||{}).map(([id,t])=>({kind:"tech",id,name:t.name||""}));
+  const vends=Object.entries(VENDORS).map(([id,v])=>({kind:"vendor",id,name:v.name||""}));
+  const all=[...techs,...vends];
+  let hit=all.find(p=>impNorm(p.name)===n);
+  if(hit)return hit;
+  const parts=n.split(" ").filter(Boolean);
+  const first=parts[0], last=parts[parts.length-1];
+  if(parts.length>=2){
+    hit=all.find(p=>{const q=impNorm(p.name).split(" ").filter(Boolean);
+      return q.length>=2 && q[0]===first && q[q.length-1]===last;});
+    if(hit)return hit;
+    // nickname case: last name matches and the first name appears anywhere
+    hit=all.find(p=>{const q=impNorm(p.name).split(" ").filter(Boolean);
+      return q[q.length-1]===last && q.includes(first);});
+    if(hit)return hit;
+  }
+  return null;
 }
 function impMatchStore(dept){
   const num=impDigits((String(dept||"").match(/BK\s*0*(\d{3,6})/i)||[])[1]||"");
@@ -3388,17 +3566,29 @@ function buildImportPreview(grid){
       if(near)sibling="#"+near.ref;
     }
     const res=impResolveCat(category,asset,m.sid);
+    const who=impMatchPerson(String(G(r,"Assign")||""));
     IMP.rows.push({
       ref, dept:String(G(r,"Department")||""), sid:m.sid, matchHow:m.how,
+      assignRaw:String(G(r,"Assign")||"").trim(),
+      // Everything else OwlOps gives us, kept verbatim so nothing is lost.
+      owlRegion:String(G(r,"Region")||"").trim(),
+      owlSubregion:String(G(r,"Subregion")||"").trim(),
+      owlVendor:String(G(r,"Vendor")||"").replace(/^n\/a$/i,"").trim(),
+      owlTime:String(G(r,"Time Logged")||"").replace(/^0h 0m$/,"").trim(),
+      owlCost:String(G(r,"Cost Logged")||"").replace(/^0$/,"").trim(),
+      owlParts:String(G(r,"Parts")||"").replace(/^0$/,"").trim(),
+      owlCloseDays:String(G(r,"Close Days")||"").replace(/^0$/,"").trim(),
+      owlAssetRaw:String(G(r,"Asset/List")||"").trim(),
       owlCat:category, asset, cat:res.cat, sub:res.sub, catHow:res.how, desc,
       pri:OWL_PRI[String(G(r,"Priority")||"").trim().toLowerCase()]||"normal",
       createdAt:impDate(G(r,"Created"))||now(),
       updatedAt:impDate(G(r,"Last Updated"))||null,
       createdByName:String(G(r,"Created By")||"").trim(),
-      lastNote:String(G(r,"Last Update")||"").trim(),
+      lastNote:(function(v){v=String(v||"").trim();return /^created$/i.test(v)?"":v})(G(r,"Last Update")),
       lastBy:String(G(r,"Last Updated By")||"").trim(),
       closedAt:closeDate, closeNotes:String(G(r,"Close Notes")||"").trim(),
       closedBy:String(G(r,"Closed By")||"").replace(/^n\/a$/i,"").trim(),
+      assignKind:who?who.kind:"", assignId:who?who.id:"", assignName:who?who.name:"",
       dupOf:dup?(dup.shortId||"existing ticket"):null,
       sibling,                       // similar row earlier in this same file
       skip:!!dup                     // only true duplicates are pre-unticked
@@ -3534,6 +3724,11 @@ function renderImportStep(){
     <div class="field" id="isSubWrap" style="margin-top:12px;${subs.length?"":"display:none"}">
       <label class="label">Subcategory</label><select class="input" id="isSub">${subOpts}</select>
       ${r.asset?`<div class="uz-h mono" style="margin-top:4px;color:var(--ink-dim)">OwlOps asset: ${esc(r.asset)}</div>`:""}</div>
+    <div class="field" style="margin-top:12px"><label class="label">Assign to
+      ${r.assignName?`<span style="font-weight:400;color:var(--green,#16a34a)">· matched from "${esc(r.assignRaw)}"</span>`
+        :(r.assignRaw?`<span style="font-weight:400;color:var(--ink-dim)">· OwlOps said "${esc(r.assignRaw)}" — no match in your directory</span>`:"")}</label>
+      <select class="input" id="isWho">${impAssignOpts(r)}</select>
+      <div class="uz-h mono" style="margin-top:4px;color:var(--ink-dim)">Picking someone dispatches the ticket to them.</div></div>
     <div class="field" style="margin-top:12px"><label class="label">Description</label>
       <textarea class="input" id="isDesc" rows="4">${esc(r.desc)}</textarea></div>
     <div style="display:flex;gap:12px;margin-top:12px">
@@ -3542,13 +3737,34 @@ function renderImportStep(){
       <div class="field" style="flex:1"><label class="label">Reported by</label>
         <input class="input" id="isBy" value="${escA(r.createdByName||"")}"></div>
     </div>
-    ${r.lastNote?`<div class="field" style="margin-top:12px"><label class="label">Comment to carry over</label>
-      <textarea class="input" id="isNote" rows="2">${esc(r.lastNote)}</textarea></div>`:""}
+    ${(r.owlRegion||r.owlVendor||r.owlTime||r.owlCost)?`<div class="imp-extra">
+      <b>Also carried over:</b>
+      ${r.owlRegion?`<span>Region: ${esc(r.owlRegion)}</span>`:""}
+      ${r.owlSubregion?`<span>Subregion: ${esc(r.owlSubregion)}</span>`:""}
+      ${r.owlVendor?`<span>Vendor: ${esc(r.owlVendor)}</span>`:""}
+      ${r.owlTime?`<span>Time: ${esc(r.owlTime)}</span>`:""}
+      ${r.owlCost?`<span>Cost: ${esc(r.owlCost)}</span>`:""}
+      ${r.owlParts?`<span>Parts: ${esc(r.owlParts)}</span>`:""}
+    </div>`:""}
+    <div class="field" style="margin-top:12px"><label class="label">Comment
+      <span style="font-weight:400;color:var(--ink-dim)">· OwlOps exports only the most recent note${r.lastNote?"":" — this ticket had none"}</span></label>
+      <textarea class="input" id="isNote" rows="3" placeholder="Add or paste any history worth keeping…">${esc(r.lastNote||"")}</textarea></div>
     <div style="display:flex;gap:9px;margin-top:16px">
       <button class="btn btn-ghost" style="flex:1" onclick="impStepSkip()">Skip</button>
       <button class="btn btn-primary" style="flex:2" id="isSave" onclick="impStepSave()">✓ Import this ticket</button>
     </div>
-    <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="renderImportPreview()">Stop and go back</button>`;
+    <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="renderImportPreview()">Pause · see the whole queue</button>`;
+}
+/* Assignee options, with the auto-matched person pre-selected. */
+function impAssignOpts(r){
+  const sel=(r.assignKind==="tech"?"tech:":r.assignKind==="vendor"?"vendor:":"")+(r.assignId||"");
+  const techs=Object.entries(MASTER.repairTechnicians||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
+  const vends=Object.entries(VENDORS).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
+  return `<option value=""${sel?"":" selected"}>— Unassigned —</option>`
+    +(techs.length?`<optgroup label="In-house techs">`+techs.map(([id,t])=>
+       `<option value="tech:${id}"${sel==="tech:"+id?" selected":""}>🔧 ${esc(t.name)}</option>`).join("")+`</optgroup>`:"")
+    +(vends.length?`<optgroup label="Third-party vendors">`+vends.map(([id,v])=>
+       `<option value="vendor:${id}"${sel==="vendor:"+id?" selected":""}>🏢 ${esc(v.name)}</option>`).join("")+`</optgroup>`:"");
 }
 function impStepStoreChanged(){
   const r=IMP.rows[IMP_Q[IMP_I]];
@@ -3577,9 +3793,17 @@ async function impStepSave(){
   r.desc=$("isDesc").value.trim();
   r.createdByName=$("isBy").value.trim();
   if($("isNote"))r.lastNote=$("isNote").value.trim();
+  r.assignKind=aTech?"tech":aVend?"vendor":"";
+  r.assignId=aTech||aVend||"";
   const d=Date.parse($("isDate").value+"T12:00:00");
   if(!isNaN(d))r.createdAt=d;
 
+  // Assignment: a matched person means the ticket arrives dispatched, not in
+  // the unassigned pool — mirroring how assignment works everywhere else.
+  const whoVal=$("isWho")?$("isWho").value:"";
+  let aTech=null,aVend=null;
+  if(whoVal.startsWith("tech:"))aTech=whoVal.slice(5);
+  else if(whoVal.startsWith("vendor:"))aVend=whoVal.slice(7);
   const id=uid();
   const shortId=nextShortId(r.sid,cat);
   const activity=[{ts:r.createdAt,by:r.createdByName||"OwlOps",role:"manager",action:"created",note:"Imported from OwlOps #"+r.ref}];
@@ -3590,13 +3814,23 @@ async function impStepSave(){
   const t={
     shortId, storeId:r.sid, category:cat, subcategory:sub,
     priority:r.pri, description:r.desc, photos:[],
-    status:r.closedAt?"closed":"unassigned", assignedVendorId:null, assignedTechId:null,
+    status:r.closedAt?"closed":((aTech||aVend)?"dispatched":"unassigned"),
+    assignedVendorId:aVend, assignedTechId:aTech,
     asset:r.asset||"", externalRef:r.ref, externalSource:"owlops",
+    owlops:{region:r.owlRegion,subregion:r.owlSubregion,vendor:r.owlVendor,
+            timeLogged:r.owlTime,costLogged:r.owlCost,parts:r.owlParts,
+            closeDays:r.owlCloseDays,assetRaw:r.owlAssetRaw,
+            assignedTo:r.assignRaw,department:r.dept},
     createdBy:"", createdByRole:"manager", createdByName:r.createdByName||"OwlOps import",
     createdAt:r.createdAt, updatedAt:r.updatedAt||r.createdAt,
     activity, comments
   };
   if(r.closedAt)t.finishedAt=r.closedAt;
+  if((aTech||aVend)&&!r.closedAt){
+    t.dispatchedAt=r.createdAt;
+    const nm=aTech?((MASTER.repairTechnicians||{})[aTech]||{}).name:(VENDORS[aVend]||{}).name;
+    activity.push({ts:r.createdAt,by:r.createdByName||"OwlOps",role:"manager",action:"assign",toStatus:"dispatched",note:"Assigned in OwlOps to "+(nm||"tech")});
+  }
   try{
     await apiWrite(`${TICKETS_NODE}/${id}`,t);
     TICKETS[id]=t; LOCAL_ECHO[id]=t;
@@ -3628,6 +3862,13 @@ function openSettings(){
       <div class="section-label" style="margin-top:22px">Ticket categories<span class="ln"></span></div>
       <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Each division has its own list. Burger King uses two levels; the others are flat until you build them out.</p>
       <button class="btn btn-ghost btn-block" onclick="openCatEditor()">🗂 Edit categories by division</button>
+      <div class="section-label" style="margin-top:22px">Default home view<span class="ln"></span></div>
+      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">What each role lands on. Everyone can still switch between Map, List and Tiles.</p>
+      <div id="vdRows">${["admin","director","coach","tech","manager"].map(rk=>`
+        <div class="vd-row" data-role="${rk}">
+          <span class="vd-name">${esc({admin:"Overwatch",director:"Director (DO)",coach:"District Manager",tech:"Technician",manager:"Store Manager"}[rk])}</span>
+          <select class="input">${["map","list","tiles"].map(v=>`<option value="${v}"${defaultViewFor(rk)===v?" selected":""}>${v[0].toUpperCase()+v.slice(1)}</option>`).join("")}</select>
+        </div>`).join("")}</div>
       <div class="section-label" style="margin-top:22px">Import<span class="ln"></span></div>
       <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Bring in open tickets from an OwlOps export. Nothing is written until you approve the preview.</p>
       <button class="btn btn-ghost btn-block" onclick="openImport()">📥 Import tickets from OwlOps</button>
@@ -3669,6 +3910,11 @@ async function saveSettings(){
         await apiWrite(`admins/${newId}`,{id:newId,email,name:email.split("@")[0],tier:"overwatch",replyNumber:num||null});
       }
     }
+    // Default home view per role (shared setting).
+    const vd={};
+    document.querySelectorAll("#vdRows .vd-row").forEach(r=>{vd[r.getAttribute("data-role")]=r.querySelector("select").value});
+    await apiWrite("admins/viewDefaults",vd);
+    MASTER.admins=MASTER.admins||{};MASTER.admins.viewDefaults=vd;loadViewDefaults();
     // Apply locally right away; the CDN copy of admins/* can lag ~60s.
     for(const i of inputs){const em=i.getAttribute("data-email").toLowerCase();const n=i.value.trim();if(n)REPLY_NUMBERS[em]=n;else delete REPLY_NUMBERS[em];}
     refreshInBackground();
@@ -3731,6 +3977,12 @@ function editTechMeta(id){
     <div class="sheet-foot"><button class="btn btn-ghost" style="flex:1" onclick="openVendors()">Cancel</button>
       <button class="btn btn-primary" style="flex:1" id="tmSave" onclick="saveTechMeta('${id}')">Save</button></div>`);
 }
+/* Ticking a whole category clears its individual items (and vice versa) so a
+   vendor is never stored as "all of X plus some of X". */
+function vcatToggle(el){
+  const block=el.closest(".vcat-block"); if(!block)return;
+  if(el.checked) block.querySelectorAll("input[data-sub]").forEach(i=>i.checked=false);
+}
 function pickTmColor(c){
   $("tmColor").value=c;
   document.querySelectorAll("#tmSw .sw").forEach(b=>b.classList.toggle("on",(b.getAttribute("data-c")||"").toLowerCase()===c.toLowerCase()));
@@ -3762,9 +4014,15 @@ function editVendor(id){
   modal(`<div class="sheet-head"><h2>${id?"Edit third-party tech":"Add third-party tech"}</h2><button class="x-btn" onclick="openVendors()">✕</button></div>
     <div class="sheet-body">
       <div class="field"><label class="label">Tech / company name</label><input class="input" id="vName" value="${escA(v.name||"")}" placeholder="e.g. Lone Star HVAC"></div>
-      <div class="field" style="margin-top:14px"><label class="label">Categories <span style="font-weight:400;color:var(--ink-dim)">(pick at least one)</span></label>
-        <div class="cat-grid" id="vCats">${Object.entries(CATEGORIES).map(([k,label])=>
-          `<label class="cat-chk"><input type="checkbox" value="${k}"${preCats.includes(k)?" checked":""}><span>${esc(label)}</span></label>`).join("")}</div>
+      <div class="field" style="margin-top:14px"><label class="label">Coverage <span style="font-weight:400;color:var(--ink-dim)">(a whole category, or just the items they actually handle)</span></label>
+        <div class="cat-grid" id="vCats">${Object.entries(CATEGORIES).map(([k,label])=>{
+          const subs=(Object.values(DIVISION_CATEGORIES).flat().find(c=>c.key===k)||{}).subs||[];
+          const kids=subs.map(sb=>`<label class="cat-chk sub"><input type="checkbox" data-sub="${sb.key}" value="${sb.key}"${preCats.includes(sb.key)?" checked":""}><span>${esc(sb.label)}</span></label>`).join("");
+          return `<div class="vcat-block">
+            <label class="cat-chk"><input type="checkbox" data-cat="${k}" value="${k}"${preCats.includes(k)?" checked":""} onchange="vcatToggle(this)"><span><b>${esc(label)}</b>${subs.length?" — all":""}</span></label>
+            ${subs.length?`<button type="button" class="vcat-more" onclick="this.nextElementSibling.classList.toggle('open');this.textContent=this.nextElementSibling.classList.contains('open')?'▾ hide items':'▸ pick specific items'">▸ pick specific items</button>
+            <div class="vcat-subs">${kids}</div>`:""}
+          </div>`;}).join("")}</div>
         ${legacyNote}
       </div>
       <div style="display:flex;gap:12px;margin-top:14px">
@@ -3779,6 +4037,7 @@ function editVendor(id){
 async function saveVendor(id){
   const name=$("vName").value.trim();if(!name){toast("Vendor name is required","err");return}
   const cats=[...document.querySelectorAll("#vCats input:checked")].map(c=>c.value);
+  // cats may hold category keys (whole area) and/or subcategory keys (granular)
   if(!cats.length){toast("Pick at least one category","err");return}
   const vid=id||uid();
   const rec={id:vid,name,categories:cats,
