@@ -17,6 +17,7 @@
 <link rel="manifest" href="site.webmanifest" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- SheetJS is pulled on demand by the import tool, not on every page load -->
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -266,6 +267,7 @@ body.no-reftags .reftag{display:none}
 .overlay{position:fixed;inset:0;z-index:60;background:rgba(26,34,48,.45);backdrop-filter:blur(4px);display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;transition:.2s;padding:48px 14px 14px}
 .overlay.on{opacity:1;pointer-events:auto}
 @media(min-width:640px){.overlay{align-items:center;padding:40px 24px}}
+.overlay.wide .sheet{max-width:900px}
 .sheet{position:relative;background:var(--panel);border:1px solid var(--line);width:100%;max-width:520px;max-height:calc(100vh - 96px);overflow-y:auto;border-radius:18px;transform:translateY(20px);transition:.25s;box-shadow:var(--shadow)}
 @media(max-width:639px){.sheet{max-height:calc(100vh - 62px)}}
 .overlay.on .sheet{transform:translateY(0)}
@@ -364,6 +366,40 @@ body.no-reftags .reftag{display:none}
 .sw-row{display:flex;gap:8px;flex-wrap:wrap}
 .sw{width:32px;height:32px;border-radius:50%;border:3px solid transparent;cursor:pointer;padding:0;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
 .sw.on{border-color:var(--ink);transform:scale(1.08)}
+.imp-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.imp-err{background:rgba(248,113,113,.1);border:1px solid var(--red);color:var(--red);border-radius:9px;padding:12px 14px;font-size:13.5px}
+.imp-warnbox{background:#fff7e6;border:1px solid var(--amber);border-radius:9px;padding:10px 13px;font-size:13px;margin-top:12px;color:var(--amber-deep);font-weight:600}
+.imp-map{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.imp-map .imp-owl{font-family:var(--mono);font-size:12.5px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:6px 10px;white-space:nowrap}
+.imp-map .imp-arrow{color:var(--ink-dim)}
+.imp-map select{flex:1}
+.imp-list{display:flex;flex-direction:column;gap:8px;max-height:46vh;overflow-y:auto;padding-right:2px}
+.imp-card{display:flex;gap:10px;border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:var(--panel)}
+.imp-card.off{opacity:.45;background:var(--panel-2)}
+.imp-chk input{width:18px;height:18px;cursor:pointer}
+.imp-body{flex:1;min-width:0}
+.imp-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px}
+.imp-desc{font-size:13.5px;color:var(--ink);line-height:1.4}
+.imp-meta{font-size:11px;color:var(--ink-dim);margin-top:5px}
+.imp-note{font-size:12px;color:var(--ink-mid);margin-top:6px;background:var(--panel-2);border-left:3px solid var(--line);border-radius:5px;padding:6px 9px}
+.imp-ok{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:rgba(22,163,74,.14);color:var(--green,#16a34a);border-radius:99px;padding:3px 8px}
+.imp-step-head{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.imp-done{text-align:center;padding:26px 16px}
+.imp-done-ic{font-size:42px;color:var(--green,#16a34a)}
+.imp-done h3{margin:6px 0 4px}
+.imp-done p{color:var(--ink-dim);font-size:13px;margin:0}
+.imp-bad{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:rgba(248,113,113,.14);color:var(--red);border-radius:99px;padding:3px 8px}
+.imp-warn{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:rgba(245,158,11,.16);color:var(--amber-deep);border-radius:99px;padding:3px 8px}
+.ce-tabs{display:flex;gap:6px;flex-wrap:wrap}
+.ce-tab{border:1px solid var(--line);background:var(--panel-2);border-radius:99px;padding:7px 13px;font-size:12.5px;font-weight:600;cursor:pointer;color:var(--ink-mid)}
+.ce-tab.on{background:var(--amber);border-color:var(--amber-deep);color:#fff}
+.ce-cat{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:var(--panel)}
+.ce-head{display:flex;align-items:center;gap:8px;padding:9px 10px}
+.ce-toggle{background:none;border:none;font-size:15px;color:var(--ink-dim);cursor:pointer;width:22px;flex-shrink:0}
+.ce-count{font-family:var(--mono);font-size:11px;color:var(--ink-dim);background:var(--panel-2);border-radius:99px;padding:3px 8px;flex-shrink:0}
+.ce-subs{border-top:1px solid var(--line);padding:10px 10px 10px 34px;background:var(--panel-2)}
+.ce-sub{display:flex;gap:7px;align-items:center;margin-bottom:6px}
+.ce-none{font-size:12px;color:var(--ink-dim);margin-bottom:8px}
 .cat-row{display:flex;gap:8px;align-items:center;margin-bottom:7px}
 .cat-row .cat-label{flex:1}
 .tech-pick{display:flex;align-items:center;gap:11px;text-align:left;padding:12px 13px}
@@ -587,7 +623,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "4.0";
+const APP_VERSION = "4.4";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -613,23 +649,70 @@ const ACTIVE_STATUSES = ["unassigned","assigned","dispatched","waiting","in_prog
    admins/ticketCategories so DPM FindMi reads the identical list, and they are
    editable from Settings here. DEFAULT_CATEGORIES is only the seed used when
    that node doesn't exist yet. Key order = dropdown order. */
-const DEFAULT_CATEGORIES = {
-  cooling:"Cooling", electrical:"Electrical", equipment:"Equipment", heating:"Heating",
-  it:"IT", lighting:"Lighting", marketing:"Marketing", plumbing:"Plumbing",
-  safety:"Safety", structural:"Structural", other:"Other"
+/* ---- CATEGORIES ARE PER-DIVISION -------------------------------------------
+   Burger King uses a two-level tree (category -> subcategory, both required).
+   C-Store, Car Wash and Subway keep the original flat list until their own
+   trees are built in Settings. Stored at admins/divisionCategories so DPM
+   FindMi reads the same config. Division comes from the store record. */
+const FLAT_CATEGORIES = [
+  {key:"cooling",label:"Cooling",subs:[]},{key:"electrical",label:"Electrical",subs:[]},
+  {key:"equipment",label:"Equipment",subs:[]},{key:"heating",label:"Heating",subs:[]},
+  {key:"it",label:"IT",subs:[]},{key:"lighting",label:"Lighting",subs:[]},
+  {key:"marketing",label:"Marketing",subs:[]},{key:"plumbing",label:"Plumbing",subs:[]},
+  {key:"safety",label:"Safety",subs:[]},{key:"structural",label:"Structural",subs:[]},
+  {key:"other",label:"Other",subs:[]}
+];
+const BK_CATEGORIES = [{"key":"equipment","label":"Equipment","subs":[{"key":"equipment_broiler","label":"Broiler"},{"key":"equipment_chef","label":"Chef"},{"key":"equipment_coffee_brewer","label":"Coffee Brewer"},{"key":"equipment_coke_machine","label":"Coke Machine"},{"key":"equipment_fry_dump","label":"Fry Dump"},{"key":"equipment_fry_freezer","label":"Fry Freezer"},{"key":"equipment_fryer","label":"Fryer"},{"key":"equipment_heat_chute","label":"Heat Chute"},{"key":"equipment_ice_machine","label":"Ice Machine"},{"key":"equipment_meat_well","label":"Meat Well"},{"key":"equipment_microwave_hopper","label":"Microwave / Hopper"},{"key":"equipment_oven","label":"Oven"},{"key":"equipment_phus","label":"PHUs"},{"key":"equipment_reach_in_cooler","label":"Reach-In Cooler"},{"key":"equipment_reach_in_freezer","label":"Reach-In Freezer"},{"key":"equipment_shake_machine","label":"Shake Machine"},{"key":"equipment_toaster","label":"Toaster"},{"key":"equipment_walk_in_cooler","label":"Walk-In Cooler"},{"key":"equipment_walk_in_freezer","label":"Walk-In Freezer"},{"key":"equipment_other","label":"Other"}]},{"key":"facilities","label":"Facilities","subs":[{"key":"facilities_bathrooms","label":"Bathrooms"},{"key":"facilities_broiler_hood","label":"Broiler Hood"},{"key":"facilities_building","label":"Building"},{"key":"facilities_ceiling_tile","label":"Ceiling Tile"},{"key":"facilities_electrical","label":"Electrical"},{"key":"facilities_fire_alarm","label":"Fire Alarm"},{"key":"facilities_flooring_tile","label":"Flooring/Tile"},{"key":"facilities_fryer_hood","label":"Fryer Hood"},{"key":"facilities_glass_window_door","label":"Glass/Window/Door"},{"key":"facilities_hvac_heat_ac","label":"HVAC (Heat/AC)"},{"key":"facilities_lighting_exterior","label":"Lighting - Exterior"},{"key":"facilities_lighting_interior","label":"Lighting - Interior"},{"key":"facilities_plumbing","label":"Plumbing"},{"key":"facilities_preventative_maintenance","label":"Preventative Maintenance"},{"key":"facilities_roof","label":"Roof"},{"key":"facilities_safe_locksmith","label":"Safe / Locksmith"},{"key":"facilities_signage","label":"Signage"},{"key":"facilities_other","label":"Other"}]},{"key":"it","label":"IT","subs":[{"key":"it_alarm","label":"Alarm"},{"key":"it_camera","label":"Camera"},{"key":"it_headset_intercom","label":"Headset/Intercom"},{"key":"it_internet","label":"Internet"},{"key":"it_lobby_atmosphere_safety_tv","label":"Lobby Atmosphere/Safety TV"},{"key":"it_music","label":"Music"},{"key":"it_network_issues","label":"Network Issues"},{"key":"it_new_user","label":"New User"},{"key":"it_office_printers","label":"Office Printers"},{"key":"it_phone","label":"Phone"},{"key":"it_other","label":"Other"}]},{"key":"ops_support","label":"OPS Support","subs":[{"key":"ops_support_bitrix","label":"Bitrix"},{"key":"ops_support_bku","label":"BKU"},{"key":"ops_support_onedrive","label":"OneDrive"},{"key":"ops_support_password_resets","label":"Password Resets"},{"key":"ops_support_paycom","label":"Paycom"},{"key":"ops_support_rsi","label":"RSI"},{"key":"ops_support_training_computer_tablet","label":"Training Computer/Tablet"},{"key":"ops_support_zenput","label":"Zenput"}]},{"key":"pos","label":"POS","subs":[{"key":"pos_credit_cards_pin_pad","label":"Credit Cards / Pin Pad"},{"key":"pos_drive_thru_director","label":"Drive Thru Director"},{"key":"pos_indoor_dmbs","label":"Indoor DMBs"},{"key":"pos_kitchen_screen","label":"Kitchen Screen"},{"key":"pos_kitchen_sticky_printer","label":"Kitchen Sticky Printer"},{"key":"pos_odmb_warranty_issues","label":"ODMB Warranty Issues"},{"key":"pos_outdoor_dmbs","label":"Outdoor DMBs"},{"key":"pos_rti","label":"RTI"},{"key":"pos_rti_labor","label":"RTI Labor"},{"key":"pos_sicom","label":"Sicom"},{"key":"pos_terminals","label":"Terminals"},{"key":"pos_thermal_printer","label":"Thermal Printer"},{"key":"pos_other","label":"Other"}]}];
+const DEFAULT_DIVISION_CATEGORIES = {
+  bk: BK_CATEGORIES,
+  cstore: FLAT_CATEGORIES, carwash: FLAT_CATEGORIES,
+  subway: FLAT_CATEGORIES, other: FLAT_CATEGORIES
 };
-let CATEGORIES = {...DEFAULT_CATEGORIES};
-/* Rebuild CATEGORIES + ALL_CATEGORIES from the directory after every refresh. */
+let DIVISION_CATEGORIES = {...DEFAULT_DIVISION_CATEGORIES};
+/* Division lives on the store record; mirror FindMi's fallback so untagged
+   stores still behave sensibly. */
+const DIVISIONS=[{key:"bk",label:"Burger King"},{key:"cstore",label:"C-Store"},
+  {key:"carwash",label:"Car Wash"},{key:"subway",label:"Subway"},{key:"other",label:"Other"}];
+function divisionLabel(k){const d=DIVISIONS.find(x=>x.key===k);return d?d.label:"Other"}
+function guessDivision(st){
+  const n=(st&&st.storeName||"").trim();
+  if(/burger\s*king|\bbk\b/i.test(n))return "bk";
+  if(/subway/i.test(n))return "subway";
+  if(/car\s*wash|\bwash\b/i.test(n))return "carwash";
+  if(/\bstop\b|quick\s*stop|travel\s*stop|truck\s*stop/i.test(n))return "cstore";
+  return "other";
+}
+function storeDivision(rid){
+  const st=store(rid), d=(st&&st.division||"").trim();
+  return (d&&DIVISIONS.some(x=>x.key===d))?d:guessDivision(st);
+}
+function catsForDivision(div){return DIVISION_CATEGORIES[div]||DIVISION_CATEGORIES.other||FLAT_CATEGORIES}
+function catsForStore(rid){return catsForDivision(storeDivision(rid))}
+function divisionUsesSubs(div){return catsForDivision(div).some(c=>c.subs&&c.subs.length)}
+/* Flat label lookups so any ticket (old or new, any division) renders. */
+let CATEGORIES={}, SUBCATEGORIES={};
 function loadCategories(){
-  const stored=(MASTER.admins||{}).ticketCategories;
-  const out={};
-  if(Array.isArray(stored)&&stored.length){
-    stored.forEach(c=>{if(c&&c.key)out[c.key]=c.label||c.key});
-  }else if(stored&&typeof stored==="object"){
-    Object.entries(stored).forEach(([k,v])=>{out[k]=typeof v==="string"?v:(v&&v.label)||k});
+  const stored=(MASTER.admins||{}).divisionCategories;
+  DIVISION_CATEGORIES={...DEFAULT_DIVISION_CATEGORIES};
+  if(stored&&typeof stored==="object"){
+    Object.entries(stored).forEach(([d,list])=>{
+      if(Array.isArray(list)&&list.length)
+        DIVISION_CATEGORIES[d]=list.map(c=>({key:c.key,label:c.label||c.key,subs:Array.isArray(c.subs)?c.subs:[]}));
+    });
   }
-  CATEGORIES = Object.keys(out).length ? out : {...DEFAULT_CATEGORIES};
-  ALL_CATEGORIES = {...CATEGORIES, ...LEGACY_CATEGORIES};
+  CATEGORIES={};SUBCATEGORIES={};
+  Object.values(DIVISION_CATEGORIES).forEach(list=>list.forEach(c=>{
+    CATEGORIES[c.key]=c.label;
+    (c.subs||[]).forEach(sb=>{SUBCATEGORIES[sb.key]={label:sb.label,parent:c.key}});
+  }));
+  ALL_CATEGORIES={...CATEGORIES,...LEGACY_CATEGORIES};
+}
+function subLabel(k){return (SUBCATEGORIES[k]||{}).label||""}
+/* "Equipment → Fryer" for display. */
+function catPath(t){
+  const c=ALL_CATEGORIES[t.category]||t.category||"Other";
+  const sb=t.subcategory?subLabel(t.subcategory):"";
+  return sb?`${c} → ${sb}`:c;
 }
 function catKeyFrom(label){
   return String(label||"").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"")||("cat"+Date.now().toString(36));
@@ -640,7 +723,7 @@ function catKeyFrom(label){
    into Structural, which is a live category again. */
 const LEGACY_CATEGORIES = { hvac:"HVAC", building:"Building", facility:"Facility" };
 /* Use for any LOOKUP/display of a stored category (old or new). */
-let ALL_CATEGORIES = {...CATEGORIES, ...LEGACY_CATEGORIES};
+let ALL_CATEGORIES={...LEGACY_CATEGORIES};
 /* Short-ID segment per category, e.g. 23086-PLM-0004. Legacy kept so old IDs
    stay reproducible. */
 const CAT_PREFIX = {
@@ -1783,7 +1866,7 @@ function applyFilterSearch(list){
   }
   if(curCategory!=="all")out=out.filter(t=>t.category===curCategory);
   if(curSearch){const q=curSearch.toLowerCase();
-    out=out.filter(t=>(t.description||"").toLowerCase().includes(q)||(ALL_CATEGORIES[t.category]||"").toLowerCase().includes(q)||(t.shortId||"").toLowerCase().includes(q)||storeName(t.storeId).toLowerCase().includes(q)||storeNum(t.storeId).toLowerCase().includes(q))}
+    out=out.filter(t=>(t.description||"").toLowerCase().includes(q)||(catPath(t)||"").toLowerCase().includes(q)||(t.shortId||"").toLowerCase().includes(q)||storeName(t.storeId).toLowerCase().includes(q)||storeNum(t.storeId).toLowerCase().includes(q))}
   out.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   return out;
 }
@@ -1829,7 +1912,7 @@ function elapsedHM(ts){
 }
 function ticketRow(t){
   const st=STATUSES[t.status]||STATUSES.unassigned;
-  const cat=ALL_CATEGORIES[t.category]||"Other";
+  const cat=catPath(t);
   const pri=t.priority||"normal";
   const priClass={normal:"n",urgent:"u",emergency:"e"}[pri]||"n";
   const photoN=(t.photos||[]).length;
@@ -2062,6 +2145,7 @@ function modal(html){
   // new modal opens before that timer fires, the wipe would erase it — cancel
   // any pending wipe so back-to-back close→open is always safe.
   if(o._wipeTimer){clearTimeout(o._wipeTimer);o._wipeTimer=null;}
+  o.classList.remove("wide");   // only the import preview widens the sheet
   // Guarantee a close affordance: if the modal's own markup doesn't include an
   // X button, inject a floating one in the top-right that dismisses the modal.
   const hasOwnX = /class="x-btn"/.test(html);
@@ -2079,17 +2163,19 @@ function openCreate(preStore){
   let ids = SESSION.role==="manager" ? [SESSION.storeId] : myStoreIds();
   ids.sort((a,b)=>storeName(a).localeCompare(storeName(b)));
   const storeOpts=ids.map(id=>`<option value="${id}"${preStore===id?" selected":""}>${esc(storeName(id))}</option>`).join("");
-  const catOpts=Object.entries(CATEGORIES).map(([k,v])=>`<option value="${k}">${v}</option>`).join("");
   const priOpts=Object.entries(PRIORITIES).map(([k,v])=>`<option value="${k}"${k==="normal"?" selected":""}>${v}</option>`).join("");
   modal(`
     <div class="sheet-head"><h2>Report new issue</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
     <div class="sheet-body">
       <div class="field"><label class="label">Store</label>
-        <select class="input" id="cStore" ${ids.length===1?"disabled":""}>${storeOpts}</select></div>
+        <select class="input" id="cStore" ${ids.length===1?"disabled":""} onchange="syncCreateCats()">${storeOpts}</select></div>
       <div style="display:flex;gap:12px;margin-top:14px">
-        <div class="field" style="flex:1"><label class="label">Category</label><select class="input" id="cCat">${catOpts}</select></div>
+        <div class="field" style="flex:1"><label class="label">Category</label><select class="input" id="cCat" onchange="syncCreateSubs()"></select></div>
         <div class="field" style="flex:1"><label class="label">Priority</label><select class="input" id="cPri">${priOpts}</select></div>
       </div>
+      <div class="field" id="cSubWrap" style="margin-top:14px;display:none">
+        <label class="label">Subcategory <span style="font-weight:400;color:var(--ink-dim)">(required)</span></label>
+        <select class="input" id="cSub"></select></div>
       <div class="field" style="margin-top:14px"><label class="label">What's the issue?</label>
         <textarea class="input" id="cDesc" placeholder="Describe the problem and location."></textarea></div>
       <div class="field" style="margin-top:14px"><label class="label">Photos (optional)</label>
@@ -2112,10 +2198,30 @@ function addDraftPhotos(input){
 }
 function renderDraftPreview(){const el=$("cPreview");if(!el)return;
   el.innerHTML=draftPhotos.map((p,i)=>`<div class="pv"><img src="${p.localUrl}" alt=""><button class="pv-x" onclick="draftPhotos.splice(${i},1);renderDraftPreview()">✕</button></div>`).join("");applyTags()}
+/* The picker follows the selected store's division: Burger King gets the
+   two-level tree (subcategory required), everyone else the flat list. */
+function syncCreateCats(){
+  const sid=$("cStore")&&$("cStore").value; if(!sid)return;
+  const list=catsForStore(sid), sel=$("cCat");
+  sel.innerHTML=list.map(c=>`<option value="${c.key}">${esc(c.label)}</option>`).join("");
+  syncCreateSubs();
+}
+function syncCreateSubs(){
+  const sid=$("cStore")&&$("cStore").value, wrap=$("cSubWrap"), sub=$("cSub");
+  if(!sid||!wrap||!sub)return;
+  const cat=(catsForStore(sid).find(c=>c.key===$("cCat").value))||{subs:[]};
+  const subs=cat.subs||[];
+  if(!subs.length){wrap.style.display="none";sub.innerHTML="";return}
+  wrap.style.display="";
+  sub.innerHTML=`<option value="">— choose —</option>`+subs.map(x=>`<option value="${x.key}">${esc(x.label)}</option>`).join("");
+}
 async function submitTicket(){
   const sid=$("cStore").value, desc=$("cDesc").value.trim();
   if(!desc){toast("Add a short description","err");return}
   const cat=$("cCat").value;
+  const subEl=$("cSub"), needSub=$("cSubWrap")&&$("cSubWrap").style.display!=="none";
+  const sub=needSub?(subEl.value||""):"";
+  if(needSub&&!sub){toast("Pick a subcategory","err");return}
   const btn=$("cSubmit");btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Creating…';
   try{
     const urls=[];for(const p of draftPhotos)urls.push(await uploadPhoto(p.file));
@@ -2133,7 +2239,7 @@ async function submitTicket(){
     // NOTE: ticket stores ONLY storeId as its anchor. No coach/director/tech frozen on it.
     const ticket={
       shortId, storeId:sid,
-      category:cat, priority:$("cPri").value, description:desc, photos:urls,
+      category:cat, subcategory:sub, priority:$("cPri").value, description:desc, photos:urls,
       status:"unassigned", assignedVendorId:null, assignedTechId:null,
       createdBy:SESSION.email, createdByRole:SESSION.role, createdByName:SESSION.name,
       createdAt:now(), updatedAt:now(),
@@ -2262,7 +2368,7 @@ function openTicket(id){
       </div>
       <div class="detail-desc">${esc(t.description||"No description")}</div>
       ${photoThumbs(t)}
-      <div class="detail-row"><span class="k">Category</span><span class="v">${ALL_CATEGORIES[t.category]||"Other"}</span></div>
+      <div class="detail-row"><span class="k">Category</span><span class="v">${esc(catPath(t))}</span></div>
       <div class="detail-row"><span class="k">Priority</span><span class="v">${PRIORITIES[t.priority]||"Normal"}</span></div>
       <div class="detail-row"><span class="k">Assigned</span><span class="v">${assignee?esc(assignee):"<span style='color:var(--ink-dim)'>Unassigned</span>"}</span></div>
       <div class="detail-row"><span class="k">Director</span><span class="v">${dir?esc(dir.name):"—"}</span></div>
@@ -2660,28 +2766,26 @@ async function confirmWaiting(id){
     toast("Set to waiting");waitReason=null;openTicket(id);
   }else if(btn){btn.disabled=false;btn.innerHTML="⏸ Set to waiting"}
 }
+let EDIT_ID=null;
 function openEdit(id){
+  EDIT_ID=id;
   const t=TICKETS[id];editPhotos=(t.photos||[]).slice();
-  // If this ticket still carries a retired category, keep it as an option so
-  // editing other fields can't silently reassign it.
-  const editCats=LEGACY_CATEGORIES[t.category]
-    ? [...Object.entries(CATEGORIES),[t.category,LEGACY_CATEGORIES[t.category]+" (retired)"]]
-    : Object.entries(CATEGORIES);
-  const catOpts=editCats.map(([k,v])=>`<option value="${k}"${t.category===k?" selected":""}>${v}</option>`).join("");
-  const priOpts=Object.entries(PRIORITIES).map(([k,v])=>`<option value="${k}"${t.priority===k?" selected":""}>${v}</option>`).join("");
-  // Overwatch can also move a misfiled ticket to the correct store; other roles
-  // can't change the store (their tickets are scoped to stores in their purview).
-  const canMoveStore = SESSION.role==="admin";
-  const storeOpts = canMoveStore
-    ? Object.keys(RESTAURANTS).slice().sort((a,b)=>storeName(a).localeCompare(storeName(b)))
-        .map(rid=>`<option value="${rid}"${t.storeId===rid?" selected":""}>${esc(storeName(rid))}</option>`).join("")
-    : "";
+  // Category list follows the ticket's own store division; a retired category
+  // stays selectable so editing other fields can't silently reassign it.
+  const eList=catsForStore(t.storeId).slice();
+  if(!eList.some(c=>c.key===t.category)){
+    const lbl=ALL_CATEGORIES[t.category]||LEGACY_CATEGORIES[t.category];
+    if(lbl)eList.push({key:t.category,label:lbl+" (retired)",subs:[]});
+  }
+  const catOpts=eList.map(c=>`<option value="${c.key}"${t.category===c.key?" selected":""}>${esc(c.label)}</option>`).join("");
   modal(`<div class="sheet-head"><h2>Edit ticket</h2><button class="x-btn" onclick="openTicket('${id}')">✕</button></div>
     <div class="sheet-body">
       ${canMoveStore?`<div class="field"><label class="label">Store</label><select class="input" id="eStore">${storeOpts}</select></div>`:""}
       <div style="display:flex;gap:12px${canMoveStore?";margin-top:14px":""}">
-        <div class="field" style="flex:1"><label class="label">Category</label><select class="input" id="eCat">${catOpts}</select></div>
+        <div class="field" style="flex:1"><label class="label">Category</label><select class="input" id="eCat" onchange="syncEditSubs()">${catOpts}</select></div>
         <div class="field" style="flex:1"><label class="label">Priority</label><select class="input" id="ePri">${priOpts}</select></div></div>
+      <div class="field" id="eSubWrap" style="margin-top:14px;display:none">
+        <label class="label">Subcategory</label><select class="input" id="eSub"></select></div>
       <div class="field" style="margin-top:14px"><label class="label">Description</label><textarea class="input" id="eDesc" rows="4">${esc(t.description||"")}</textarea></div>
       <div class="field" style="margin-top:14px"><label class="label">Photos</label>
         <div class="upload-zone" onclick="$('eFile').click()"><div class="uz-ic">📷</div><div class="uz-t">Add photos</div><div class="uz-h mono">take one or pick from your gallery</div></div>
@@ -2691,6 +2795,7 @@ function openEdit(id){
     <div class="sheet-foot"><button class="btn btn-ghost" style="flex:1" onclick="openTicket('${id}')">Cancel</button>
       <button class="btn btn-primary" style="flex:1" id="eSave" onclick="saveEdit('${id}')">Save changes</button></div>`);
   renderEditPreview();
+  syncEditSubs(TICKETS[id].subcategory||"");
 }
 function renderEditPreview(){const el=$("ePreview");if(!el)return;
   el.innerHTML=editPhotos.map((u,i)=>`<div class="pv"><img src="${escA(u)}" alt=""><button class="pv-x" onclick="editPhotos.splice(${i},1);renderEditPreview()">✕</button></div>`).join("");applyTags()}
@@ -2699,9 +2804,20 @@ async function addEditPhotos(input){
   for(const f of files){if(f.size>25*1024*1024){toast("That photo is very large and was skipped","err");continue}
     try{editPhotos.push(await uploadPhoto(f));renderEditPreview()}catch(e){toast("Photo upload failed: "+(e.message||"network error"),"err")}}
 }
+function syncEditSubs(preset){
+  const wrap=$("eSubWrap"), sub=$("eSub"); if(!wrap||!sub)return;
+  const t=TICKETS[EDIT_ID]||{};
+  const cat=(catsForStore(t.storeId)||[]).find(c=>c.key===$("eCat").value);
+  const subs=(cat&&cat.subs)||[];
+  if(!subs.length){wrap.style.display="none";sub.innerHTML="";return}
+  wrap.style.display="";
+  const cur=preset!==undefined?preset:sub.value;
+  sub.innerHTML=`<option value="">— choose —</option>`+subs.map(x=>`<option value="${x.key}"${x.key===cur?" selected":""}>${esc(x.label)}</option>`).join("");
+}
 async function saveEdit(id){
   const btn=$("eSave");btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Saving…';
-  const patch={description:$("eDesc").value.trim(),category:$("eCat").value,priority:$("ePri").value,photos:editPhotos.slice()};
+  const subEl=$("eSub"), hasSub=$("eSubWrap")&&$("eSubWrap").style.display!=="none";
+  const patch={description:$("eDesc").value.trim(),category:$("eCat").value,subcategory:hasSub?(subEl.value||""):"",priority:$("ePri").value,photos:editPhotos.slice()};
   // Overwatch only: allow moving the ticket to a different store.
   const eStore=$("eStore");
   if(eStore && eStore.value && eStore.value!==TICKETS[id].storeId) patch.storeId=eStore.value;
@@ -3045,6 +3161,455 @@ function owDotClick(g){
   tip.style.left=x+"px"; tip.style.top=y+"px";
 }
 
+
+
+/* ============================================================ CATEGORY EDITOR (overwatch)
+   Per-division category + subcategory editing. Saves to admins/divisionCategories
+   so DPM FindMi reads the same tree. */
+let CE_DIV="bk", CE_TREE=null, CE_OPEN={};
+function openCatEditor(div){
+  CE_DIV=div||CE_DIV;
+  CE_TREE=JSON.parse(JSON.stringify(catsForDivision(CE_DIV)));
+  renderCatEditor();
+}
+function renderCatEditor(){
+  const tabs=DIVISIONS.map(d=>`<button class="ce-tab${CE_DIV===d.key?" on":""}" onclick="openCatEditor('${d.key}')">${esc(d.label)}</button>`).join("");
+  const nSub=CE_TREE.reduce((n,c)=>n+((c.subs||[]).length),0);
+  const rows=CE_TREE.map((c,ci)=>{
+    const subs=(c.subs||[]).map((sb,si)=>`
+      <div class="ce-sub">
+        <input class="input" value="${escA(sb.label)}" oninput="CE_TREE[${ci}].subs[${si}].label=this.value">
+        <button class="btn btn-danger btn-sm" onclick="CE_TREE[${ci}].subs.splice(${si},1);renderCatEditor()">✕</button>
+      </div>`).join("");
+    const open=CE_OPEN[c.key];
+    return `<div class="ce-cat">
+      <div class="ce-head">
+        <button class="ce-toggle" onclick="CE_OPEN['${escA(c.key)}']=!CE_OPEN['${escA(c.key)}'];renderCatEditor()">${open?"▾":"▸"}</button>
+        <input class="input" value="${escA(c.label)}" oninput="CE_TREE[${ci}].label=this.value">
+        <span class="ce-count">${(c.subs||[]).length}</span>
+        <button class="btn btn-danger btn-sm" onclick="if(confirm('Remove ${escA(c.label)} and its subcategories?')){CE_TREE.splice(${ci},1);renderCatEditor()}">✕</button>
+      </div>
+      ${open?`<div class="ce-subs">${subs||'<div class="ce-none">No subcategories — this category is single-level.</div>'}
+        <button class="btn btn-ghost btn-sm" onclick="ceAddSub(${ci})">＋ Add subcategory</button></div>`:""}
+    </div>`;}).join("");
+  modal(`<div class="sheet-head"><h2>Categories</h2><button class="x-btn" onclick="openSettings()">✕</button></div>
+    <div class="sheet-body">
+      <div class="ce-tabs">${tabs}</div>
+      <p style="color:var(--ink-dim);font-size:12.5px;margin:12px 0 10px">
+        <b>${esc(divisionLabel(CE_DIV))}</b> · ${CE_TREE.length} categor${CE_TREE.length===1?"y":"ies"} · ${nSub} subcategor${nSub===1?"y":"ies"}.
+        A category with no subcategories stays single-level.</p>
+      ${rows||'<div class="rp-empty">No categories yet for this division.</div>'}
+      <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="ceAddCat()">＋ Add category</button>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-ghost" style="flex:1" onclick="openSettings()">Cancel</button>
+      <button class="btn btn-primary" style="flex:1" id="ceSave" onclick="saveCatEditor()">Save ${esc(divisionLabel(CE_DIV))}</button>
+    </div>`);
+}
+function ceAddCat(){CE_TREE.push({key:"",label:"",subs:[]});renderCatEditor()}
+function ceAddSub(ci){CE_TREE[ci].subs=CE_TREE[ci].subs||[];CE_TREE[ci].subs.push({key:"",label:""});CE_OPEN[CE_TREE[ci].key]=true;renderCatEditor()}
+async function saveCatEditor(){
+  // Keys are generated from labels but NEVER regenerated for existing entries,
+  // so renaming a category can't orphan the tickets already filed under it.
+  const seen=new Set();
+  const tree=CE_TREE.map(c=>{
+    const label=(c.label||"").trim(); if(!label)return null;
+    let key=c.key||catKeyFrom(label);
+    while(seen.has(key))key+="_2"; seen.add(key);
+    const subs=(c.subs||[]).map(sb=>{
+      const sl=(sb.label||"").trim(); if(!sl)return null;
+      let sk=sb.key||(key+"_"+catKeyFrom(sl));
+      while(seen.has(sk))sk+="_2"; seen.add(sk);
+      return {key:sk,label:sl};
+    }).filter(Boolean);
+    return {key,label,subs};
+  }).filter(Boolean);
+  if(!tree.length){toast("Add at least one category","err");return}
+  const btn=$("ceSave");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>'}
+  const all={...DIVISION_CATEGORIES,[CE_DIV]:tree};
+  try{
+    await apiWrite("admins/divisionCategories",all);
+    MASTER.admins=MASTER.admins||{};MASTER.admins.divisionCategories=all;
+    loadCategories();
+    toast(divisionLabel(CE_DIV)+" categories saved");
+    refreshInBackground();openSettings();
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent="Save";}
+    toast(e.message||"Could not save categories","err");
+  }
+}
+
+/* ============================================================ OWLOPS IMPORT (overwatch)
+   Two-phase by design: parse + preview first, write only on approval.
+   Everything is mapped to FixMi's own shape — original dates, original
+   reporter and the OwlOps comment thread are all preserved so imported
+   tickets read like native ones. */
+let IMP={rows:[],catMap:{},loaded:false};
+
+function openImport(){
+  IMP={rows:[],catMap:{},loaded:false};
+  modal(`<div class="sheet-head"><h2>Import from OwlOps</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body">
+      <div class="upload-zone" onclick="$('impFile').click()">
+        <div class="uz-ic">📥</div><div class="uz-t">Choose the OwlOps export</div>
+        <div class="uz-h mono">.xlsx or .csv — nothing is imported until you approve the preview</div>
+      </div>
+      <input type="file" id="impFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleImportFile(this)">
+      <div id="impOut" style="margin-top:16px"></div>
+    </div>`);
+}
+
+/* SheetJS is only needed for .xlsx; pull it on demand so it never slows a normal load. */
+function ensureXLSX(){
+  if(window.XLSX)return Promise.resolve(true);
+  return new Promise(res=>{
+    const sc=document.createElement("script");
+    sc.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    sc.onload=()=>res(!!window.XLSX); sc.onerror=()=>res(false);
+    document.head.appendChild(sc);
+  });
+}
+function parseCSV(text){
+  const rows=[];let row=[],cur="",q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=c; }
+    else if(c==='"')q=true;
+    else if(c===","){row.push(cur);cur="";}
+    else if(c==="\n"){row.push(cur);rows.push(row);row=[];cur="";}
+    else if(c!=="\r")cur+=c;
+  }
+  if(cur||row.length){row.push(cur);rows.push(row);}
+  return rows.filter(r=>r.some(x=>String(x).trim()!==""));
+}
+
+async function handleImportFile(input){
+  const f=input.files&&input.files[0]; input.value="";
+  if(!f)return;
+  const out=$("impOut"); out.innerHTML=`<div class="rp-empty"><span class="inline-spin"></span> Reading ${esc(f.name)}…</div>`;
+  try{
+    let grid;
+    if(/\.csv$/i.test(f.name)) grid=parseCSV(await f.text());
+    else{
+      if(!await ensureXLSX()){out.innerHTML=`<div class="imp-err">Couldn't load the spreadsheet reader. Re-save the file as .csv and try again.</div>`;return}
+      const wb=XLSX.read(await f.arrayBuffer(),{type:"array",cellDates:true});
+      grid=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:""});
+    }
+    buildImportPreview(grid);
+  }catch(e){ out.innerHTML=`<div class="imp-err">Could not read that file: ${esc(e.message||"unknown error")}</div>`; }
+}
+
+/* ---- field helpers ---------------------------------------------------- */
+const OWL_PRI={high:"emergency",urgent:"emergency",med:"urgent",medium:"urgent",low:"normal","non-urgent":"normal",nonurgent:"normal"};
+function impDigits(v){return String(v||"").replace(/\D/g,"").replace(/^0+/,"")}
+function impDate(v){
+  if(!v)return null;
+  if(v instanceof Date&&!isNaN(v))return v.getTime();
+  const t=Date.parse(String(v));
+  return isNaN(t)?null:t;
+}
+/* "BK25385 Athens (IT - Terminals)" -> {category:"IT", asset:"Terminals"} */
+function impAsset(v){
+  const m=String(v||"").match(/\(([^()]*)\)\s*$/);
+  if(!m)return {category:"",asset:""};
+  const inner=m[1].trim();
+  const i=inner.indexOf(" - ");
+  return i<0?{category:inner,asset:""}:{category:inner.slice(0,i).trim(),asset:inner.slice(i+3).trim()};
+}
+/* Store number may sit anywhere in the label and carry leading zeros. */
+/* The export's category column is wrong for POS items (Terminals, Kitchen
+   Screen and friends are all filed under "IT"). The ASSET name is unambiguous,
+   so resolve against the live BK tree by asset and fall back to the stated
+   category only when the asset can't be placed. */
+function impResolveCat(owlCat,asset,sid){
+  const tree=sid?catsForStore(sid):catsForDivision("bk");
+  const norm=x=>String(x||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  const a=norm(asset);
+  if(a){
+    for(const c of tree) for(const sb of (c.subs||[]))
+      if(norm(sb.label)===a) return {cat:c.key,sub:sb.key,how:"asset"};
+    for(const c of tree) for(const sb of (c.subs||[]))
+      if(norm(sb.label).includes(a)||a.includes(norm(sb.label))) return {cat:c.key,sub:sb.key,how:"asset~"};
+  }
+  const oc=norm(owlCat);
+  const hit=tree.find(c=>norm(c.label)===oc)||tree.find(c=>oc&&norm(c.label).includes(oc));
+  return hit?{cat:hit.key,sub:"",how:"category"}:{cat:"",sub:"",how:""};
+}
+function impMatchStore(dept){
+  const num=impDigits((String(dept||"").match(/BK\s*0*(\d{3,6})/i)||[])[1]||"");
+  if(num){
+    const hit=Object.keys(RESTAURANTS).find(rid=>impDigits(store(rid).storeNumber)===num);
+    if(hit)return {sid:hit,how:"number"};
+  }
+  const clean=String(dept||"").replace(/BK\s*\d+/ig,"").replace(/[^a-z ]/ig," ").trim().toLowerCase();
+  if(clean.length>3){
+    const hit=Object.keys(RESTAURANTS).find(rid=>storeName(rid).toLowerCase().includes(clean));
+    if(hit)return {sid:hit,how:"name"};
+  }
+  return {sid:null,how:null};
+}
+/* Rough similarity for the near-duplicate check. */
+function impSim(a,b){
+  const tok=x=>new Set(String(x||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w.length>3));
+  const A=tok(a),B=tok(b); if(!A.size||!B.size)return 0;
+  let n=0; A.forEach(w=>{if(B.has(w))n++});
+  return n/Math.min(A.size,B.size);
+}
+
+function buildImportPreview(grid){
+  const out=$("impOut");
+  if(!grid||grid.length<2){out.innerHTML=`<div class="imp-err">That file has no data rows.</div>`;return}
+  const hdr=grid[0].map(h=>String(h||"").trim());
+  const col=n=>hdr.findIndex(h=>h.toLowerCase()===n.toLowerCase());
+  const need=["Task #","Department","Asset/List","Description","Created","Priority"];
+  const missing=need.filter(n=>col(n)<0);
+  if(missing.length){out.innerHTML=`<div class="imp-err">This doesn't look like an OwlOps export — missing column(s): <b>${esc(missing.join(", "))}</b></div>`;return}
+
+  const G=(r,n)=>{const i=col(n);return i<0?"":r[i]};
+  const existing=Object.values(TICKETS);
+  IMP.rows=[];
+  for(let i=1;i<grid.length;i++){
+    const r=grid[i]; if(!String(G(r,"Task #")||"").trim())continue;
+    const {category,asset}=impAsset(G(r,"Asset/List"));
+    const m=impMatchStore(G(r,"Department"));
+    const desc=String(G(r,"Description")||"").trim();
+    const closeDate=impDate(G(r,"Close Date"));
+    const ref=String(G(r,"Task #")).trim();
+    // duplicate detection: same external ref, or same store + very similar text
+    let dup=existing.find(t=>t.externalRef&&String(t.externalRef)===ref);
+    if(!dup&&m.sid) dup=existing.find(t=>t.storeId===m.sid&&impSim(t.description,desc)>=0.6);
+    // Also compare against EARLIER ROWS IN THIS FILE. Multi-year OwlOps exports
+    // often carry several similar tickets for one store (e.g. tile repairs in
+    // four different areas), so flag rather than auto-skip: these are usually
+    // legitimately distinct and only you can tell.
+    let sibling=null;
+    if(!dup&&m.sid){
+      const near=IMP.rows.find(x=>x.sid===m.sid&&impSim(x.desc,desc)>=0.6);
+      if(near)sibling="#"+near.ref;
+    }
+    const res=impResolveCat(category,asset,m.sid);
+    IMP.rows.push({
+      ref, dept:String(G(r,"Department")||""), sid:m.sid, matchHow:m.how,
+      owlCat:category, asset, cat:res.cat, sub:res.sub, catHow:res.how, desc,
+      pri:OWL_PRI[String(G(r,"Priority")||"").trim().toLowerCase()]||"normal",
+      createdAt:impDate(G(r,"Created"))||now(),
+      updatedAt:impDate(G(r,"Last Updated"))||null,
+      createdByName:String(G(r,"Created By")||"").trim(),
+      lastNote:String(G(r,"Last Update")||"").trim(),
+      lastBy:String(G(r,"Last Updated By")||"").trim(),
+      closedAt:closeDate, closeNotes:String(G(r,"Close Notes")||"").trim(),
+      closedBy:String(G(r,"Closed By")||"").replace(/^n\/a$/i,"").trim(),
+      dupOf:dup?(dup.shortId||"existing ticket"):null,
+      sibling,                       // similar row earlier in this same file
+      skip:!!dup                     // only true duplicates are pre-unticked
+    });
+  }
+  // seed category mapping: exact/loose match against the live category list
+  const owlCats=[...new Set(IMP.rows.map(r=>r.owlCat).filter(Boolean))];
+  owlCats.forEach(c=>{
+    if(IMP.catMap[c])return;
+    const lc=c.toLowerCase();
+    const hit=Object.keys(CATEGORIES).find(k=>CATEGORIES[k].toLowerCase()===lc)
+           || Object.keys(CATEGORIES).find(k=>lc.includes(CATEGORIES[k].toLowerCase()));
+    IMP.catMap[c]=hit||"";
+  });
+  IMP.loaded=true;
+  renderImportPreview();
+}
+
+function renderImportPreview(){
+  const out=$("impOut"); if(!out)return;
+  const rows=IMP.rows;
+  const ov=$("modalOverlay"); if(ov)ov.classList.add("wide");
+  const unmatched=rows.filter(r=>!r.sid).length;
+  const dups=rows.filter(r=>r.dupOf||r.sibling).length;
+  const queued=rows.filter(r=>impReady(r)).length;
+
+  const catRows=Object.keys(IMP.catMap).sort().map(c=>{
+    const opts=Object.entries(CATEGORIES).map(([k,l])=>`<option value="${k}"${IMP.catMap[c]===k?" selected":""}>${esc(l)}</option>`).join("");
+    return `<div class="imp-map">
+      <span class="imp-owl">${esc(c)}</span><span class="imp-arrow">→</span>
+      <select class="input" onchange="IMP.catMap['${escA(c)}']=this.value;renderImportPreview()">
+        <option value="">— choose a category —</option>${opts}
+      </select></div>`;}).join("");
+
+  const cards=rows.map((r,i)=>impCard(r,i)).join("");
+
+  out.innerHTML=`
+    <div class="imp-summary">
+      <div class="rp-stat"><div class="rp-n">${rows.length}</div><div class="rp-l">in file</div></div>
+      <div class="rp-stat"><div class="rp-n">${queued}</div><div class="rp-l">queued</div></div>
+      <div class="rp-stat"><div class="rp-n">${unmatched}</div><div class="rp-l">no store</div></div>
+      <div class="rp-stat"><div class="rp-n">${dups}</div><div class="rp-l">possible dupes</div></div>
+    </div>
+    ${Object.values(IMP.catMap).some(v=>!v)?`<div class="imp-warnbox">Some OwlOps categories still need mapping — those rows use their own resolved category where possible.</div>`:""}
+    ${catRows?`<div class="section-label" style="margin-top:16px">Category mapping<span class="ln"></span></div>${catRows}`:""}
+    <div class="section-label" style="margin-top:18px">Queue · ${queued} of ${rows.length}<span class="ln"></span></div>
+    <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 10px">Nothing is written yet. Review one at a time — each ticket is saved only when you approve it.</p>
+    <div class="imp-list">${cards}</div>
+    <button class="btn btn-primary btn-block" style="margin-top:14px" ${queued?"":"disabled"} onclick="startImportReview()">
+      Review &amp; import ${queued} ticket(s) →</button>`;
+}
+function impReady(r){return !!(r.sid && !r.skip && (r.cat||IMP.catMap[r.owlCat]) && !r.done)}
+function impCard(r,i){
+  const cat=r.cat||IMP.catMap[r.owlCat];
+  const problem = r.done ? `<span class="imp-ok">imported ${esc(r.done)}</span>`
+                : !r.sid ? `<span class="imp-bad">store not found</span>`
+                : !cat  ? `<span class="imp-bad">needs a category</span>`
+                : r.dupOf ? `<span class="imp-warn">looks like ${esc(r.dupOf)}</span>`
+                : r.sibling ? `<span class="imp-warn">similar to ${esc(r.sibling)} in this file</span>` : "";
+  return `<div class="imp-card${(r.skip||r.done)?" off":""}">
+    <label class="imp-chk"><input type="checkbox" ${(r.skip||r.done)?"":"checked"} ${r.done?"disabled":""} onchange="IMP.rows[${i}].skip=!this.checked;renderImportPreview()"></label>
+    <div class="imp-body">
+      <div class="imp-top">
+        <b>${r.sid?esc(storeName(r.sid)):esc(r.dept)}</b>
+        <span class="r-pri ${r.pri==="emergency"?"e":r.pri==="urgent"?"u":""}">${esc(PRIORITIES[r.pri]||"Normal")}</span>
+        ${problem}
+      </div>
+      <div class="imp-desc">${esc(r.desc||"(no description)")}</div>
+      <div class="imp-meta mono">
+        ${cat?esc(ALL_CATEGORIES[cat]||cat):"—"}${r.sub?" → "+esc(subLabel(r.sub)):""}${r.asset&&!r.sub?" · "+esc(r.asset):""}
+        · ${r.closedAt?"closed":"unassigned"}
+        · ${new Date(r.createdAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}
+        · ${esc(r.createdByName||"unknown")}
+        · OwlOps #${esc(r.ref)}
+      </div>
+      ${r.lastNote?`<div class="imp-note">💬 ${esc(r.lastNote)}${r.lastBy?` — ${esc(r.lastBy)}`:""}</div>`:""}
+    </div></div>`;
+}
+
+/* ---- one-at-a-time review -------------------------------------------------
+   Deliberately NOT a bulk write. Each ticket is shown fully editable; it is
+   only written when you approve it, then the next one loads. You can stop at
+   any point and everything already approved stays saved. */
+let IMP_Q=[], IMP_I=0, IMP_DONE=0, IMP_FAIL=0;
+function startImportReview(){
+  IMP_Q=IMP.rows.map((r,i)=>i).filter(i=>impReady(IMP.rows[i]));
+  IMP_I=0; IMP_DONE=0; IMP_FAIL=0;
+  if(!IMP_Q.length){toast("Nothing queued","err");return}
+  renderImportStep();
+}
+function renderImportStep(){
+  const out=$("impOut"); if(!out)return;
+  if(IMP_I>=IMP_Q.length){
+    out.innerHTML=`<div class="imp-done">
+      <div class="imp-done-ic">✓</div>
+      <h3>${IMP_DONE} ticket${IMP_DONE===1?"":"s"} imported</h3>
+      <p>${IMP_FAIL?IMP_FAIL+" failed and stayed in the queue.":"Everything you approved was saved."}</p>
+      <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="renderImportPreview()">Back to the queue</button>
+      <button class="btn btn-primary btn-block" style="margin-top:8px" onclick="closeModal();render()">Done</button>
+    </div>`;
+    refreshInBackground();
+    return;
+  }
+  const r=IMP.rows[IMP_Q[IMP_I]];
+  const cat=r.cat||IMP.catMap[r.owlCat];
+  const stores=Object.keys(RESTAURANTS).sort((a,b)=>storeName(a).localeCompare(storeName(b)));
+  const tree=catsForStore(r.sid);
+  const catOpts=tree.map(c=>`<option value="${c.key}"${c.key===cat?" selected":""}>${esc(c.label)}</option>`).join("");
+  const cur=tree.find(c=>c.key===cat);
+  const subs=(cur&&cur.subs)||[];
+  const subOpts=subs.length?`<option value="">— none —</option>`+subs.map(x=>`<option value="${x.key}"${x.key===r.sub?" selected":""}>${esc(x.label)}</option>`).join(""):"";
+  const priOpts=Object.entries(PRIORITIES).map(([k,v])=>`<option value="${k}"${k===r.pri?" selected":""}>${v}</option>`).join("");
+  const dstr=new Date(r.createdAt).toISOString().slice(0,10);
+
+  out.innerHTML=`
+    <div class="imp-step-head">
+      <div><b>Ticket ${IMP_I+1} of ${IMP_Q.length}</b> <span class="mono" style="color:var(--ink-dim)">OwlOps #${esc(r.ref)}</span></div>
+      <div class="bp-track" style="margin-top:8px"><div class="bp-fill" style="width:${Math.round(IMP_I/IMP_Q.length*100)}%"></div></div>
+    </div>
+    ${r.dupOf?`<div class="imp-warnbox">Looks like an existing ticket (${esc(r.dupOf)}). Skip if it's the same issue.</div>`:""}
+    ${r.sibling?`<div class="imp-warnbox">Similar to ${esc(r.sibling)} earlier in this file — check it isn't the same issue.</div>`:""}
+    <div class="field" style="margin-top:12px"><label class="label">Store</label>
+      <select class="input" id="isStore" onchange="impStepStoreChanged()">
+        ${stores.map(id=>`<option value="${id}"${id===r.sid?" selected":""}>${esc(storeName(id))}</option>`).join("")}
+      </select>
+      <div class="uz-h mono" style="margin-top:4px;color:var(--ink-dim)">OwlOps said: ${esc(r.dept)}</div></div>
+    <div style="display:flex;gap:12px;margin-top:12px">
+      <div class="field" style="flex:1"><label class="label">Category</label>
+        <select class="input" id="isCat" onchange="impStepCatChanged()">${catOpts}</select></div>
+      <div class="field" style="flex:1"><label class="label">Priority</label>
+        <select class="input" id="isPri">${priOpts}</select></div>
+    </div>
+    <div class="field" id="isSubWrap" style="margin-top:12px;${subs.length?"":"display:none"}">
+      <label class="label">Subcategory</label><select class="input" id="isSub">${subOpts}</select>
+      ${r.asset?`<div class="uz-h mono" style="margin-top:4px;color:var(--ink-dim)">OwlOps asset: ${esc(r.asset)}</div>`:""}</div>
+    <div class="field" style="margin-top:12px"><label class="label">Description</label>
+      <textarea class="input" id="isDesc" rows="4">${esc(r.desc)}</textarea></div>
+    <div style="display:flex;gap:12px;margin-top:12px">
+      <div class="field" style="flex:1"><label class="label">Created date</label>
+        <input class="input" id="isDate" type="date" value="${dstr}"></div>
+      <div class="field" style="flex:1"><label class="label">Reported by</label>
+        <input class="input" id="isBy" value="${escA(r.createdByName||"")}"></div>
+    </div>
+    ${r.lastNote?`<div class="field" style="margin-top:12px"><label class="label">Comment to carry over</label>
+      <textarea class="input" id="isNote" rows="2">${esc(r.lastNote)}</textarea></div>`:""}
+    <div style="display:flex;gap:9px;margin-top:16px">
+      <button class="btn btn-ghost" style="flex:1" onclick="impStepSkip()">Skip</button>
+      <button class="btn btn-primary" style="flex:2" id="isSave" onclick="impStepSave()">✓ Import this ticket</button>
+    </div>
+    <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="renderImportPreview()">Stop and go back</button>`;
+}
+function impStepStoreChanged(){
+  const r=IMP.rows[IMP_Q[IMP_I]];
+  r.sid=$("isStore").value;
+  renderImportStep();          // category tree can differ by division
+}
+function impStepCatChanged(){
+  const r=IMP.rows[IMP_Q[IMP_I]];
+  const tree=catsForStore($("isStore").value);
+  const c=tree.find(x=>x.key===$("isCat").value);
+  const subs=(c&&c.subs)||[];
+  const wrap=$("isSubWrap"), sel=$("isSub");
+  if(!subs.length){wrap.style.display="none";sel.innerHTML="";return}
+  wrap.style.display="";
+  sel.innerHTML=`<option value="">— none —</option>`+subs.map(x=>`<option value="${x.key}">${esc(x.label)}</option>`).join("");
+}
+function impStepSkip(){IMP_I++;renderImportStep()}
+async function impStepSave(){
+  const idx=IMP_Q[IMP_I], r=IMP.rows[idx];
+  const btn=$("isSave"); if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Saving…'}
+  // take whatever is on screen now
+  r.sid=$("isStore").value;
+  const cat=$("isCat").value;
+  const sub=($("isSubWrap").style.display==="none")?"":($("isSub").value||"");
+  r.pri=$("isPri").value;
+  r.desc=$("isDesc").value.trim();
+  r.createdByName=$("isBy").value.trim();
+  if($("isNote"))r.lastNote=$("isNote").value.trim();
+  const d=Date.parse($("isDate").value+"T12:00:00");
+  if(!isNaN(d))r.createdAt=d;
+
+  const id=uid();
+  const shortId=nextShortId(r.sid,cat);
+  const activity=[{ts:r.createdAt,by:r.createdByName||"OwlOps",role:"manager",action:"created",note:"Imported from OwlOps #"+r.ref}];
+  const comments=[];
+  if(r.lastNote)comments.push({id:uid(),by:r.lastBy||"OwlOps",role:"manager",email:"",text:r.lastNote,ts:r.updatedAt||r.createdAt});
+  if(r.closeNotes)comments.push({id:uid(),by:r.closedBy||"OwlOps",role:"manager",email:"",text:r.closeNotes,ts:r.closedAt||r.createdAt});
+  if(r.closedAt)activity.push({ts:r.closedAt,by:r.closedBy||"OwlOps",role:"manager",action:"status",toStatus:"closed",note:"Closed in OwlOps"});
+  const t={
+    shortId, storeId:r.sid, category:cat, subcategory:sub,
+    priority:r.pri, description:r.desc, photos:[],
+    status:r.closedAt?"closed":"unassigned", assignedVendorId:null, assignedTechId:null,
+    asset:r.asset||"", externalRef:r.ref, externalSource:"owlops",
+    createdBy:"", createdByRole:"manager", createdByName:r.createdByName||"OwlOps import",
+    createdAt:r.createdAt, updatedAt:r.updatedAt||r.createdAt,
+    activity, comments
+  };
+  if(r.closedAt)t.finishedAt=r.closedAt;
+  try{
+    await apiWrite(`${TICKETS_NODE}/${id}`,t);
+    TICKETS[id]=t; LOCAL_ECHO[id]=t;
+    r.done=shortId; r.skip=true; IMP_DONE++;
+    toast("Imported "+shortId);
+    IMP_I++; renderImportStep();
+  }catch(e){
+    IMP_FAIL++;
+    if(btn){btn.disabled=false;btn.innerHTML="✓ Import this ticket"}
+    toast(e.message||"Could not save that ticket","err");
+  }
+}
+
 /* ============================================================ VENDORS */
 function openSettings(){
   const adminEmails=[...new Set([...ADMIN_EMAILS,...Object.values(MASTER.admins||{}).map(a=>(a.email||"").toLowerCase()).filter(Boolean)])];
@@ -3061,13 +3626,11 @@ function openSettings(){
       ${rows}
       <div class="contact-note">Used as the reply-to / callback when SMS (Twilio) and email (SendGrid) are wired up.</div>
       <div class="section-label" style="margin-top:22px">Ticket categories<span class="ln"></span></div>
-      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Shared with FindMi. Renaming is safe; removing one only hides it from new tickets.</p>
-      <div id="catRows">${Object.entries(CATEGORIES).map(([k,label])=>`
-        <div class="cat-row" data-key="${escA(k)}">
-          <input class="input cat-label" value="${escA(label)}">
-          <button class="btn btn-danger btn-sm" onclick="this.closest('.cat-row').remove()">✕</button>
-        </div>`).join("")}</div>
-      <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addCatRow()">＋ Add category</button>
+      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Each division has its own list. Burger King uses two levels; the others are flat until you build them out.</p>
+      <button class="btn btn-ghost btn-block" onclick="openCatEditor()">🗂 Edit categories by division</button>
+      <div class="section-label" style="margin-top:22px">Import<span class="ln"></span></div>
+      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Bring in open tickets from an OwlOps export. Nothing is written until you approve the preview.</p>
+      <button class="btn btn-ghost btn-block" onclick="openImport()">📥 Import tickets from OwlOps</button>
     </div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
@@ -3105,17 +3668,6 @@ async function saveSettings(){
         const newId="adm_"+uid();
         await apiWrite(`admins/${newId}`,{id:newId,email,name:email.split("@")[0],tier:"overwatch",replyNumber:num||null});
       }
-    }
-    // Ticket categories (shared with FindMi) — stored as an ordered array.
-    const catList=[...document.querySelectorAll("#catRows .cat-row")].map(r=>{
-      const label=(r.querySelector(".cat-label").value||"").trim();
-      if(!label)return null;
-      return {key:r.getAttribute("data-key")||catKeyFrom(label),label};
-    }).filter(Boolean);
-    if(catList.length){
-      await apiWrite("admins/ticketCategories",catList);
-      MASTER.admins=MASTER.admins||{};MASTER.admins.ticketCategories=catList;
-      loadCategories();
     }
     // Apply locally right away; the CDN copy of admins/* can lag ~60s.
     for(const i of inputs){const em=i.getAttribute("data-email").toLowerCase();const n=i.value.trim();if(n)REPLY_NUMBERS[em]=n;else delete REPLY_NUMBERS[em];}
