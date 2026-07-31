@@ -268,6 +268,22 @@ body.no-reftags .reftag{display:none}
 .overlay.on{opacity:1;pointer-events:auto}
 @media(min-width:640px){.overlay{align-items:center;padding:40px 24px}}
 .overlay.wide .sheet{max-width:900px}
+/* Tall mode — for long forms like the import reviewer. Fills the viewport and
+   keeps the action row pinned so you never scroll or zoom to find the buttons. */
+.overlay.tall{padding:14px}
+.overlay.tall .sheet{max-width:820px;height:calc(100vh - 28px);max-height:none;display:flex;flex-direction:column;overflow:hidden}
+.overlay.tall .sheet-head{flex:0 0 auto}
+.overlay.tall .sheet-body{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.imp-actions{position:sticky;bottom:0;background:var(--panel);border-top:1px solid var(--line);
+  padding:12px 0 4px;margin-top:16px;display:flex;gap:9px;z-index:3}
+@media(max-width:639px){
+  .overlay.tall{padding:0}
+  .overlay.tall .sheet{height:100vh;border-radius:0}
+  .imp-fields{grid-template-columns:1fr}
+}
+/* two-column field grid so the form fits without endless scrolling */
+.imp-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.imp-fields .full{grid-column:1/-1}
 .sheet{position:relative;background:var(--panel);border:1px solid var(--line);width:100%;max-width:520px;max-height:calc(100vh - 96px);overflow-y:auto;border-radius:18px;transform:translateY(20px);transition:.25s;box-shadow:var(--shadow)}
 @media(max-width:639px){.sheet{max-height:calc(100vh - 62px)}}
 .overlay.on .sheet{transform:translateY(0)}
@@ -639,7 +655,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "4.7";
+const APP_VERSION = "4.8";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2175,7 +2191,7 @@ function modal(html){
   // new modal opens before that timer fires, the wipe would erase it — cancel
   // any pending wipe so back-to-back close→open is always safe.
   if(o._wipeTimer){clearTimeout(o._wipeTimer);o._wipeTimer=null;}
-  o.classList.remove("wide");   // only the import preview widens the sheet
+  o.classList.remove("wide");o.classList.remove("tall");   // only the importer changes sheet size
   // Guarantee a close affordance: if the modal's own markup doesn't include an
   // X button, inject a floating one in the top-right that dismisses the modal.
   const hasOwnX = /class="x-btn"/.test(html);
@@ -3692,6 +3708,7 @@ function renderImportStep(){
     refreshInBackground();
     return;
   }
+  const ovv=$("modalOverlay"); if(ovv){ovv.classList.remove("wide");ovv.classList.add("tall");}
   const r=IMP.rows[IMP_Q[IMP_I]];
   const cat=r.cat||IMP.catMap[r.owlCat];
   const stores=Object.keys(RESTAURANTS).sort((a,b)=>storeName(a).localeCompare(storeName(b)));
@@ -3710,33 +3727,29 @@ function renderImportStep(){
     </div>
     ${r.dupOf?`<div class="imp-warnbox">Looks like an existing ticket (${esc(r.dupOf)}). Skip if it's the same issue.</div>`:""}
     ${r.sibling?`<div class="imp-warnbox">Similar to ${esc(r.sibling)} earlier in this file — check it isn't the same issue.</div>`:""}
-    <div class="field" style="margin-top:12px"><label class="label">Store</label>
+    <div class="imp-fields"><div class="field full"><label class="label">Store</label>
       <select class="input" id="isStore" onchange="impStepStoreChanged()">
         ${stores.map(id=>`<option value="${id}"${id===r.sid?" selected":""}>${esc(storeName(id))}</option>`).join("")}
       </select>
       <div class="uz-h mono" style="margin-top:4px;color:var(--ink-dim)">OwlOps said: ${esc(r.dept)}</div></div>
-    <div style="display:flex;gap:12px;margin-top:12px">
-      <div class="field" style="flex:1"><label class="label">Category</label>
+      <div class="field"><label class="label">Category</label>
         <select class="input" id="isCat" onchange="impStepCatChanged()">${catOpts}</select></div>
-      <div class="field" style="flex:1"><label class="label">Priority</label>
+      <div class="field"><label class="label">Priority</label>
         <select class="input" id="isPri">${priOpts}</select></div>
-    </div>
-    <div class="field" id="isSubWrap" style="margin-top:12px;${subs.length?"":"display:none"}">
+    <div class="field full" id="isSubWrap" style="${subs.length?"":"display:none"}">
       <label class="label">Subcategory</label><select class="input" id="isSub">${subOpts}</select>
       ${r.asset?`<div class="uz-h mono" style="margin-top:4px;color:var(--ink-dim)">OwlOps asset: ${esc(r.asset)}</div>`:""}</div>
-    <div class="field" style="margin-top:12px"><label class="label">Assign to
+    <div class="field full"><label class="label">Assign to
       ${r.assignName?`<span style="font-weight:400;color:var(--green,#16a34a)">· matched from "${esc(r.assignRaw)}"</span>`
         :(r.assignRaw?`<span style="font-weight:400;color:var(--ink-dim)">· OwlOps said "${esc(r.assignRaw)}" — no match in your directory</span>`:"")}</label>
       <select class="input" id="isWho">${impAssignOpts(r)}</select>
       <div class="uz-h mono" style="margin-top:4px;color:var(--ink-dim)">Picking someone dispatches the ticket to them.</div></div>
-    <div class="field" style="margin-top:12px"><label class="label">Description</label>
-      <textarea class="input" id="isDesc" rows="4">${esc(r.desc)}</textarea></div>
-    <div style="display:flex;gap:12px;margin-top:12px">
-      <div class="field" style="flex:1"><label class="label">Created date</label>
+    <div class="field full"><label class="label">Description</label>
+      <textarea class="input" id="isDesc" rows="3">${esc(r.desc)}</textarea></div>
+      <div class="field"><label class="label">Created date</label>
         <input class="input" id="isDate" type="date" value="${dstr}"></div>
-      <div class="field" style="flex:1"><label class="label">Reported by</label>
+      <div class="field"><label class="label">Reported by</label>
         <input class="input" id="isBy" value="${escA(r.createdByName||"")}"></div>
-    </div>
     ${(r.owlRegion||r.owlVendor||r.owlTime||r.owlCost)?`<div class="imp-extra">
       <b>Also carried over:</b>
       ${r.owlRegion?`<span>Region: ${esc(r.owlRegion)}</span>`:""}
@@ -3746,14 +3759,15 @@ function renderImportStep(){
       ${r.owlCost?`<span>Cost: ${esc(r.owlCost)}</span>`:""}
       ${r.owlParts?`<span>Parts: ${esc(r.owlParts)}</span>`:""}
     </div>`:""}
-    <div class="field" style="margin-top:12px"><label class="label">Comment
+    <div class="field full"><label class="label">Comment
       <span style="font-weight:400;color:var(--ink-dim)">· OwlOps exports only the most recent note${r.lastNote?"":" — this ticket had none"}</span></label>
-      <textarea class="input" id="isNote" rows="3" placeholder="Add or paste any history worth keeping…">${esc(r.lastNote||"")}</textarea></div>
-    <div style="display:flex;gap:9px;margin-top:16px">
-      <button class="btn btn-ghost" style="flex:1" onclick="impStepSkip()">Skip</button>
-      <button class="btn btn-primary" style="flex:2" id="isSave" onclick="impStepSave()">✓ Import this ticket</button>
+      <textarea class="input" id="isNote" rows="2" placeholder="Add or paste any history worth keeping…">${esc(r.lastNote||"")}</textarea></div>
     </div>
-    <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="renderImportPreview()">Pause · see the whole queue</button>`;
+    <div class="imp-actions">
+      <button class="btn btn-ghost" style="flex:1" onclick="renderImportPreview()">Queue</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="impStepSkip()">Skip</button>
+      <button class="btn btn-primary" style="flex:2" id="isSave" onclick="impStepSave()">✓ Import</button>
+    </div>`;
 }
 /* Assignee options, with the auto-matched person pre-selected. */
 function impAssignOpts(r){
@@ -3793,8 +3807,6 @@ async function impStepSave(){
   r.desc=$("isDesc").value.trim();
   r.createdByName=$("isBy").value.trim();
   if($("isNote"))r.lastNote=$("isNote").value.trim();
-  r.assignKind=aTech?"tech":aVend?"vendor":"";
-  r.assignId=aTech||aVend||"";
   const d=Date.parse($("isDate").value+"T12:00:00");
   if(!isNaN(d))r.createdAt=d;
 
@@ -3804,6 +3816,9 @@ async function impStepSave(){
   let aTech=null,aVend=null;
   if(whoVal.startsWith("tech:"))aTech=whoVal.slice(5);
   else if(whoVal.startsWith("vendor:"))aVend=whoVal.slice(7);
+  // remember the override so returning to this row keeps the choice
+  r.assignKind=aTech?"tech":(aVend?"vendor":"");
+  r.assignId=aTech||aVend||"";
   const id=uid();
   const shortId=nextShortId(r.sid,cat);
   const activity=[{ts:r.createdAt,by:r.createdByName||"OwlOps",role:"manager",action:"created",note:"Imported from OwlOps #"+r.ref}];
