@@ -130,6 +130,7 @@ body.no-reftags .reftag{display:none}
 .tile.big{transform:scale(1.06);box-shadow:0 6px 20px rgba(40,55,80,.2);z-index:2}
 .tile.big .tile-n{font-size:30px}
 .board-controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+.sort-select{max-width:210px}
 .loc-select{max-width:300px;flex:0 1 auto}
 .search{flex:1;min-width:160px}
 .list-head{font-family:var(--disp);font-weight:800;font-size:18px;margin:0 0 12px}
@@ -433,6 +434,9 @@ body.no-reftags .reftag{display:none}
 .tech-pick .tp-dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 1px rgba(0,0,0,.12)}
 .tech-pick .tp-body{display:flex;flex-direction:column;gap:2px;min-width:0}
 .tech-pick .tp-body span{font-size:12px;color:var(--ink-dim);font-weight:400}
+.div-group{margin-bottom:14px}
+.div-head{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);
+  margin-bottom:7px;padding-bottom:4px;border-bottom:1px solid var(--line)}
 .vcat-block{border:1px solid var(--line);border-radius:9px;padding:8px 9px;background:var(--panel)}
 .vcat-more{background:none;border:none;color:var(--amber-deep);font-size:11.5px;font-weight:600;cursor:pointer;padding:4px 0 0 26px;display:block}
 .vcat-subs{display:none;padding:6px 0 2px 22px;gap:5px;flex-direction:column}
@@ -538,7 +542,8 @@ body.simulating .wrap{padding-bottom:40px}
   .tile-n{font-size:22px}
   /* controls stack */
   .board-controls{flex-direction:column;align-items:stretch}
-  .loc-select{max-width:none}
+  .sort-select{max-width:210px}
+.loc-select{max-width:none}
   .search{width:100%}
   /* rows: stack the right side under the main content */
   .row{flex-direction:column;align-items:stretch;gap:9px;padding:12px 13px}
@@ -655,7 +660,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "4.8";
+const APP_VERSION = "5.0";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -738,6 +743,20 @@ function loadCategories(){
     (c.subs||[]).forEach(sb=>{SUBCATEGORIES[sb.key]={label:sb.label,parent:c.key}});
   }));
   ALL_CATEGORIES={...CATEGORIES,...LEGACY_CATEGORIES};
+}
+/* CATEGORIES is a flat union of every division — correct for looking up a
+   label, wrong as a picker. This returns the categories grouped by division,
+   collapsing divisions that share an identical list (C-Store / Car Wash /
+   Subway / Other all use the same flat list) so nothing is shown four times. */
+function categoryGroupsByDivision(){
+  const byShape={};
+  DIVISIONS.forEach(d=>{
+    const list=catsForDivision(d.key);
+    const shape=list.map(c=>c.key).join("|");
+    if(!byShape[shape])byShape[shape]={divs:[],cats:list};
+    byShape[shape].divs.push(d.label);
+  });
+  return Object.values(byShape).map(g=>({label:g.divs.join(" · "),cats:g.cats}));
 }
 function subLabel(k){return (SUBCATEGORIES[k]||{}).label||""}
 /* "Equipment → Fryer" for display. */
@@ -925,6 +944,33 @@ function paymiBanner(){
 let REPLY_NUMBERS={}; // email(lowercased) -> reply phone number, stored in master
 let TICKETS={}, VENDORS={}, RESTAURANTS={};
 let curFilter="active", curSearch="", curStore="all", tilesExpanded=false, curAssignee="all", curCategory="all";
+/* List sort. Priority is the default everywhere so emergencies surface first. */
+let curSort="priority";
+const PRI_RANK={emergency:0,urgent:1,normal:2};
+function priRankOf(t){const r=PRI_RANK[t.priority];return r===undefined?2:r}
+function sortRows(rows){
+  const out=rows.slice();
+  if(curSort==="store"){
+    out.sort((a,b)=>storeName(a.storeId).localeCompare(storeName(b.storeId))
+      || priRankOf(a)-priRankOf(b) || (b.createdAt||0)-(a.createdAt||0));
+  }else if(curSort==="category"){
+    out.sort((a,b)=>(catPath(a)||"").localeCompare(catPath(b)||"")
+      || priRankOf(a)-priRankOf(b) || (b.createdAt||0)-(a.createdAt||0));
+  }else if(curSort==="newest"){
+    out.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  }else if(curSort==="oldest"){
+    out.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+  }else{ // priority — emergencies on top, then oldest first within a band
+    out.sort((a,b)=>priRankOf(a)-priRankOf(b) || (a.createdAt||0)-(b.createdAt||0));
+  }
+  return out;
+}
+function sortSelect(){
+  const opts=[["priority","Priority (emergencies first)"],["store","Store"],["category","Category"],
+              ["newest","Newest first"],["oldest","Oldest first"]];
+  return `<select class="input sort-select" onchange="curSort=this.value;render()" title="Sort">
+    ${opts.map(([k,l])=>`<option value="${k}"${curSort===k?" selected":""}>↕ ${l}</option>`).join("")}</select>`;
+}
 /* bulk select removed */
 let openGroups={};          // storeId -> bool (expanded)
 let managerScreen="hub";
@@ -1682,7 +1728,7 @@ function renderCoachStore(sid){
   // Guard: if the store isn't theirs (or vanished), bounce to the hub.
   if(!coachStoreList().includes(sid)){coachScreen="hub";return renderCoachHub();}
   const all=ticketsForStore(sid);
-  const open=all.filter(t=>ACTIVE_STATUSES.includes(t.status)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  const open=sortRows(all.filter(t=>ACTIVE_STATUSES.includes(t.status)));
   const done=all.filter(t=>!ACTIVE_STATUSES.includes(t.status)).sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
   const dir=storeDirector(sid), coach=storeCoach(sid), tech=storeTech(sid);
   const openCards=open.length
@@ -1708,6 +1754,7 @@ function renderCoachStore(sid){
       <div class="hb-ic">📝</div><div class="hb-t">New ticket for this store</div>
       <div class="hb-d">Open a ticket for ${esc(storeName(sid))}.</div>
     </button>
+    <div class="board-controls" style="margin-bottom:10px">${sortSelect()}</div>
     <div class="section-label" style="margin-top:0">Open tickets · ${open.length}<span class="ln"></span></div>
     ${openCards}
     ${doneBlock}`;
@@ -1757,9 +1804,10 @@ function renderBoard(){
           <option value="all"${curStore==="all"?" selected":""}>All stores (${storeIds.length})</option>
           ${storeIds.slice().sort((a,b)=>storeName(a).localeCompare(storeName(b))).map(id=>`<option value="${id}"${curStore===id?" selected":""}>${esc(storeName(id))}</option>`).join("")}
         </select>`:""}
+        ${sortSelect()}
         <input class="input search" placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="onSearchInput(this)">
       </div>
-      ${curFilter==="dispatched"?(TECH_LOC
+      ${(curFilter==="dispatched"&&curSort==="priority")?(TECH_LOC
         ? `<div class="loc-note ok">📍 Sorted nearest first from your location</div>`
         : `<button class="loc-note ask" onclick="requestTechLocation(true)">📍 Turn on location to sort nearest jobs first</button>`):""}`;
     if(!storeIds.length) return techHead+`<div class="empty"><div class="empty-mark">🏪</div><h3>No stores dispatched to you</h3><p>Managed in the master.</p></div>`;
@@ -1770,8 +1818,10 @@ function renderBoard(){
     // priority — emergency, then urgent, then normal — and within the same
     // priority, nearest-to-farthest from the tech's location (if location is
     // granted; otherwise newest first).
-    if(curFilter==="dispatched"){
-      const priRank=t=>t.priority==="emergency"?0:(t.priority==="urgent"?1:2);
+    // Techs can re-sort too. On the default priority sort the in-progress job
+    // stays pinned and distance breaks ties; other sorts behave as chosen.
+    if(curFilter==="dispatched"&&curSort==="priority"){
+      const priRank=t=>priRankOf(t);
       trows.sort((a,b)=>{
         const ai=a.status==="in_progress"?0:1, bi=b.status==="in_progress"?0:1;
         if(ai!==bi)return ai-bi;
@@ -1831,6 +1881,7 @@ function renderBoard(){
       </select>`:""}
       ${(curFilter==="dispatched"||curFilter==="assigned")?assigneeFilterSelect(allTickets):""}
       ${SESSION.role==="admin"?categoryFilterSelect():""}
+      ${sortSelect()}
       <input class="input search" placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="onSearchInput(this)">
     </div>`;
 
@@ -1913,8 +1964,7 @@ function applyFilterSearch(list){
   if(curCategory!=="all")out=out.filter(t=>t.category===curCategory);
   if(curSearch){const q=curSearch.toLowerCase();
     out=out.filter(t=>(t.description||"").toLowerCase().includes(q)||(catPath(t)||"").toLowerCase().includes(q)||(t.shortId||"").toLowerCase().includes(q)||storeName(t.storeId).toLowerCase().includes(q)||storeNum(t.storeId).toLowerCase().includes(q))}
-  out.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
-  return out;
+  return sortRows(out);
 }
 // dropdown of the distinct assignees present in the current status, to filter by
 function assigneeFilterSelect(allTickets){
@@ -1933,6 +1983,7 @@ function categoryFilterSelect(){
   // CATEGORIES is already in the intended order (alphabetical, Other last).
   // Legacy categories are appended only if some ticket still uses them.
   const used=new Set(Object.values(TICKETS).map(t=>t.category));
+  const grouped=categoryGroupsByDivision();
   const list=[...Object.entries(CATEGORIES),
               ...Object.entries(LEGACY_CATEGORIES).filter(([k])=>used.has(k))];
   const opts=list
@@ -3632,7 +3683,9 @@ function renderImportPreview(){
   const queued=rows.filter(r=>impReady(r)).length;
 
   const catRows=Object.keys(IMP.catMap).sort().map(c=>{
-    const opts=Object.entries(CATEGORIES).map(([k,l])=>`<option value="${k}"${IMP.catMap[c]===k?" selected":""}>${esc(l)}</option>`).join("");
+    const opts=categoryGroupsByDivision().map(g=>
+      `<optgroup label="${escA(g.label)}">`+g.cats.map(c=>
+        `<option value="${c.key}"${IMP.catMap[c]===c.key?" selected":""}>${esc(c.label)}</option>`).join("")+`</optgroup>`).join("");
     return `<div class="imp-map">
       <span class="imp-owl">${esc(c)}</span><span class="imp-arrow">→</span>
       <select class="input" onchange="IMP.catMap['${escA(c)}']=this.value;renderImportPreview()">
@@ -3982,8 +4035,11 @@ function editTechMeta(id){
     <div class="sheet-body">
       <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Name, email and phone are managed in FindMi. Specialties and colour save to both apps.</p>
       <div class="field"><label class="label">Specialties <span style="font-weight:400;color:var(--ink-dim)">(none ticked = general, handles everything)</span></label>
-        <div class="cat-grid" id="tmCats">${Object.entries(CATEGORIES).map(([k,label])=>
-          `<label class="cat-chk"><input type="checkbox" value="${k}"${cur.includes(k)?" checked":""}><span>${esc(label)}</span></label>`).join("")}</div></div>
+        <div id="tmCats">${categoryGroupsByDivision().map(g=>`
+          <div class="div-group"><div class="div-head">${esc(g.label)}</div>
+            <div class="cat-grid">${g.cats.map(c=>
+              `<label class="cat-chk"><input type="checkbox" value="${c.key}"${cur.includes(c.key)?" checked":""}><span>${esc(c.label)}</span></label>`).join("")}</div>
+          </div>`).join("")}</div></div>
       <div class="field" style="margin-top:14px"><label class="label">Zone colour</label>
         <div class="sw-row" id="tmSw">${ZONE_PALETTE.map(c=>
           `<button type="button" class="sw${c.toLowerCase()===String(curColor).toLowerCase()?" on":""}" style="background:${c}" data-c="${c}" onclick="pickTmColor('${c}')"></button>`).join("")}</div>
@@ -4030,14 +4086,17 @@ function editVendor(id){
     <div class="sheet-body">
       <div class="field"><label class="label">Tech / company name</label><input class="input" id="vName" value="${escA(v.name||"")}" placeholder="e.g. Lone Star HVAC"></div>
       <div class="field" style="margin-top:14px"><label class="label">Coverage <span style="font-weight:400;color:var(--ink-dim)">(a whole category, or just the items they actually handle)</span></label>
-        <div class="cat-grid" id="vCats">${Object.entries(CATEGORIES).map(([k,label])=>{
-          const subs=(Object.values(DIVISION_CATEGORIES).flat().find(c=>c.key===k)||{}).subs||[];
-          const kids=subs.map(sb=>`<label class="cat-chk sub"><input type="checkbox" data-sub="${sb.key}" value="${sb.key}"${preCats.includes(sb.key)?" checked":""}><span>${esc(sb.label)}</span></label>`).join("");
-          return `<div class="vcat-block">
-            <label class="cat-chk"><input type="checkbox" data-cat="${k}" value="${k}"${preCats.includes(k)?" checked":""} onchange="vcatToggle(this)"><span><b>${esc(label)}</b>${subs.length?" — all":""}</span></label>
-            ${subs.length?`<button type="button" class="vcat-more" onclick="this.nextElementSibling.classList.toggle('open');this.textContent=this.nextElementSibling.classList.contains('open')?'▾ hide items':'▸ pick specific items'">▸ pick specific items</button>
-            <div class="vcat-subs">${kids}</div>`:""}
-          </div>`;}).join("")}</div>
+        <div id="vCats">${categoryGroupsByDivision().map(g=>`
+          <div class="div-group"><div class="div-head">${esc(g.label)}</div>
+            <div class="cat-grid">${g.cats.map(c=>{
+              const subs=c.subs||[];
+              const kids=subs.map(sb=>`<label class="cat-chk sub"><input type="checkbox" data-sub="${sb.key}" value="${sb.key}"${preCats.includes(sb.key)?" checked":""}><span>${esc(sb.label)}</span></label>`).join("");
+              return `<div class="vcat-block">
+                <label class="cat-chk"><input type="checkbox" data-cat="${c.key}" value="${c.key}"${preCats.includes(c.key)?" checked":""} onchange="vcatToggle(this)"><span><b>${esc(c.label)}</b>${subs.length?" — all":""}</span></label>
+                ${subs.length?`<button type="button" class="vcat-more" onclick="this.nextElementSibling.classList.toggle('open');this.textContent=this.nextElementSibling.classList.contains('open')?'▾ hide items':'▸ pick specific items'">▸ pick specific items</button>
+                <div class="vcat-subs">${kids}</div>`:""}
+              </div>`;}).join("")}</div>
+          </div>`).join("")}</div>
         ${legacyNote}
       </div>
       <div style="display:flex;gap:12px;margin-top:14px">
