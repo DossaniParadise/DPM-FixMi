@@ -361,6 +361,8 @@ body.no-reftags .reftag{display:none}
 .ow-dot{cursor:pointer}
 .ow-dot.on circle{transition:r .12s}
 .ow-dot:hover circle{stroke:var(--ink);stroke-width:2.2}
+.v-area{font-size:11.5px;color:var(--amber-deep);margin-top:4px;font-weight:600}
+.v-area.none{color:var(--ink-dim);font-weight:400}
 .v-notes{font-size:12px;color:var(--ink-mid);margin-top:5px;white-space:pre-wrap;
   background:var(--panel-2);border-left:3px solid var(--line);border-radius:5px;padding:6px 9px}
 .ow-leaflet{display:none;width:100%;height:460px;border-radius:14px 14px 0 0;z-index:1}
@@ -425,6 +427,10 @@ body.no-reftags .reftag{display:none}
 .ce-subs{border-top:1px solid var(--line);padding:10px 10px 10px 34px;background:var(--panel-2)}
 .ce-sub{display:flex;gap:7px;align-items:center;margin-bottom:6px}
 .ce-none{font-size:12px;color:var(--ink-dim);margin-bottom:8px}
+.vmap{width:100%;height:400px;border-radius:12px;border:1px solid var(--line);z-index:1}
+.vm-row{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.vm-row:hover{background:var(--panel-2)}
+@media(max-width:600px){.vmap{height:300px}}
 .vd-row{display:flex;align-items:center;gap:10px;margin-bottom:7px}
 .vd-row .vd-name{flex:1;font-size:13.5px}
 .vd-row select{width:130px}
@@ -660,7 +666,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "5.0";
+const APP_VERSION = "5.1";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -786,6 +792,34 @@ const CAT_PREFIX = {
 /* Does this vendor cover a given category key? Uses the new multi-select array
    when present; falls back to a loose text match for vendors still carrying the
    old free-text specialty so they still sort sensibly. */
+/* ---- VENDOR SERVICE AREAS -------------------------------------------------
+   A third-party vendor can be given a home ZIP and a mile radius. Once set,
+   that vendor is only offered for stores inside the circle — in-house techs are
+   unaffected, since FindMi defines their coverage explicitly.
+   ZIP -> lat/lng uses Zippopotam (free, no key). Coordinates are cached on the
+   vendor record so the lookup happens once, not on every render. */
+async function geocodeZip(zip){
+  const z=String(zip||"").trim().slice(0,5);
+  if(!/^\d{5}$/.test(z))throw new Error("Enter a 5-digit ZIP code");
+  const r=await fetchWithTimeout("https://api.zippopotam.us/us/"+z,{},15000);
+  if(!r.ok)throw new Error("That ZIP wasn't found");
+  const j=await r.json();
+  const pl=(j.places||[])[0];
+  if(!pl)throw new Error("That ZIP wasn't found");
+  return {lat:parseFloat(pl.latitude),lng:parseFloat(pl.longitude),
+          place:(pl["place name"]||"")+", "+(pl["state abbreviation"]||"")};
+}
+function vendorArea(v){
+  const lat=parseFloat(v&&v.svcLat), lng=parseFloat(v&&v.svcLng), r=parseFloat(v&&v.svcRadius);
+  return (isFinite(lat)&&isFinite(lng)&&isFinite(r)&&r>0)?{lat,lng,radius:r,zip:v.svcZip||"",place:v.svcPlace||""}:null;
+}
+/* No area set = available everywhere (so existing vendors keep working). */
+function vendorCoversStore(v,sid){
+  const a=vendorArea(v); if(!a)return true;
+  const c=storeCoords(sid); if(!c)return true;      // store has no GPS — don't hide the vendor
+  const d=distanceMiles({lat:a.lat,lng:a.lng},c);
+  return d!=null && d<=a.radius;
+}
 function vendorMatchesCategory(v,catKey,subKey){
   if(!catKey)return false;
   if(Array.isArray(v.categories)&&v.categories.length){
@@ -801,7 +835,9 @@ function vendorMatchesCategory(v,catKey,subKey){
    each alphabetical. DMs/DOs sometimes file under the wrong category, so we
    never HIDE a vendor — we only push the less likely ones to the bottom. */
 function vendorGroupsFor(t){
-  const all=Object.entries(VENDORS).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
+  const all=Object.entries(VENDORS)
+    .filter(([,v])=>vendorCoversStore(v,t.storeId))     // out-of-range vendors aren't offered
+    .sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
   const match=all.filter(([,v])=>vendorMatchesCategory(v,t.category,t.subcategory));
   const rest =all.filter(([,v])=>!vendorMatchesCategory(v,t.category,t.subcategory));
   return {match,rest};
@@ -1389,10 +1425,16 @@ function buildImpersonatedSession(kind,id){
 // flat roster of everyone an admin can view as; managers labeled by store
 function viewAsRoster(){
   const list=[];
-  Object.entries(MASTER.directors||{}).forEach(([id,d])=>list.push({kind:"director",id,primary:"Director — "+d.name,secondary:"",search:(d.name+" director").toLowerCase(),sortk:"1"+d.name}));
-  Object.entries(MASTER.areaCoaches||{}).forEach(([id,c])=>list.push({kind:"coach",id,primary:"Area Coach — "+c.name,secondary:"",search:(c.name+" area coach").toLowerCase(),sortk:"2"+c.name}));
-  Object.entries(MASTER.repairTechnicians||{}).forEach(([id,t])=>list.push({kind:"tech",id,primary:"Repair Tech — "+t.name,secondary:"",search:(t.name+" tech").toLowerCase(),sortk:"3"+t.name}));
-  Object.keys(RESTAURANTS).forEach(id=>{
+  // Overwatch sees everyone. A director sees only their own patch: the DMs
+  // under them, the techs servicing their stores, and their store managers.
+  const isDir=SESSION.role==="director";
+  const myStores=isDir?new Set(myStoreIds()):null;
+  const myCoaches=isDir?new Set(myStoreIds().map(id=>store(id).assignedAreaCoachId).filter(Boolean)):null;
+  const myTechs=isDir?new Set(myStoreIds().flatMap(id=>storeTechIds(id))):null;
+  if(!isDir) Object.entries(MASTER.directors||{}).forEach(([id,d])=>list.push({kind:"director",id,primary:"Director — "+d.name,secondary:"",search:(d.name+" director").toLowerCase(),sortk:"1"+d.name}));
+  Object.entries(MASTER.areaCoaches||{}).filter(([id])=>!isDir||myCoaches.has(id)).forEach(([id,c])=>list.push({kind:"coach",id,primary:"Area Coach — "+c.name,secondary:"",search:(c.name+" area coach").toLowerCase(),sortk:"2"+c.name}));
+  Object.entries(MASTER.repairTechnicians||{}).filter(([id])=>!isDir||myTechs.has(id)).forEach(([id,t])=>list.push({kind:"tech",id,primary:"Repair Tech — "+t.name,secondary:"",search:(t.name+" tech").toLowerCase(),sortk:"3"+t.name}));
+  Object.keys(RESTAURANTS).filter(id=>!isDir||myStores.has(id)).forEach(id=>{
     const s=RESTAURANTS[id];
     const mgr=s.storeManager||"—";
     list.push({kind:"manager",id,
@@ -1484,7 +1526,7 @@ const TECH_VISIBLE_STATUSES=["dispatched","waiting","in_progress","finished"];
 function ticketsForStore(sid){
   return Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}))
     .filter(t=>t.storeId===sid)
-    .filter(t=>SESSION.role==="admin" || t.status!=="closed")
+    .filter(t=>["admin","director"].includes(SESSION.role) || t.status!=="closed")
     .filter(t=>SESSION.role!=="tech" || TECH_VISIBLE_STATUSES.includes(t.status))
     // A tech sees ONLY tickets dispatched specifically to them — never other
     // tickets at the store, even unassigned ones.
@@ -1572,8 +1614,11 @@ function enterAppChrome(){
   $("brandSub").textContent=ROLE_LABEL[SESSION.role]+" Console";
   $("vendorTopBtn").classList.toggle("hidden",!canManageVendors());
   // View As is available only to a real (non-simulated) admin
-  const realAdmin = (REAL_SESSION?REAL_SESSION:SESSION).role==="admin" && !SESSION._sim;
-  $("viewAsBtn").classList.toggle("hidden",!realAdmin);
+  const realRole=(REAL_SESSION?REAL_SESSION:SESSION).role;
+  const realAdmin = realRole==="admin" && !SESSION._sim;
+  // Directors can also view as their own DMs / techs / store managers.
+  const canViewAs = !SESSION._sim && (realRole==="admin"||realRole==="director");
+  $("viewAsBtn").classList.toggle("hidden",!canViewAs);
   // Tech-location overwatch: any overwatch/admin (real or simulated) can view.
   $("techReportBtn").classList.toggle("hidden",SESSION.role!=="admin");
   $("settingsBtn").classList.toggle("hidden",!realAdmin);
@@ -1865,7 +1910,7 @@ function renderBoard(){
         <span class="exp-chevs">⟨ ⟩</span><span class="exp-hint">statuses</span>
       </button>
       <div class="tiles-mid">${midTiles}</div>
-      ${tile("closed",(SESSION.role==="admin"&&!CLOSED_LOADED)?CLOSED_COUNT:cnt("closed"),"CLOSED","No follow-up","var(--s-closed)")}
+      ${tile("closed",(["admin","director"].includes(SESSION.role)&&!CLOSED_LOADED)?CLOSED_COUNT:cnt("closed"),"CLOSED","No follow-up","var(--s-closed)")}
     </div>`;
 
   const head=`
@@ -1913,7 +1958,7 @@ function pickStatus(key){
   if(key==="active"||key==="closed"){_tilePinned=false;tilesExpanded=false;}
   // Closed details are NOT downloaded until this moment (v2.7.6). Admin "All"
   // also includes closed rows, so it triggers the same lazy load.
-  if(key==="closed"||(key==="all"&&SESSION.role==="admin")) ensureClosedLoaded();
+  if(key==="closed"||(key==="all"&&["admin","director"].includes(SESSION.role))) ensureClosedLoaded();
   render();
 }
 /* Fetch the closed-ticket details on demand and cache them for the session.
@@ -1956,7 +2001,7 @@ function applyFilterSearch(list){
   if(SESSION.role==="tech" && curFilter==="dispatched")
     out=out.filter(t=>["dispatched","waiting","in_progress"].includes(t.status));
   else if(curFilter==="active")out=out.filter(t=>ACTIVE_STATUSES.includes(t.status));
-  else if(curFilter==="all")out=out.filter(t=>SESSION.role==="admin"?true:t.status!=="closed");
+  else if(curFilter==="all")out=out.filter(t=>["admin","director"].includes(SESSION.role)?true:t.status!=="closed");
   else out=out.filter(t=>t.status===curFilter);
   if((curFilter==="dispatched"||curFilter==="assigned")&&curAssignee!=="all"){
     out=out.filter(t=>{const w=ticketAssignee(t);return w&&(w.kind+":"+w.id)===curAssignee});
@@ -3378,6 +3423,82 @@ function owDotClick(g){
 
 
 
+
+/* ============================================================ VENDOR COVERAGE MAP (overwatch)
+   Every third-party vendor with a service area drawn as a dot (their base) plus
+   a translucent circle (their radius), over the same tiles as the zone map.
+   Stores are small markers so you can see at a glance who is actually reachable.
+   In-house techs are deliberately absent — FindMi defines their coverage. */
+let VMAP=null;
+function openVendorMap(){
+  const withArea=Object.entries(VENDORS).filter(([,v])=>vendorArea(v));
+  const without=Object.entries(VENDORS).filter(([,v])=>!vendorArea(v));
+  modal(`<div class="sheet-head"><h2>Vendor coverage</h2><button class="x-btn" onclick="openVendors()">✕</button></div>
+    <div class="sheet-body">
+      <div id="vmap" class="vmap"></div>
+      <div id="vmapNote" class="rp-empty" style="display:none">Loading map…</div>
+      <div class="section-label" style="margin-top:16px">Service areas · ${withArea.length}<span class="ln"></span></div>
+      ${withArea.length?withArea.map(([id,v])=>{
+        const a=vendorArea(v);
+        const n=Object.keys(RESTAURANTS).filter(sid=>vendorCoversStore(v,sid)).length;
+        return `<div class="vm-row" onclick="vmapFocus('${id}')">
+          <span class="v-dot" style="background:${vendorColor(id)}"></span>
+          <div style="flex:1;min-width:0"><div class="v-name">${esc(v.name)}</div>
+            <div class="v-meta">${esc(a.place||a.zip)} · ${esc(String(a.radius))} mi · reaches <b>${n}</b> store${n===1?"":"s"}</div></div>
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editVendor('${id}')">Edit</button>
+        </div>`;}).join(""):'<div class="rp-empty">No vendor has a service area yet. Add a ZIP and radius when editing a vendor.</div>'}
+      ${without.length?`<div class="section-label" style="margin-top:16px">No area set · ${without.length}<span class="ln"></span></div>
+        <p style="color:var(--ink-dim);font-size:12.5px;margin:0">${without.map(([,v])=>esc(v.name)).join(" · ")} — offered for every store.</p>`:""}
+    </div>
+    <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="openVendors()">Back to techs &amp; vendors</button></div>`);
+  setTimeout(initVendorMap,60);
+}
+/* Stable colour per vendor so the circle and the list row match. */
+function vendorColor(id){
+  const ids=Object.keys(VENDORS).sort();
+  return ZONE_PALETTE[Math.max(0,ids.indexOf(id))%ZONE_PALETTE.length];
+}
+async function initVendorMap(){
+  const host=$("vmap"); if(!host)return;
+  const note=$("vmapNote");
+  if(!await ensureLeaflet()){
+    host.style.display="none";
+    if(note){note.style.display="";note.textContent="Map couldn't load — the service-area list below still works.";}
+    return;
+  }
+  if(note)note.style.display="none";
+  if(VMAP){try{VMAP.remove()}catch(e){}VMAP=null}
+  VMAP=L.map(host,{zoomControl:true,scrollWheelZoom:false});
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    {maxZoom:19,subdomains:"abcd",attribution:"© OpenStreetMap © CARTO"}).addTo(VMAP);
+  const bounds=[];
+  // stores first, so vendor circles sit above them
+  Object.keys(RESTAURANTS).forEach(sid=>{
+    const c=storeCoords(sid); if(!c)return;
+    L.circleMarker([c.lat,c.lng],{radius:3.5,color:"#334155",weight:1,fillColor:"#64748b",fillOpacity:.9})
+      .addTo(VMAP).bindTooltip(storeName(sid),{direction:"top"});
+    bounds.push([c.lat,c.lng]);
+  });
+  VMAP._vendorLayers={};
+  Object.entries(VENDORS).forEach(([id,v])=>{
+    const a=vendorArea(v); if(!a)return;
+    const col=vendorColor(id);
+    const g=L.layerGroup().addTo(VMAP);
+    L.circle([a.lat,a.lng],{radius:a.radius*1609.34,color:col,weight:2,fillColor:col,fillOpacity:.12}).addTo(g);
+    L.circleMarker([a.lat,a.lng],{radius:7,color:"#fff",weight:2,fillColor:col,fillOpacity:1})
+      .addTo(g).bindTooltip(`${v.name} — ${a.radius} mi`,{direction:"top"});
+    VMAP._vendorLayers[id]={g,a};
+    bounds.push([a.lat,a.lng]);
+  });
+  if(bounds.length)VMAP.fitBounds(bounds,{padding:[30,30],maxZoom:10});
+  setTimeout(()=>{try{VMAP.invalidateSize()}catch(e){}},120);
+}
+function vmapFocus(id){
+  const rec=VMAP&&VMAP._vendorLayers&&VMAP._vendorLayers[id];
+  if(!rec)return;
+  VMAP.fitBounds(L.circle([rec.a.lat,rec.a.lng],{radius:rec.a.radius*1609.34}).getBounds(),{padding:[24,24]});
+}
+
 /* ============================================================ CATEGORY EDITOR (overwatch)
    Per-division category + subcategory editing. Saves to admins/divisionCategories
    so DPM FindMi reads the same tree. */
@@ -4011,6 +4132,7 @@ function openVendors(){
     <div class="vrow"><div style="flex:1;min-width:0">
       <div class="v-name">${esc(v.name)}</div>
       <div class="v-meta">${esc([vendorCatLabel(v),fmtPhone(v.phone),v.email].filter(Boolean).join(" · ")||"No contact on file")}</div>
+      ${vendorArea(v)?`<div class="v-area">📍 ${esc(v.svcPlace||v.svcZip)} · ${esc(String(v.svcRadius))} mi radius</div>`:`<div class="v-area none">🌐 No service area — available everywhere</div>`}
       ${v.notes?`<div class="v-notes">${esc(v.notes)}</div>`:""}</div>
       <button class="btn btn-ghost btn-sm" onclick="editVendor('${id}')">Edit</button>
       <button class="btn btn-danger btn-sm" onclick="removeVendor('${id}')">Remove</button></div>`).join("");
@@ -4023,6 +4145,7 @@ function openVendors(){
       <div class="section-label" style="margin-top:20px">Third-party vendors · ${Object.keys(VENDORS).length}<span class="ln"></span></div>
       <div id="vendorRows">${rows||'<div class="rp-empty">No third-party vendors yet.</div>'}</div>
       <button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="editVendor(null)">＋ Add vendor</button>
+      <button class="btn btn-ghost btn-block" style="margin-top:8px" onclick="openVendorMap()">🗺 Vendor coverage map</button>
     </div>
     <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="closeModal()">Done</button></div>`);
 }
@@ -4102,6 +4225,14 @@ function editVendor(id){
       <div style="display:flex;gap:12px;margin-top:14px">
         <div class="field" style="flex:1"><label class="label">Phone</label><input class="input" id="vPhone" value="${escA(v.phone||"")}"></div>
         <div class="field" style="flex:1"><label class="label">Email</label><input class="input" id="vEmail" value="${escA(v.email||"")}"></div></div>
+      <div class="field" style="margin-top:14px"><label class="label">Service area <span style="font-weight:400;color:var(--ink-dim)">(leave blank = available everywhere)</span></label>
+        <div style="display:flex;gap:10px">
+          <input class="input" id="vZip" style="flex:1" inputmode="numeric" maxlength="5" placeholder="Home ZIP" value="${escA(v.svcZip||"")}">
+          <input class="input" id="vRadius" style="width:120px" type="number" min="1" step="1" placeholder="Miles" value="${escA(v.svcRadius||"")}">
+        </div>
+        <div class="uz-h mono" id="vGeoNote" style="margin-top:5px;color:var(--ink-dim)">${v.svcPlace?esc(v.svcPlace)+" · "+esc(String(v.svcRadius||""))+" mi radius":"They'll only be offered for stores inside this radius."}</div>
+        <input type="hidden" id="vLat" value="${escA(v.svcLat||"")}"><input type="hidden" id="vLng" value="${escA(v.svcLng||"")}">
+      </div>
       <div class="field" style="margin-top:14px"><label class="label">Notes <span style="font-weight:400;color:var(--ink-dim)">(specialties, rates, hours, who to ask for…)</span></label>
         <textarea class="input" id="vNotes" rows="4" placeholder="e.g. Walk-in cooler specialists. Ask for Danny. No weekend calls. $95/hr after 5pm.">${esc(v.notes||"")}</textarea></div>
     </div>
@@ -4114,7 +4245,19 @@ async function saveVendor(id){
   // cats may hold category keys (whole area) and/or subcategory keys (granular)
   if(!cats.length){toast("Pick at least one category","err");return}
   const vid=id||uid();
+  const zip=($("vZip").value||"").trim();
+  const radius=parseFloat($("vRadius").value)||0;
+  let svcLat=parseFloat($("vLat").value), svcLng=parseFloat($("vLng").value), svcPlace=(id&&VENDORS[id])?VENDORS[id].svcPlace||"":"";
+  if(zip&&radius>0){
+    const prev=id?VENDORS[id]:null;
+    if(!prev||prev.svcZip!==zip||!isFinite(svcLat)){
+      try{const g=await geocodeZip(zip);svcLat=g.lat;svcLng=g.lng;svcPlace=g.place;}
+      catch(e){toast(e.message||"Couldn't look up that ZIP","err");return}
+    }
+  }else{svcLat=NaN;svcLng=NaN;svcPlace="";}
   const rec={id:vid,name,categories:cats,
+    svcZip:(zip&&radius>0)?zip:"", svcRadius:(zip&&radius>0)?radius:"",
+    svcLat:isFinite(svcLat)?svcLat:"", svcLng:isFinite(svcLng)?svcLng:"", svcPlace,
              category:cats.map(k=>CATEGORIES[k]||k).join(" · "),   // readable mirror for legacy readers
              phone:$("vPhone").value.trim(),email:$("vEmail").value.trim(),
              notes:$("vNotes").value.trim(),updatedAt:now()};
