@@ -684,7 +684,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "5.8";
+const APP_VERSION = "5.9";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2091,14 +2091,13 @@ function ticketRow(t){
     const vOpt=([id,v])=>`<option value="vendor:${id}">🏢 ${esc(v.name)}</option>`;
     const catLabel=ALL_CATEGORIES[t.category]||"category";
     right=`<div class="row-assign" onclick="event.stopPropagation()">
-      <select class="input row-sel" id="rsel_${t._id}" onchange="if(this.value==='__add__'){this.value='';openVendors();}">
+      <select class="input row-sel" id="rsel_${t._id}" onchange="if(this.value==='__add__'){this.value='';openVendors();return}rowAssign('${t._id}')">
         <option value="">Assign to…</option>
         <optgroup label="In-house tech for this store">${techOpt}</optgroup>
         ${match.length?`<optgroup label="Vendors — ${esc(catLabel)}">${match.map(vOpt).join("")}</optgroup>`:""}
         ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
         <option value="__add__">＋ Add new vendor…</option>
       </select>
-      <button class="btn btn-primary btn-sm" onclick="rowAssign('${t._id}')">Assign</button>
     </div>`;
   }else{
     let sub="";
@@ -2178,8 +2177,7 @@ function ticketRow(t){
       // DOs route to their own in-house techs, or back to the pool. Third-party
       // vendors are Overwatch-only — a DO leaving a job unassigned is the signal
       // that an outside vendor is needed.
-      reqBtn=`<select class="input row-sel" id="dosel_${t._id}">${directorAssignOptions(t)}</select>
-          <button class="btn btn-primary btn-sm" onclick="rowDirectorAssign('${t._id}')">Assign</button>`;
+      reqBtn=`<select class="input row-sel" id="dosel_${t._id}" onchange="rowDirectorAssign('${t._id}')">${directorAssignOptions(t)}</select>`;
             }else if(SESSION.role==="coach" && t.status==="unassigned"){
       const elig=eligibleTechsFor(t);
       if(elig.length){
@@ -2530,10 +2528,13 @@ function confirmReassign(id,val,fromDetail){
       ${isVendor?`<p style="color:var(--ink-dim);font-size:12.5px;margin:10px 0 0">This job is with a third-party tech. Moving it in-house means ${esc(cur||"they")} will no longer be expected.</p>`:""}
     </div>
     <div class="sheet-foot">
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Keep as is</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="cancelReassign()">Keep as is</button>
       <button class="btn btn-danger" style="flex:1" onclick="proceedReassign()">Yes, change it</button>
     </div>`);
 }
+/* Cancelling must redraw, or the dropdown keeps showing the option the user
+   picked even though nothing changed. */
+function cancelReassign(){_pendingAssign=null;closeModal();render();}
 async function proceedReassign(){
   const p=_pendingAssign; _pendingAssign=null; closeModal();
   if(p) await applyDirectorAssign(p.id,p.val,p.fromDetail,true);
@@ -2760,13 +2761,13 @@ function ticketControls(t){
       const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
       h+=`<div class="section-label">Assign<span class="ln"></span></div>
         <div class="field">
-          <select class="input" id="doAssign">${directorAssignOptions(t)}</select>
+          <select class="input" id="doAssign" onchange="doDirectorAssign('${t._id}')">${directorAssignOptions(t)}</select>
           <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">${
             techs.length?"Choosing a tech dispatches the job to them straight away."
                         :"No in-house tech is assigned to this store."}${
             t.assignedVendorId?" This job is with a third-party — only Overwatch can change that.":""}</div>
         </div>
-        <button class="btn btn-primary btn-block" style="margin-top:9px" onclick="doDirectorAssign('${t._id}')">Set assignment</button>`;
+`;
       h+=`<button class="btn btn-ghost btn-block" style="margin-top:9px" onclick="requestThirdParty('${t._id}')">🏢 Leave unassigned — needs a third-party</button>
         <div style="font-size:11px;color:var(--ink-dim);margin:5px 0 4px">Overwatch selects and dispatches the vendor.</div>`;
         }else if(role==="coach"){
@@ -2816,14 +2817,14 @@ function assignControls(t){
   const catLabel=ALL_CATEGORIES[t.category]||"this category";
 
   return `<div style="display:flex;gap:10px">
-    <select class="input" id="assignSel">
+    <select class="input" id="assignSel" onchange="doAssign('${t._id}')">
       <option value="">— Unassigned (pool) —</option>
       <optgroup label="In-house tech for this store">${techOpts||'<option disabled>None assigned to this store</option>'}</optgroup>
       ${match.length?`<optgroup label="Vendors — ${esc(catLabel)}">${match.map(vOpt).join("")}</optgroup>`:""}
       ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
       ${!match.length&&!rest.length?`<optgroup label="Third-party vendors"><option disabled>No vendors added</option></optgroup>`:""}
     </select>
-    <button class="btn btn-primary" onclick="doAssign('${t._id}')">Set</button></div>
+    </div>
     <div style="font-size:11px;color:var(--ink-dim);margin-top:7px">Vendors matching <b>${esc(catLabel)}</b> are listed first. Picking anyone sets the ticket to Assigned.</div>`;
 }
 
