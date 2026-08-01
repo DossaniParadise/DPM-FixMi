@@ -131,6 +131,7 @@ body.no-reftags .reftag{display:none}
 .tile.big .tile-n{font-size:30px}
 .board-controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
 .sort-select{max-width:210px}
+@media(max-width:600px){.sort-select{max-width:none}}
 .loc-select{max-width:300px;flex:0 1 auto}
 .search{flex:1;min-width:160px}
 .list-head{font-family:var(--disp);font-weight:800;font-size:18px;margin:0 0 12px}
@@ -226,7 +227,14 @@ body.no-reftags .reftag{display:none}
   background:#eef4ff;border:1px solid #d6e4ff;border-top:none;border-radius:0 0 10px 10px;
   margin-top:-1px;padding:9px 15px;font-size:13px;color:var(--ink-mid)}
 .row-bar b{color:var(--ink)}
-.rb-btns{display:flex;gap:7px;flex-wrap:wrap}
+/* Long store names / descriptions must wrap, never widen the page. */
+.row-main,.row-desc,.row-store,.rs-who,.v-name,.v-meta,.imp-desc{min-width:0;overflow-wrap:anywhere}
+.row{min-width:0}
+html,body{max-width:100%;overflow-x:hidden}
+.rb-btns{display:flex;gap:7px;flex-wrap:wrap;align-items:center;justify-content:flex-end;flex:1 1 auto;min-width:0}
+.row-bar>span:first-child{flex:0 1 auto;min-width:0}
+/* the assign dropdown inside a row bar shouldn't hog the line or collapse */
+.rb-btns .row-sel{flex:0 1 190px;min-width:130px}
 .rb-btns .btn.tk-cur{opacity:1;border-color:var(--amber);background:rgba(29,118,187,.12);color:var(--amber-deep);font-weight:700;cursor:default}
 .rb-none{font-size:12px;color:var(--ink-dim);font-style:italic}
 .row-wrap .row{position:relative;z-index:1}
@@ -268,7 +276,7 @@ body.no-reftags .reftag{display:none}
 .overlay{position:fixed;inset:0;z-index:60;background:rgba(26,34,48,.45);backdrop-filter:blur(4px);display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;transition:.2s;padding:48px 14px 14px}
 .overlay.on{opacity:1;pointer-events:auto}
 @media(min-width:640px){.overlay{align-items:center;padding:40px 24px}}
-.overlay.wide .sheet{max-width:900px}
+.overlay.wide .sheet{max-width:min(900px,100%)}
 /* Tall mode — for long forms like the import reviewer. Fills the viewport and
    keeps the action row pinned so you never scroll or zoom to find the buttons. */
 .overlay.tall{padding:14px}
@@ -532,7 +540,15 @@ body.simulating .wrap{padding-bottom:40px}
   .hub{grid-template-columns:1fr}
   .detail-row{gap:10px}
   .detail-row .v{max-width:52vw}
-  .topbar{gap:8px;padding:10px 12px}
+  .topbar{gap:6px;padding:10px 10px;flex-wrap:nowrap}
+  .topbar .icon-btn{flex:0 0 auto}
+  /* Overwatch has six icons; on a narrow phone let the bar scroll sideways
+     rather than squashing the brand or pushing icons off-screen. */
+  .topbar{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .topbar::-webkit-scrollbar{display:none}
+  .topbar .brand{flex:0 0 auto}
+  .topbar .who{flex:0 0 auto}
+  .topbar-spacer{flex:1 1 auto;min-width:6px}
   .brand-sub{display:none}
   .brand-name{font-size:15px}
   .who-name{max-width:30vw;font-size:12px}
@@ -549,6 +565,7 @@ body.simulating .wrap{padding-bottom:40px}
   /* controls stack */
   .board-controls{flex-direction:column;align-items:stretch}
   .sort-select{max-width:210px}
+@media(max-width:600px){.sort-select{max-width:none}}
 .loc-select{max-width:none}
   .search{width:100%}
   /* rows: stack the right side under the main content */
@@ -584,8 +601,9 @@ body.simulating .wrap{padding-bottom:40px}
   .row-assign{flex-direction:column;align-items:stretch;width:100%;gap:7px}
   .row-sel{width:100%;min-width:0}
   .row-bar{flex-direction:column;align-items:stretch;gap:9px}
-  .row-bar .rb-btns{flex-wrap:wrap}
-  .row-bar .rb-btns .btn,.row-bar .rb-btns a.btn{flex:1 1 calc(50% - 4px);justify-content:center;min-height:40px}
+  .row-bar .rb-btns{flex-wrap:wrap;justify-content:stretch}
+  .row-bar .rb-btns .btn,.row-bar .rb-btns a.btn{flex:1 1 130px;justify-content:center;min-height:42px}
+  .rb-btns .row-sel{flex:1 1 100%;min-width:0}
   .bulk-bar{position:sticky;top:60px;z-index:20}
   .bulk-bar .btn{flex:1 1 auto;min-height:40px}
   .bulk-count{margin-right:0;flex-basis:100%}
@@ -666,7 +684,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "5.4";
+const APP_VERSION = "5.6";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2163,7 +2181,7 @@ function ticketRow(t){
       const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
       const none=!t.assignedTechId&&!t.assignedVendorId;
       if(techs.length){
-        reqBtn=`<select class="input row-sel" id="dosel_${t._id}" style="max-width:200px">
+        reqBtn=`<select class="input row-sel" id="dosel_${t._id}">
             <option value=""${none?" selected":""}>— Unassigned —</option>
             ${techs.map(([id,x])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("")}
           </select>
@@ -2419,18 +2437,28 @@ async function submitTicket(){
    the person + status move together per the integrity rule). No → it stays
    Unassigned for overwatch to route. Skipped if the store has no tech. */
 function askDispatchToTech(id,sid){
-  const techId=store(sid).assignedRepairTechnicianId;
-  const tech=(MASTER.repairTechnicians||{})[techId];
-  if(!tech) return; // no in-house tech on this store — stays unassigned, no prompt
-  const first=esc((tech.name||"").trim().split(/\s+/)[0]||tech.name);
-  modal(`<div class="sheet-head"><h2>Request your technician?</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+  const t=TICKETS[id]; if(!t)return;
+  // Only offer techs whose specialties actually cover the category that was
+  // just chosen — and read the full multi-tech list, not the legacy single
+  // field. No eligible tech means no prompt: the job stays in the pool for
+  // the office team to route.
+  const elig=eligibleTechsFor(t);
+  if(!elig.length) return;
+  const many=elig.length>1;
+  const first=esc((elig[0][1].name||"").trim().split(/\s+/)[0]||elig[0][1].name);
+  const who=many?`${elig.length} of our technicians`:`our technician <b>${first}</b>`;
+  const yes=many?`Choose a technician`:`Yes, request ${first}`;
+  const act=many?`closeModal();requestInHouse('${id}')`:`dispatchToStoreTech('${id}','${elig[0][0]}')`;
+  modal(`<div class="sheet-head"><h2>Request an in-house technician?</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
     <div class="sheet-body">
-      <p style="font-size:15px;margin:0">Would you like to request our technician <b>${first}</b> to do this job?</p>
-      <p style="color:var(--ink-dim);font-size:13px;margin:12px 0 0">Yes sends it straight to ${first}'s job list. No leaves it Unassigned for dispatch to route.</p>
+      <p style="font-size:15px;margin:0">${who} ${many?"cover":"covers"} <b>${esc(catPath(t))}</b> at this store.</p>
+      <p style="color:var(--ink-dim);font-size:13px;margin:12px 0 0">
+        Requesting ${many?"one of them":"them"} puts this job on their board straight away.
+        Leaving it unassigned sends it to the office team to route on your behalf.</p>
     </div>
     <div class="sheet-foot">
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">No, leave unassigned</button>
-      <button class="btn btn-primary" style="flex:1" id="reqTechBtn" onclick="dispatchToStoreTech('${id}','${techId}')">Yes, request ${first}</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Leave unassigned</button>
+      <button class="btn btn-primary" style="flex:1" id="reqTechBtn" onclick="${act}">${yes}</button>
     </div>`);
 }
 /* One eligible tech -> dispatch straight through. Two or more -> let them
