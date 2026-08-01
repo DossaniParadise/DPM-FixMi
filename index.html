@@ -666,7 +666,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "5.3";
+const APP_VERSION = "5.4";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2157,24 +2157,19 @@ function ticketRow(t){
     // Coach/director only: one-tap dispatch of an unassigned job to the store's tech.
     let reqBtn="";
     if(SESSION.role==="director"){
-      // DOs route from the row itself — in-house techs, then category vendors,
-      // then the rest — so they never have to open the ticket just to assign.
-      // (Previously the row only offered the in-house button, which is why
-      // vendors looked unreachable from Tiles and Map.)
+      // DOs route to their own in-house techs, or back to the pool. Third-party
+      // vendors are Overwatch-only — a DO leaving a job unassigned is the signal
+      // that an outside vendor is needed.
       const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
-      const {match,rest}=vendorGroupsFor(t);
-      const vOpt=([id,v])=>`<option value="vendor:${id}"${t.assignedVendorId===id?" selected":""}>🏢 ${esc(v.name)}</option>`;
-      const cl=ALL_CATEGORIES[t.category]||"category";
       const none=!t.assignedTechId&&!t.assignedVendorId;
-      reqBtn=`<select class="input row-sel" id="dosel_${t._id}" style="max-width:210px">
-          <option value=""${none?" selected":""}>— Unassigned —</option>
-          ${techs.length?`<optgroup label="In-house tech">${techs.map(([id,x])=>
-            `<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("")}</optgroup>`:""}
-          ${match.length?`<optgroup label="Vendors — ${esc(cl)}">${match.map(vOpt).join("")}</optgroup>`:""}
-          ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
-        </select>
-        <button class="btn btn-primary btn-sm" onclick="rowDirectorAssign('${t._id}')">Assign</button>`;
-    }else if(SESSION.role==="coach" && t.status==="unassigned"){
+      if(techs.length){
+        reqBtn=`<select class="input row-sel" id="dosel_${t._id}" style="max-width:200px">
+            <option value=""${none?" selected":""}>— Unassigned —</option>
+            ${techs.map(([id,x])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("")}
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="rowDirectorAssign('${t._id}')">Assign</button>`;
+      }
+        }else if(SESSION.role==="coach" && t.status==="unassigned"){
       const elig=eligibleTechsFor(t);
       if(elig.length){
         const tip=elig.length===1?`Requests ${esc(elig[0][1].name)}`:`${elig.length} techs cover this store`;
@@ -2483,9 +2478,8 @@ async function applyDirectorAssign(id,val,fromDetail){
     if(!x){toast("That tech no longer exists","err");return}
     patch={assignedTechId:tid,assignedVendorId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
   }else{
-    const vid=val.slice(7), v=VENDORS[vid];
-    if(!v){toast("That vendor no longer exists","err");return}
-    patch={assignedVendorId:vid,assignedTechId:null,status:"assigned"};note="🏢 "+v.name;
+    // Directors cannot route to third-party vendors — Overwatch only.
+    toast("Vendor assignment is handled by Overwatch","err");return;
   }
   if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status}))
     toast((patch.status==="dispatched"?"Dispatched · ":"Assigned · ")+note);
@@ -2662,27 +2656,26 @@ function ticketControls(t){
     // after the fact (this was the bug: the controls disappeared once a ticket
     // moved off unassigned).
     if(role==="director"){
-      // DOs route exactly like Overwatch: this store's in-house techs first,
-      // then vendors covering the ticket's category, then the rest. Vendors
-      // whose service area doesn't reach the store are already excluded.
+      // In-house techs only. Vendor selection stays with Overwatch, so a DO who
+      // needs outside help leaves the ticket unassigned and flags it.
       const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
-      const {match,rest}=vendorGroupsFor(t);
-      const vOpt=([id,v])=>`<option value="vendor:${id}"${t.assignedVendorId===id?" selected":""}>🏢 ${esc(v.name)}</option>`;
-      const catLabel=ALL_CATEGORIES[t.category]||"this category";
       const isUnassigned=!t.assignedTechId&&!t.assignedVendorId;
-      h+=`<div class="section-label">Assign<span class="ln"></span></div>
-        <div class="field">
-          <select class="input" id="doAssign">
-            <option value=""${isUnassigned?" selected":""}>— Unassigned —</option>
-            ${techs.length?`<optgroup label="In-house tech for this store">${techs.map(([id,x])=>
-              `<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("")}</optgroup>`:""}
-            ${match.length?`<optgroup label="Vendors — ${esc(catLabel)}">${match.map(vOpt).join("")}</optgroup>`:""}
-            ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
-          </select>
-          <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">In-house techs dispatch immediately; vendors go to Assigned so someone contacts them.</div>
-        </div>
-        <button class="btn btn-primary btn-block" style="margin-top:9px" onclick="doDirectorAssign('${t._id}')">Set assignment</button>`;
-    }else if(role==="coach"){
+      h+=`<div class="section-label">Assign<span class="ln"></span></div>`;
+      if(techs.length){
+        h+=`<div class="field">
+            <select class="input" id="doAssign">
+              <option value=""${isUnassigned?" selected":""}>— Unassigned —</option>
+              ${techs.map(([id,x])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("")}
+            </select>
+            <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">Choosing a tech dispatches the job to them straight away.</div>
+          </div>
+          <button class="btn btn-primary btn-block" style="margin-top:9px" onclick="doDirectorAssign('${t._id}')">Set assignment</button>`;
+      }else{
+        h+=`<div style="font-size:12px;color:var(--ink-dim);margin-bottom:9px">No in-house tech is assigned to this store.</div>`;
+      }
+      h+=`<button class="btn btn-ghost btn-block" style="margin-top:9px" onclick="requestThirdParty('${t._id}')">🏢 Leave unassigned — needs a third-party</button>
+        <div style="font-size:11px;color:var(--ink-dim);margin:5px 0 4px">Overwatch selects and dispatches the vendor.</div>`;
+        }else if(role==="coach"){
       // DMs (Area Coaches): request their own in-house tech, or leave it in the
       // pool for Overwatch. They never see the vendor roster.
       const elig=eligibleTechsFor(t);
