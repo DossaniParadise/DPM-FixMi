@@ -666,7 +666,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "5.2";
+const APP_VERSION = "5.3";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1602,7 +1602,7 @@ const NO_TECH_COLOR="#94a3b8";
 /* ============================================================ PERMISSIONS */
 function canCreate(){return SESSION.role!=="tech"}
 function canManageVendors(){return SESSION.role==="admin"}
-function canEditContent(){return SESSION.role==="admin"||SESSION.role==="coach";}
+function canEditContent(){return ["admin","coach","director"].includes(SESSION.role);}
 function canAssign(){return SESSION.role==="admin"}
 
 /* ============================================================ ENTER / POLL */
@@ -2156,7 +2156,25 @@ function ticketRow(t){
     const canProgress = t.status!=="in_progress" && t.status!=="finished";
     // Coach/director only: one-tap dispatch of an unassigned job to the store's tech.
     let reqBtn="";
-    if((SESSION.role==="coach"||SESSION.role==="director") && t.status==="unassigned"){
+    if(SESSION.role==="director"){
+      // DOs route from the row itself — in-house techs, then category vendors,
+      // then the rest — so they never have to open the ticket just to assign.
+      // (Previously the row only offered the in-house button, which is why
+      // vendors looked unreachable from Tiles and Map.)
+      const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
+      const {match,rest}=vendorGroupsFor(t);
+      const vOpt=([id,v])=>`<option value="vendor:${id}"${t.assignedVendorId===id?" selected":""}>🏢 ${esc(v.name)}</option>`;
+      const cl=ALL_CATEGORIES[t.category]||"category";
+      const none=!t.assignedTechId&&!t.assignedVendorId;
+      reqBtn=`<select class="input row-sel" id="dosel_${t._id}" style="max-width:210px">
+          <option value=""${none?" selected":""}>— Unassigned —</option>
+          ${techs.length?`<optgroup label="In-house tech">${techs.map(([id,x])=>
+            `<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("")}</optgroup>`:""}
+          ${match.length?`<optgroup label="Vendors — ${esc(cl)}">${match.map(vOpt).join("")}</optgroup>`:""}
+          ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="rowDirectorAssign('${t._id}')">Assign</button>`;
+    }else if(SESSION.role==="coach" && t.status==="unassigned"){
       const elig=eligibleTechsFor(t);
       if(elig.length){
         const tip=elig.length===1?`Requests ${esc(elig[0][1].name)}`:`${elig.length} techs cover this store`;
@@ -2443,14 +2461,21 @@ function requestInHouse(id){
     <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="closeModal()">Cancel</button></div>`);
 }
 /* Director assign — same integrity rules as Overwatch. */
+/* Assign straight from a list/tile row. */
+async function rowDirectorAssign(id){
+  const sel=$("dosel_"+id); if(!sel){toast("Pick someone first","err");return}
+  await applyDirectorAssign(id,sel.value||"");
+}
 async function doDirectorAssign(id){
-  const val=($("doAssign")||{}).value||"";
+  await applyDirectorAssign(id,($("doAssign")||{}).value||"",true);
+}
+async function applyDirectorAssign(id,val,fromDetail){
   let patch,note;
   if(!val){
     // Blank = put it back in the pool.
     if(await patchTicket(id,{assignedTechId:null,assignedVendorId:null,status:"unassigned"},
         {action:"assign",note:"unassigned (pool)",toStatus:"unassigned"}))
-      {toast("Back to unassigned");openTicket(id)}
+      {toast("Back to unassigned");if(fromDetail)openTicket(id)}
     return;
   }
   if(val.startsWith("tech:")){
@@ -2680,9 +2705,9 @@ function ticketControls(t){
       h+=`<button class="btn btn-ghost btn-block" onclick="setStatus('${t._id}','in_progress')">▶ Mark in progress</button>`;
     h+=`<button class="btn btn-danger btn-block" onclick="confirmClose('${t._id}')">✕ Mark closed</button>`;
     h+=`</div><div style="font-size:11px;color:var(--ink-dim);margin-top:8px">Closing removes the ticket from all views except Overwatch.</div>`;
-    // Overwatch + area coaches can correct the ticket's text, category, and urgency.
+    // Overwatch, Directors and Area Coaches can correct a ticket's details.
     if(canEditContent())
-      h+=`<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="openEdit('${t._id}')">✎ Edit details &amp; urgency</button>`;
+      h+=`<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="openEdit('${t._id}')">✎ ${role==="director"?"Edit all details":"Edit details &amp; urgency"}</button>`;
     return h;
   }
   return h;
@@ -2981,9 +3006,12 @@ function openEdit(id){
   const priOpts=Object.entries(PRIORITIES).map(([k,v])=>`<option value="${k}"${t.priority===k?" selected":""}>${esc(v)}</option>`).join("");
   // Overwatch can move a misfiled ticket to the correct store; other roles can't
   // (their tickets are scoped to stores in their own purview).
-  const canMoveStore = SESSION.role==="admin";
+  // Overwatch can move a ticket to ANY store; a Director can move a misfiled
+  // one between the stores in their own patch (never outside it).
+  const canMoveStore = SESSION.role==="admin"||SESSION.role==="director";
+  const moveScope = SESSION.role==="admin" ? Object.keys(RESTAURANTS) : myStoreIds();
   const storeOpts = canMoveStore
-    ? Object.keys(RESTAURANTS).slice().sort((a,b)=>storeName(a).localeCompare(storeName(b)))
+    ? [...new Set([...moveScope,t.storeId])].sort((a,b)=>storeName(a).localeCompare(storeName(b)))
         .map(rid=>`<option value="${rid}"${t.storeId===rid?" selected":""}>${esc(storeName(rid))}</option>`).join("")
     : "";
   modal(`<div class="sheet-head"><h2>Edit ticket</h2><button class="x-btn" onclick="openTicket('${id}')">✕</button></div>
