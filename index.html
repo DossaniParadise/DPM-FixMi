@@ -684,7 +684,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "5.6";
+const APP_VERSION = "5.8";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2178,16 +2178,9 @@ function ticketRow(t){
       // DOs route to their own in-house techs, or back to the pool. Third-party
       // vendors are Overwatch-only — a DO leaving a job unassigned is the signal
       // that an outside vendor is needed.
-      const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
-      const none=!t.assignedTechId&&!t.assignedVendorId;
-      if(techs.length){
-        reqBtn=`<select class="input row-sel" id="dosel_${t._id}">
-            <option value=""${none?" selected":""}>— Unassigned —</option>
-            ${techs.map(([id,x])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("")}
-          </select>
+      reqBtn=`<select class="input row-sel" id="dosel_${t._id}">${directorAssignOptions(t)}</select>
           <button class="btn btn-primary btn-sm" onclick="rowDirectorAssign('${t._id}')">Assign</button>`;
-      }
-        }else if(SESSION.role==="coach" && t.status==="unassigned"){
+            }else if(SESSION.role==="coach" && t.status==="unassigned"){
       const elig=eligibleTechsFor(t);
       if(elig.length){
         const tip=elig.length===1?`Requests ${esc(elig[0][1].name)}`:`${elig.length} techs cover this store`;
@@ -2485,6 +2478,66 @@ function requestInHouse(id){
 }
 /* Director assign — same integrity rules as Overwatch. */
 /* Assign straight from a list/tile row. */
+/* Options for a Director's assign dropdown.
+   A <select> with no matching option silently falls back to displaying its
+   FIRST option — which is why a ticket already with a third-party vendor was
+   showing "— Unassigned —". Worse, pressing Assign then submitted "" and
+   quietly removed that vendor. So when a vendor is on the ticket we include
+   them as the selected option; applyDirectorAssign treats re-submitting the
+   same vendor as a no-op, and Directors still can't pick a DIFFERENT one. */
+function directorAssignOptions(t){
+  const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
+  const vend=t.assignedVendorId?VENDORS[t.assignedVendorId]:null;
+  const none=!t.assignedTechId&&!t.assignedVendorId;
+  let html=`<option value=""${none?" selected":""}>— Unassigned —</option>`;
+  if(t.assignedVendorId){
+    const nm=vend?vend.name:"Third-party (removed)";
+    html+=`<option value="vendor:${t.assignedVendorId}" selected>🏢 ${esc(nm)} — third-party</option>`;
+  }
+  html+=techs.map(([id,x])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("");
+  return html;
+}
+/* Who last set this ticket's assignment, and when. Read from the activity
+   trail so the warning can name the actual person rather than guessing. */
+function lastAssignEvent(t){
+  const acts=Array.isArray(t.activity)?t.activity:[];
+  for(let i=acts.length-1;i>=0;i--){
+    const a=acts[i];
+    if(a.action==="assign"||(a.action==="status"&&(a.toStatus==="dispatched"||a.toStatus==="assigned")))
+      return a;
+  }
+  return null;
+}
+function currentAssigneeName(t){
+  if(t.assignedTechId){const x=(MASTER.repairTechnicians||{})[t.assignedTechId];return x?x.name:"a technician"}
+  if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];return v?v.name:"a third-party tech"}
+  return null;
+}
+/* Changing someone else's routing decision is confirmed, never silent. */
+let _pendingAssign=null;
+function confirmReassign(id,val,fromDetail){
+  const t=TICKETS[id];
+  const cur=currentAssigneeName(t);
+  const ev=lastAssignEvent(t);
+  const who=ev&&ev.by?ev.by:"Someone";
+  const when=ev&&ev.ts?fmtDate(ev.ts):"earlier";
+  const isVendor=!!t.assignedVendorId;
+  _pendingAssign={id,val,fromDetail};
+  modal(`<div class="sheet-head"><h2>Change this assignment?</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body">
+      <p style="font-size:15px;margin:0"><b>${esc(who)}</b> assigned this ticket to <b>${esc(cur||"someone")}</b> on ${esc(when)}.</p>
+      <p style="color:var(--ink-mid);font-size:14px;margin:12px 0 0">Are you sure you want to change this assignment?</p>
+      ${isVendor?`<p style="color:var(--ink-dim);font-size:12.5px;margin:10px 0 0">This job is with a third-party tech. Moving it in-house means ${esc(cur||"they")} will no longer be expected.</p>`:""}
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Keep as is</button>
+      <button class="btn btn-danger" style="flex:1" onclick="proceedReassign()">Yes, change it</button>
+    </div>`);
+}
+async function proceedReassign(){
+  const p=_pendingAssign; _pendingAssign=null; closeModal();
+  if(p) await applyDirectorAssign(p.id,p.val,p.fromDetail,true);
+}
 async function rowDirectorAssign(id){
   const sel=$("dosel_"+id); if(!sel){toast("Pick someone first","err");return}
   await applyDirectorAssign(id,sel.value||"");
@@ -2492,7 +2545,15 @@ async function rowDirectorAssign(id){
 async function doDirectorAssign(id){
   await applyDirectorAssign(id,($("doAssign")||{}).value||"",true);
 }
-async function applyDirectorAssign(id,val,fromDetail){
+async function applyDirectorAssign(id,val,fromDetail,confirmed){
+  const t0=TICKETS[id];
+  // If this ticket is already assigned and the change wasn't made by whoever
+  // set it, confirm first — naming who assigned it and when.
+  if(!confirmed && t0 && (t0.assignedTechId||t0.assignedVendorId)){
+    const same=(val==="tech:"+t0.assignedTechId)||(val==="vendor:"+t0.assignedVendorId);
+    if(!same){const ev=lastAssignEvent(t0);
+      if(!ev||ev.by!==SESSION.name){confirmReassign(id,val,fromDetail);return}}
+  }
   let patch,note;
   if(!val){
     // Blank = put it back in the pool.
@@ -2506,7 +2567,9 @@ async function applyDirectorAssign(id,val,fromDetail){
     if(!x){toast("That tech no longer exists","err");return}
     patch={assignedTechId:tid,assignedVendorId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
   }else{
-    // Directors cannot route to third-party vendors — Overwatch only.
+    const vid=val.slice(7);
+    if(vid===TICKETS[id].assignedVendorId){toast("No change");return}   // unchanged
+    // Directors cannot route TO a third-party vendor — Overwatch only.
     toast("Vendor assignment is handled by Overwatch","err");return;
   }
   if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status}))
@@ -2518,7 +2581,15 @@ async function requestThirdParty(id){
       {action:"status",toStatus:"unassigned",note:"Third-party tech requested by "+SESSION.name}))
     {toast("Flagged for Overwatch");openTicket(id)}
 }
-async function dispatchToStoreTech(id,techId){
+async function dispatchToStoreTech(id,techId,confirmed){
+  const t0=TICKETS[id];
+  if(!confirmed && t0 && (t0.assignedTechId||t0.assignedVendorId) && t0.assignedTechId!==techId){
+    const ev=lastAssignEvent(t0);
+    if(!ev||ev.by!==SESSION.name){confirmReassign(id,"tech:"+techId,false);return}
+  }
+  return _doDispatchToStoreTech(id,techId);
+}
+async function _doDispatchToStoreTech(id,techId){
   const tech=(MASTER.repairTechnicians||{})[techId];
   if(!tech){toast("That tech no longer exists — left unassigned","err");closeModal();return}
   const btn=$("reqTechBtn");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>'}
@@ -2687,20 +2758,15 @@ function ticketControls(t){
       // In-house techs only. Vendor selection stays with Overwatch, so a DO who
       // needs outside help leaves the ticket unassigned and flags it.
       const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
-      const isUnassigned=!t.assignedTechId&&!t.assignedVendorId;
-      h+=`<div class="section-label">Assign<span class="ln"></span></div>`;
-      if(techs.length){
-        h+=`<div class="field">
-            <select class="input" id="doAssign">
-              <option value=""${isUnassigned?" selected":""}>— Unassigned —</option>
-              ${techs.map(([id,x])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("")}
-            </select>
-            <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">Choosing a tech dispatches the job to them straight away.</div>
-          </div>
-          <button class="btn btn-primary btn-block" style="margin-top:9px" onclick="doDirectorAssign('${t._id}')">Set assignment</button>`;
-      }else{
-        h+=`<div style="font-size:12px;color:var(--ink-dim);margin-bottom:9px">No in-house tech is assigned to this store.</div>`;
-      }
+      h+=`<div class="section-label">Assign<span class="ln"></span></div>
+        <div class="field">
+          <select class="input" id="doAssign">${directorAssignOptions(t)}</select>
+          <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">${
+            techs.length?"Choosing a tech dispatches the job to them straight away."
+                        :"No in-house tech is assigned to this store."}${
+            t.assignedVendorId?" This job is with a third-party — only Overwatch can change that.":""}</div>
+        </div>
+        <button class="btn btn-primary btn-block" style="margin-top:9px" onclick="doDirectorAssign('${t._id}')">Set assignment</button>`;
       h+=`<button class="btn btn-ghost btn-block" style="margin-top:9px" onclick="requestThirdParty('${t._id}')">🏢 Leave unassigned — needs a third-party</button>
         <div style="font-size:11px;color:var(--ink-dim);margin:5px 0 4px">Overwatch selects and dispatches the vendor.</div>`;
         }else if(role==="coach"){
