@@ -666,7 +666,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "5.1";
+const APP_VERSION = "5.2";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2445,8 +2445,14 @@ function requestInHouse(id){
 /* Director assign — same integrity rules as Overwatch. */
 async function doDirectorAssign(id){
   const val=($("doAssign")||{}).value||"";
-  if(!val){toast("Pick someone first","err");return}
   let patch,note;
+  if(!val){
+    // Blank = put it back in the pool.
+    if(await patchTicket(id,{assignedTechId:null,assignedVendorId:null,status:"unassigned"},
+        {action:"assign",note:"unassigned (pool)",toStatus:"unassigned"}))
+      {toast("Back to unassigned");openTicket(id)}
+    return;
+  }
   if(val.startsWith("tech:")){
     const tid=val.slice(5), x=(MASTER.repairTechnicians||{})[tid];
     if(!x){toast("That tech no longer exists","err");return}
@@ -2626,40 +2632,50 @@ function ticketControls(t){
   // Mark FINISHED is intentionally NOT offered here — finishing is a tech /
   // overwatch action only. Closing is available to all store-access roles.
   if(hasStoreAccess()){
-    h+=`<div class="section-label">Update job<span class="ln"></span></div><div style="display:flex;flex-direction:column;gap:9px">`;
-    // Coach / director: one-tap dispatch to THIS store's in-house tech (their
-    // only assignment option — no vendor roster; that's overwatch's job).
-    if((role==="coach"||role==="director") && t.status==="unassigned"){
-      const elig=eligibleTechsFor(t);
-      if(role==="director"){
-        // Directors route like Overwatch: in-house tech for the store first,
-        // then vendors covering this category, then everyone else.
-        const {match,rest}=vendorGroupsFor(t);
-        const vOpt=([id,v])=>`<option value="vendor:${id}">🏢 ${esc(v.name)}</option>`;
-        const catLabel=ALL_CATEGORIES[t.category]||"this category";
-        h+=`<div class="field"><label class="label">Assign to</label>
+    // ---- Assignment -------------------------------------------------------
+    // Available at ANY status, not just unassigned, so a job can be re-routed
+    // after the fact (this was the bug: the controls disappeared once a ticket
+    // moved off unassigned).
+    if(role==="director"){
+      // DOs route exactly like Overwatch: this store's in-house techs first,
+      // then vendors covering the ticket's category, then the rest. Vendors
+      // whose service area doesn't reach the store are already excluded.
+      const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
+      const {match,rest}=vendorGroupsFor(t);
+      const vOpt=([id,v])=>`<option value="vendor:${id}"${t.assignedVendorId===id?" selected":""}>🏢 ${esc(v.name)}</option>`;
+      const catLabel=ALL_CATEGORIES[t.category]||"this category";
+      const isUnassigned=!t.assignedTechId&&!t.assignedVendorId;
+      h+=`<div class="section-label">Assign<span class="ln"></span></div>
+        <div class="field">
           <select class="input" id="doAssign">
-            <option value="">— choose —</option>
-            ${elig.length?`<optgroup label="In-house tech for this store">${elig.map(([id,x])=>`<option value="tech:${id}">🔧 ${esc(x.name)}</option>`).join("")}</optgroup>`:""}
+            <option value=""${isUnassigned?" selected":""}>— Unassigned —</option>
+            ${techs.length?`<optgroup label="In-house tech for this store">${techs.map(([id,x])=>
+              `<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("")}</optgroup>`:""}
             ${match.length?`<optgroup label="Vendors — ${esc(catLabel)}">${match.map(vOpt).join("")}</optgroup>`:""}
             ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
-          </select></div>
-          <button class="btn btn-primary btn-block" style="margin-top:9px" onclick="doDirectorAssign('${t._id}')">Assign</button>`;
-      }else if(elig.length){
-        // DMs may only request their own in-house tech.
+          </select>
+          <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">In-house techs dispatch immediately; vendors go to Assigned so someone contacts them.</div>
+        </div>
+        <button class="btn btn-primary btn-block" style="margin-top:9px" onclick="doDirectorAssign('${t._id}')">Set assignment</button>`;
+    }else if(role==="coach"){
+      // DMs (Area Coaches): request their own in-house tech, or leave it in the
+      // pool for Overwatch. They never see the vendor roster.
+      const elig=eligibleTechsFor(t);
+      const assignedNow=t.assignedTechId||t.assignedVendorId;
+      h+=`<div class="section-label">Assign<span class="ln"></span></div>`;
+      if(elig.length){
         const sub=elig.length===1
-          ? `Dispatches to ${esc(elig[0][1].name)}, the in-house tech for this store.`
+          ? `Dispatches to ${esc(elig[0][1].name)}.`
           : `${elig.length} in-house techs cover this store — you'll pick one.`;
         h+=`<button class="btn btn-primary btn-block" onclick="requestInHouse('${t._id}')">🔧 Request In-House Tech</button>
-        <div style="font-size:11px;color:var(--ink-dim);margin:-4px 0 4px">${sub}</div>`;
+          <div style="font-size:11px;color:var(--ink-dim);margin:5px 0 9px">${sub}</div>`;
+      }else{
+        h+=`<div style="font-size:12px;color:var(--ink-dim);margin-bottom:9px">No in-house tech covers this category at this store.</div>`;
       }
-      if(role==="coach"){
-        // ...or flag that it needs an outside vendor, which leaves routing to
-        // Overwatch rather than giving DMs the vendor list.
-        h+=`<button class="btn btn-ghost btn-block" onclick="requestThirdParty('${t._id}')">🏢 Request third-party tech</button>
-        <div style="font-size:11px;color:var(--ink-dim);margin:-4px 0 4px">Stays unassigned and flags Overwatch to pick the vendor.</div>`;
-      }
+      h+=`<button class="btn btn-ghost btn-block" onclick="requestThirdParty('${t._id}')">🏢 Leave unassigned — needs a third-party</button>
+        <div style="font-size:11px;color:var(--ink-dim);margin:5px 0 4px">${assignedNow?"Clears the current assignment and":"Flags Overwatch to"} pick a vendor.</div>`;
     }
+    h+=`<div class="section-label">Update job<span class="ln"></span></div><div style="display:flex;flex-direction:column;gap:9px">`;
     if(t.status!=="in_progress" && t.status!=="finished")
       h+=`<button class="btn btn-ghost btn-block" onclick="setStatus('${t._id}','in_progress')">▶ Mark in progress</button>`;
     h+=`<button class="btn btn-danger btn-block" onclick="confirmClose('${t._id}')">✕ Mark closed</button>`;
