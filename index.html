@@ -684,7 +684,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "5.9";
+const APP_VERSION = "6.0";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2353,6 +2353,12 @@ function openCreate(preStore){
     </div>`);
   if(preStore&&$("cStore"))$("cStore").value=preStore;
   else if(ids.length===1)$("cStore").value=ids[0];
+  // Populate the category list for the store now selected. Without this the
+  // dropdown renders EMPTY and only fills once the store is changed — which is
+  // why the first click did nothing (and never worked at all for single-store
+  // managers, whose store select is disabled so its onchange never fires).
+  renderDraftPreview();
+  syncCreateCats();
 }
 function addDraftPhotos(input){
   [...input.files].slice(0,5-draftPhotos.length).forEach(f=>{
