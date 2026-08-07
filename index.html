@@ -684,7 +684,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.1";
+const APP_VERSION = "6.2";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2402,6 +2402,9 @@ async function submitTicket(){
   const subEl=$("cSub"), needSub=$("cSubWrap")&&$("cSubWrap").style.display!=="none";
   const sub=needSub?(subEl.value||""):"";
   if(needSub&&!sub){toast("Pick a subcategory","err");return}
+  // A tech filing an on-site issue keeps the job unless they untick the box.
+  // Read it BEFORE the awaits below, while the form is still on screen.
+  const mine = SESSION.role==="tech" && !!$("cMine") && $("cMine").checked;
   const btn=$("cSubmit");btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Creating…';
   try{
     const urls=[];for(const p of draftPhotos)urls.push(await uploadPhoto(p.file));
