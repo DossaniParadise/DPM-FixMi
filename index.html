@@ -684,7 +684,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.0";
+const APP_VERSION = "6.1";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1533,7 +1533,14 @@ function myStoreIds(){
       return s.assignedDirectorId===SESSION.refId || coachSet.has(s.assignedAreaCoachId);
     });
   }
-  // coach/tech: stores whose live assignment field === my id
+  // A tech may be one of SEVERAL techs on a store. FindMi stores the full list
+  // in assignedRepairTechnicianIds and mirrors only the FIRST into the legacy
+  // single field — so comparing the legacy field hid every tech but the first
+  // (this is why Kyle saw no stores while Gino was fine). Always read the array
+  // via storeTechIds(), which falls back to the legacy field when needed.
+  if(SESSION.role==="tech")
+    return Object.keys(RESTAURANTS).filter(r=>storeTechIds(r).includes(SESSION.refId));
+  // coach: stores whose live assignment field === my id
   return Object.keys(RESTAURANTS).filter(r=>RESTAURANTS[r][SESSION.refField]===SESSION.refId);
 }
 // Closed tickets vanish from every view EXCEPT overwatch (kept for stats/reports).
@@ -1618,7 +1625,7 @@ function eligibleTechsFor(t){
 const NO_TECH_COLOR="#94a3b8";
 
 /* ============================================================ PERMISSIONS */
-function canCreate(){return SESSION.role!=="tech"}
+function canCreate(){return true}   // techs file tickets for issues they find on site
 function canManageVendors(){return SESSION.role==="admin"}
 function canEditContent(){return ["admin","coach","director"].includes(SESSION.role);}
 function canAssign(){return SESSION.role==="admin"}
@@ -2337,6 +2344,9 @@ function openCreate(preStore){
         <div class="field" style="flex:1"><label class="label">Category</label><select class="input" id="cCat" onchange="syncCreateSubs()"></select></div>
         <div class="field" style="flex:1"><label class="label">Priority</label><select class="input" id="cPri">${priOpts}</select></div>
       </div>
+      ${SESSION.role==="tech"?`<label class="cat-chk" style="margin-top:14px">
+        <input type="checkbox" id="cMine" checked>
+        <span>Assign this job to me<br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Untick to leave it for dispatch to route.</span></span></label>`:""}
       <div class="field" id="cSubWrap" style="margin-top:14px;display:none">
         <label class="label">Subcategory <span style="font-weight:400;color:var(--ink-dim)">(required)</span></label>
         <select class="input" id="cSub"></select></div>
@@ -2410,10 +2420,12 @@ async function submitTicket(){
     const ticket={
       shortId, storeId:sid,
       category:cat, subcategory:sub, priority:$("cPri").value, description:desc, photos:urls,
-      status:"unassigned", assignedVendorId:null, assignedTechId:null,
+      status:(mine?"dispatched":"unassigned"), assignedVendorId:null, assignedTechId:(mine?SESSION.refId:null),
+      ...(mine?{dispatchedAt:now()}:{}),
       createdBy:SESSION.email, createdByRole:SESSION.role, createdByName:SESSION.name,
       createdAt:now(), updatedAt:now(),
-      activity:[{ts:now(),by:SESSION.name,role:SESSION.role,action:"created"}],
+      activity:[{ts:now(),by:SESSION.name,role:SESSION.role,action:"created"},
+        ...(mine?[{ts:now(),by:SESSION.name,role:SESSION.role,action:"assign",toStatus:"dispatched",note:"🔧 "+SESSION.name+" (self, found on site)"}]:[])],
       comments:[]
     };
     await apiWrite(`${TICKETS_NODE}/${id}`,ticket);
@@ -2425,7 +2437,7 @@ async function submitTicket(){
     if(SESSION.role==="coach"||SESSION.role==="director")coachScreen=sid;   // drop them onto the store they just filed for
     openGroups[sid]=true;render();
     // Area coach: offer to dispatch straight to the store's in-house tech.
-    if(SESSION.role==="coach"||SESSION.role==="director") askDispatchToTech(id,sid);
+    if((SESSION.role==="coach"||SESSION.role==="director")&&!mine) askDispatchToTech(id,sid);
   }catch(e){toast(e.message||"Could not create ticket","err");btn.disabled=false;btn.textContent="Create ticket"}
 }
 
@@ -3387,7 +3399,10 @@ function renderZoneMap(){
   const mapped=[],unmapped=[];
   ids.forEach(sid=>{
     const c=storeCoords(sid);
-    const tids=storeTechIds(sid);                     // ALL techs, not just the first
+    // On a tech's own map every dot is their own dispatched work, so colour it
+    // as theirs. Painting it with all the store's techs made Kyle's jobs look
+    // like Gino's. Overwatch keeps the split-colour zone view.
+    const tids=(SESSION.role==="tech")?[SESSION.refId]:storeTechIds(sid);
     const cols=tids.length?tids.map(id=>(zones[id]||{}).color||NO_TECH_COLOR):[NO_TECH_COLOR];
     const names=tids.length?tids.map(id=>(zones[id]||{}).name||"Unknown tech"):["No tech assigned"];
     const rec={sid,open:openCount(sid),tids,cols,techName:names.join(" + ")};
