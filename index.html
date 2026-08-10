@@ -684,7 +684,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.2";
+const APP_VERSION = "6.3";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1279,7 +1279,21 @@ function store(rid){return RESTAURANTS[rid]||{}}
 function storeName(rid){return store(rid).storeName||"Unknown store"}
 function storeNum(rid){return store(rid).storeNumber||""}
 function storeDirector(rid){const id=store(rid).assignedDirectorId;return (MASTER.directors||{})[id]||null}
-function storeCoach(rid){const id=store(rid).assignedAreaCoachId;return (MASTER.areaCoaches||{})[id]||null}
+/* A store can have SEVERAL area coaches. FindMi stores the full list in
+   assignedAreaCoachIds and mirrors only the FIRST into the legacy singular
+   field — so reading the singular field hid every coach but the first (the
+   same bug class that hid Kyle's stores). Always read through this. */
+function storeCoachIds(rid){
+  const s=store(rid);
+  let ids=[];
+  if(Array.isArray(s.assignedAreaCoachIds)) ids=s.assignedAreaCoachIds.slice();
+  else if(s.assignedAreaCoachIds&&typeof s.assignedAreaCoachIds==="object") ids=Object.values(s.assignedAreaCoachIds);
+  else if(s.assignedAreaCoachId) ids=[s.assignedAreaCoachId];
+  const all=MASTER.areaCoaches||{};
+  return [...new Set(ids.filter(id=>id&&all[id]))];
+}
+/* Primary coach, for single-name display. */
+function storeCoach(rid){const ids=storeCoachIds(rid);return ids.length?(MASTER.areaCoaches||{})[ids[0]]:null}
 function storeTech(rid){const ids=storeTechIds(rid);return ids.length?(MASTER.repairTechnicians||{})[ids[0]]:null}
 function techName(tid){return (MASTER.repairTechnicians||{})[tid]?.name||null}
 function storeManagerName(rid){return store(rid).storeManager||""}
@@ -1447,7 +1461,7 @@ function viewAsRoster(){
   // under them, the techs servicing their stores, and their store managers.
   const isDir=SESSION.role==="director";
   const myStores=isDir?new Set(myStoreIds()):null;
-  const myCoaches=isDir?new Set(myStoreIds().map(id=>store(id).assignedAreaCoachId).filter(Boolean)):null;
+  const myCoaches=isDir?new Set(myStoreIds().flatMap(id=>storeCoachIds(id))):null;
   const myTechs=isDir?new Set(myStoreIds().flatMap(id=>storeTechIds(id))):null;
   if(!isDir) Object.entries(MASTER.directors||{}).forEach(([id,d])=>list.push({kind:"director",id,primary:"Director — "+d.name,secondary:"",search:(d.name+" director").toLowerCase(),sortk:"1"+d.name}));
   Object.entries(MASTER.areaCoaches||{}).filter(([id])=>!isDir||myCoaches.has(id)).forEach(([id,c])=>list.push({kind:"coach",id,primary:"Area Coach — "+c.name,secondary:"",search:(c.name+" area coach").toLowerCase(),sortk:"2"+c.name}));
@@ -1530,7 +1544,7 @@ function myStoreIds(){
     const coachSet=new Set(myCoaches);
     return Object.keys(RESTAURANTS).filter(r=>{
       const s=RESTAURANTS[r];
-      return s.assignedDirectorId===SESSION.refId || coachSet.has(s.assignedAreaCoachId);
+      return s.assignedDirectorId===SESSION.refId || storeCoachIds(r).some(cid=>coachSet.has(cid));
     });
   }
   // A tech may be one of SEVERAL techs on a store. FindMi stores the full list
@@ -1540,7 +1554,9 @@ function myStoreIds(){
   // via storeTechIds(), which falls back to the legacy field when needed.
   if(SESSION.role==="tech")
     return Object.keys(RESTAURANTS).filter(r=>storeTechIds(r).includes(SESSION.refId));
-  // coach: stores whose live assignment field === my id
+  // coach: stores listing me among their area coaches (a store may have several)
+  if(SESSION.role==="coach")
+    return Object.keys(RESTAURANTS).filter(r=>storeCoachIds(r).includes(SESSION.refId));
   return Object.keys(RESTAURANTS).filter(r=>RESTAURANTS[r][SESSION.refField]===SESSION.refId);
 }
 // Closed tickets vanish from every view EXCEPT overwatch (kept for stats/reports).
@@ -1611,15 +1627,21 @@ function techCategories(t){
   if(Array.isArray(m.categories))return m.categories;
   return Array.isArray(t&&t.categories)?t.categories:[];
 }
-function techHandlesCategory(t,catKey){
+function techHandlesCategory(t,catKey,subKey){
   const c=techCategories(t);
-  return c.length===0 || (catKey&&c.includes(catKey));   // untagged tech = handles everything
+  if(c.length===0) return true;                 // untagged tech = handles everything
+  if(catKey&&c.includes(catKey)) return true;   // tagged with the whole category
+  if(subKey&&c.includes(subKey)) return true;   // tagged with just this item
+  return false;
 }
-/* Which of a store's in-house techs may take THIS ticket. */
+/* Which of a store's in-house techs may take THIS ticket. Matches on the
+   ticket's category AND subcategory, so a tech tagged at either level is
+   found (previously only the top-level category was compared, so anyone
+   tagged with specific items was silently never eligible). */
 function eligibleTechsFor(t){
   const techs=MASTER.repairTechnicians||{};
   return storeTechIds(t.storeId)
-    .filter(id=>techHandlesCategory({...techs[id],id},t.category))
+    .filter(id=>techHandlesCategory({...techs[id],id},t.category,t.subcategory))
     .map(id=>[id,techs[id]]);
 }
 const NO_TECH_COLOR="#94a3b8";
