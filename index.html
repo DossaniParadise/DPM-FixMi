@@ -274,8 +274,15 @@ html,body{max-width:100%;overflow-x:hidden}
   display:grid;place-items:center;overflow:hidden;flex-shrink:0}
 .inv-thumb img{width:100%;height:100%;object-fit:cover;cursor:pointer}
 .inv-thumbs{display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;max-width:172px}
-.inv-ph-x{position:absolute;top:-6px;right:-6px;width:17px;height:17px;border:none;border-radius:50%;
-  background:var(--red);color:#fff;font-size:9px;line-height:1;display:grid;place-items:center;padding:0;z-index:2}
+/* The remove badge sits INSIDE the photo's corner — .inv-thumb clips its
+   overflow (rounded corners), so anything poking outside gets cut off.
+   The ::after pseudo expands the touch target to ~36px without growing the
+   visible button. */
+.inv-ph-x{position:absolute;top:3px;right:3px;width:22px;height:22px;border:none;border-radius:6px;
+  background:rgba(12,18,28,.62);color:#fff;font-size:11px;font-weight:700;line-height:1;
+  display:grid;place-items:center;padding:0;z-index:2;cursor:pointer}
+.inv-ph-x::after{content:"";position:absolute;inset:-7px}
+.inv-ph-x:active{background:var(--red)}
 .inv-na{font-size:11px;font-weight:800;color:var(--ink-dim);letter-spacing:.04em}
 .inv-todo{color:var(--ink-dim)}
 .inv-label{font-weight:600;font-size:13.5px}
@@ -300,7 +307,23 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 @media(max-width:600px){
   .inv-item{flex-wrap:wrap}
   .inv-acts{width:100%;justify-content:stretch}
-  .inv-acts .btn{flex:1;min-height:40px}
+  .inv-acts .btn{flex:1;min-height:42px}
+  /* Bigger touch surfaces on phones */
+  .inv-thumb{width:60px;height:60px}
+  .inv-thumbs{max-width:200px}
+  .inv-ph-x{width:26px;height:26px;font-size:12px}
+  .preview-strip img{width:64px;height:64px}
+  .preview-strip .pv-x{width:27px;height:27px;font-size:12px}
+  .preview-strip .pv-retry{height:34px;font-size:13px}
+  .x-btn{width:40px;height:40px}
+  .btn-sm{min-height:40px}
+  .cmt-actions .btn{min-height:42px}
+  .cmt-actions .btn-primary{flex:1}
+  .ow-tab{min-height:40px}
+  .inv-ow{min-height:44px}
+  .inv-success{min-height:42px}
+  .thumb{width:80px;height:80px}
+  .cmt-photos .thumb{width:64px;height:64px}
 }
 .store-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
 .store-tile{display:flex;flex-direction:column;justify-content:space-between;gap:14px;min-height:120px;text-align:left;
@@ -514,14 +537,16 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .upload-zone .uz-ic{font-size:24px;margin-bottom:6px}
 .upload-zone .uz-t{font-size:13px;font-weight:600}
 .upload-zone .uz-h{font-size:11px;margin-top:3px;font-family:var(--mono)}
-.preview-strip{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}
+.preview-strip{display:flex;gap:9px;flex-wrap:wrap;margin-top:11px;padding-top:6px}
 .preview-strip .pv{position:relative}
-.preview-strip img{width:52px;height:52px;border-radius:8px;object-fit:cover;border:1px solid var(--line)}
-.preview-strip .pv-x{position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:10px;line-height:1;display:grid;place-items:center}
+.preview-strip img{width:56px;height:56px;border-radius:8px;object-fit:cover;border:1px solid var(--line)}
+.preview-strip .pv-x{position:absolute;top:-7px;right:-7px;background:var(--red);color:#fff;border:2px solid var(--panel);border-radius:50%;
+  width:24px;height:24px;font-size:11px;font-weight:700;line-height:1;display:grid;place-items:center;padding:0;z-index:2}
+.preview-strip .pv-x::after{content:"";position:absolute;inset:-8px}
 .preview-strip .pv-spin{position:absolute;inset:0;display:grid;place-items:center;background:rgba(255,255,255,.6);border-radius:8px}
 .preview-strip .pv-failed img{opacity:.4}
 .preview-strip .pv-failed{outline:2px solid var(--red);border-radius:9px}
-.preview-strip .pv-retry{position:absolute;inset:0;margin:auto;height:24px;padding:0 8px;background:var(--red);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+.preview-strip .pv-retry{position:absolute;inset:0;margin:auto;height:30px;padding:0 10px;background:var(--red);color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 textarea.input{resize:vertical;min-height:90px;line-height:1.5}
 select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236b7686' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;padding-right:36px}
 .vrow{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--line-soft)}
@@ -732,7 +757,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.9";
+const APP_VERSION = "6.10";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
