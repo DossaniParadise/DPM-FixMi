@@ -732,7 +732,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.8";
+const APP_VERSION = "6.9";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -4483,15 +4483,35 @@ async function invUpload(input){
     await invSave(sid,key,{photos:existing.concat(urls),na:false,rejectNote:"",rejectBy:"",rejectAt:0});
   }catch(e){toast(e.message||"Photo upload failed","err")}
 }
-/* Remove one of an item's photos. Removing the last one puts the item back to
-   "not recorded" (the required photo is gone), so the fraction drops. */
-async function invRemovePhoto(key,idx){
+/* Remove one of an item's photos. Anyone who can open this sheet (DM/coach,
+   Director, Overwatch) can delete. Extras go instantly; removing the LAST
+   photo un-completes the item and drops the count, so that one asks first. */
+function invRemovePhoto(key,idx){
+  const sid=INV_SID; if(!sid)return;
+  const e=(invFor(sid))[key]||{};
+  if(invPhotos(e).length<=1){
+    const item=equipItems().find(x=>x.key===key);
+    modal(`<div class="sheet-head"><h2>Remove this photo?</h2><button class="x-btn" onclick="openInventoryStore('${sid}')">✕</button></div>
+      <div class="sheet-body">
+        <p style="margin:0;font-size:14px"><b>${esc(item?item.label:key)}</b> at ${esc(storeName(sid))}</p>
+        <p style="margin:10px 0 0;font-size:13px;color:var(--ink-mid)">This is the item's only photo. Removing it puts the item back to <b>Not recorded</b> and the store's progress count drops by one.</p>
+      </div>
+      <div class="sheet-foot">
+        <button class="btn btn-ghost" style="flex:1" onclick="openInventoryStore('${sid}')">Cancel</button>
+        <button class="btn btn-danger" style="flex:1" onclick="invDoRemovePhoto('${key}',${idx})">Remove photo</button>
+      </div>`);
+    return;
+  }
+  invDoRemovePhoto(key,idx);
+}
+async function invDoRemovePhoto(key,idx){
   const sid=INV_SID; if(!sid)return;
   const e=(invFor(sid))[key]||{};
   const phs=invPhotos(e).slice();
   phs.splice(idx,1);
   await invSave(sid,key,{photos:phs,na:false,
     rejectNote:e.rejectNote||"",rejectBy:e.rejectBy||"",rejectAt:e.rejectAt||0});
+  toast(phs.length?"Photo removed":"Photo removed — item back to Not recorded");
 }
 /* Overwatch rejects a recorded item with a reason. The photo is cleared so the
    store's fraction drops, and the reason stays visible to the DM until they
