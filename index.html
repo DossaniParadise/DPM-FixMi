@@ -285,6 +285,15 @@ html,body{max-width:100%;overflow-x:hidden}
 .inv-rej{font-size:11.5px;color:var(--red);background:rgba(248,113,113,.08);border-left:3px solid var(--red);
   border-radius:5px;padding:6px 9px;margin-top:5px;line-height:1.45}
 .inv-rej b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+.inv-row.full{border-color:var(--green)}
+/* Slim inventory strip on the Overwatch panel (map/list views) */
+.inv-ow{display:flex;align-items:center;gap:10px;width:100%;margin:0 0 14px;padding:10px 14px;background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:var(--ink);text-align:left;transition:.13s}
+.inv-ow:hover{border-color:var(--amber)}
+/* Completed state: the inventory message shrinks to one green success line */
+.inv-success{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:9px 13px;font-size:13px;font-weight:700;
+  color:var(--green);background:rgba(5,150,105,.08);border:1px solid var(--green);border-radius:var(--radius-sm);text-align:center}
+button.inv-success:hover{background:rgba(5,150,105,.14)}
 @media(max-width:600px){
   .inv-item{flex-wrap:wrap}
   .inv-acts{width:100%;justify-content:stretch}
@@ -372,7 +381,10 @@ html,body{max-width:100%;overflow-x:hidden}
 .cmt-time{font-size:10px;color:var(--ink-dim);margin-left:auto}
 .cmt-body{font-size:13.5px;color:var(--ink-mid);line-height:1.5;white-space:pre-wrap;word-break:break-word}
 .comment-add{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
-.comment-add .btn{align-self:flex-end}
+.cmt-actions{display:flex;justify-content:flex-end;gap:8px}
+.cmt-photos{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.cmt-photos .thumb{width:54px;height:54px;border-radius:8px;overflow:hidden;border:1px solid var(--line);padding:0;background:none}
+.cmt-photos .thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .section-label{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);margin:20px 0 10px;display:flex;align-items:center;gap:8px}
 .section-label .ln{flex:1;height:1px;background:var(--line-soft)}
 .status-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-bottom:6px}
@@ -717,7 +729,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.6";
+const APP_VERSION = "6.7";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1102,6 +1114,10 @@ const CLOSED_TTL_MS=60000;  // matches the API's CDN s-maxage
    up. UI feedback is instant; the CDN lag becomes invisible to the writer. */
 let LOCAL_ECHO={};          // ticketId -> full ticket we just wrote
 let VENDOR_ECHO={};         // vendorId -> rec we just wrote, or {__deleted,updatedAt}
+let INV_ECHO={};            // "storeId/itemKey" -> equipInv rec we just wrote.
+                            // Same CDN-lag shield as above: without it, the next
+                            // refresh() replaced MASTER with the <=60s-stale
+                            // payload and a just-saved inventory photo vanished.
 
 /* ============================================================ API */
 async function apiGet(){
@@ -1157,6 +1173,18 @@ async function refresh(){
       if(!s || (v.updatedAt||0)>(s.updatedAt||0)) VENDORS[id]=v;
       else delete VENDOR_ECHO[id];
     }
+  }
+  // Equipment inventory gets the same write-echo treatment: our copy wins while
+  // it's newer than the (possibly CDN-stale) server copy; once the server's
+  // `at` catches up, the echo entry is evicted.
+  MASTER.admins=MASTER.admins||{};
+  MASTER.admins.equipInv=MASTER.admins.equipInv||{};
+  for(const [pk,rec] of Object.entries(INV_ECHO)){
+    const slash=pk.indexOf("/"), sid=pk.slice(0,slash), key=pk.slice(slash+1);
+    const node=MASTER.admins.equipInv[sid]=MASTER.admins.equipInv[sid]||{};
+    const s=node[key];
+    if(!s || (rec.at||0)>(s.at||0)) node[key]=rec;
+    else delete INV_ECHO[pk];
   }
   // reply numbers are stored as contact info on each Overwatch admin record
   REPLY_NUMBERS={};
@@ -1759,7 +1787,9 @@ function render(){
   if(owView==="map")        body=renderZoneMap();
   else if(owView==="tiles") body=(coachScreen==="hub")?renderCoachHub():renderCoachStore(coachScreen);
   else                      body=renderBoard();
-  v.innerHTML=(role==="admin"?paymiBanner():"")+owToggle()+body;
+  // Overwatch's Map/List views get the slim inventory strip; Tiles already
+  // renders the full inventory card inside the hub itself.
+  v.innerHTML=(role==="admin"?paymiBanner():"")+owToggle()+(role==="admin"&&owView!=="tiles"?invOwBar():"")+body;
   applyTags();
   if(owView==="map")setTimeout(initZoneMap,0);
 }
@@ -2710,6 +2740,7 @@ function openPhoto(url){
 }
 function closePhoto(){const o=$("photoOverlay");if(o){o.classList.remove("on");setTimeout(()=>{if(o)o.innerHTML=""},200)}}
 function openTicket(id){
+  cmtPhotos=[];               // fresh comment-photo draft per ticket sheet
   const t={_id:id,...TICKETS[id]};
   const st=STATUSES[t.status]||STATUSES.open;
   const sid=t.storeId;
@@ -2751,7 +2782,12 @@ function openTicket(id){
       <div class="comments" id="commentList">${renderComments(t)}</div>
       <div class="comment-add">
         <textarea class="input" id="cmtInput" placeholder="Add a comment…" style="min-height:64px"></textarea>
-        <button class="btn btn-primary btn-sm" id="cmtSend" onclick="addComment('${id}')">Post comment</button>
+        <input type="file" id="cmtFile" accept="image/*" multiple style="display:none" onchange="addCommentPhotos(this)">
+        <div class="preview-strip" id="cmtPreview" style="margin-top:0;display:none"></div>
+        <div class="cmt-actions">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="$('cmtFile').click()">📷 Add photo</button>
+          <button class="btn btn-primary btn-sm" id="cmtSend" onclick="addComment('${id}')">Post comment</button>
+        </div>
       </div>
       <div class="section-label">Activity<span class="ln"></span></div>
       <div class="timeline">${activity||'<div style="color:var(--ink-dim);font-size:13px">No activity yet.</div>'}</div>
@@ -2775,19 +2811,60 @@ function renderComments(t){
       <div class="cmt-head"><span class="cmt-who">${esc(c.by)}</span>
         <span class="cmt-role">${esc(ROLE_LABEL[c.role]||c.role||"")}</span>
         <span class="cmt-time mono">${fmtDate(c.ts)}</span></div>
-      <div class="cmt-body">${esc(c.text)}</div>
+      ${c.text?`<div class="cmt-body">${esc(c.text)}</div>`:""}
+      ${Array.isArray(c.photos)&&c.photos.length?`<div class="cmt-photos">${c.photos.map(u=>
+        `<button type="button" class="thumb" onclick="openPhoto('${escA(u)}')"><img src="${escA(u)}" loading="lazy" decoding="async" alt="comment photo"></button>`).join("")}</div>`:""}
     </div>`).join("");
+}
+/* ---- comment photos ----
+   Same pipeline as ticket photos (compress → imgbb → URL). The URLs are stored
+   as `photos:[...]` ON the comment object itself, inside the ticket's
+   `comments` array — so they live in the ticket schema and travel with the
+   ticket, exactly like the ticket-level photos array. Upload starts as soon as
+   a photo is picked; Post is blocked only while an upload is in flight. */
+let cmtPhotos=[];
+async function addCommentPhotos(input){
+  const files=[...input.files].slice(0,5-cmtPhotos.length);input.value="";
+  for(const f of files){
+    if(f.size>25*1024*1024){toast("That photo is very large and was skipped","err");continue}
+    const ph={file:f,localUrl:URL.createObjectURL(f),url:null,uploading:true,failed:false};
+    cmtPhotos.push(ph);renderCmtPreview();
+    await uploadOneCmt(ph);
+  }
+}
+async function uploadOneCmt(ph){
+  ph.uploading=true;ph.failed=false;renderCmtPreview();
+  try{ph.url=await uploadPhoto(ph.file);ph.uploading=false;}
+  catch(e){ph.uploading=false;ph.failed=true;toast("Photo upload failed: "+(e.message||"network error")+" — tap retry","err");}
+  renderCmtPreview();
+}
+function retryCmtPhoto(i){const ph=cmtPhotos[i];if(ph)uploadOneCmt(ph);}
+function renderCmtPreview(){
+  const el=$("cmtPreview");if(!el)return;
+  el.style.display=cmtPhotos.length?"flex":"none";
+  el.innerHTML=cmtPhotos.map((p,i)=>`<div class="pv${p.failed?" pv-failed":""}">
+      <img src="${p.localUrl}" alt="">
+      ${p.uploading?`<span class="pv-spin"><span class="inline-spin"></span></span>`:""}
+      ${p.failed?`<button class="pv-retry" onclick="retryCmtPhoto(${i})">↻ Retry</button>`:""}
+      <button class="pv-x" onclick="cmtPhotos.splice(${i},1);renderCmtPreview()">✕</button>
+    </div>`).join("");
+  const anyUploading=cmtPhotos.some(p=>p.uploading);
+  const btn=$("cmtSend");if(btn)btn.disabled=anyUploading;
+  applyTags();
 }
 async function addComment(id){
   const inp=$("cmtInput");if(!inp)return;
   const text=inp.value.trim();
-  if(!text){toast("Write something first","err");return}
+  const photos=cmtPhotos.filter(p=>p.url).map(p=>p.url);
+  if(!text&&!photos.length){toast("Write something or add a photo","err");return}
+  if(cmtPhotos.some(p=>p.uploading)){toast("Hold on — a photo is still uploading","err");return}
   const btn=$("cmtSend");btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>';
   const t=TICKETS[id];
   const comments=Array.isArray(t.comments)?t.comments.slice():[];
-  comments.push({id:uid(),by:SESSION.name,role:SESSION.role,email:SESSION.email,text,ts:now()});
+  comments.push({id:uid(),by:SESSION.name,role:SESSION.role,email:SESSION.email,text,ts:now(),
+    ...(photos.length?{photos}:{})});
   const ok=await patchTicket(id,{comments},null); // comment is its own log; no activity entry needed
-  if(ok){toast("Comment posted");openTicket(id)}
+  if(ok){cmtPhotos=[];toast("Comment posted");openTicket(id)}
   else{btn.disabled=false;btn.textContent="Post comment"}
 }
 /* ---- who can do what (new lifecycle) ----
@@ -4276,6 +4353,10 @@ function invHubButton(){
   if(!canSeeInventory())return "";
   const stores=invStores(), per=equipItems().length;
   const done=stores.reduce((n,sid)=>n+invDone(sid),0), total=stores.length*per;
+  // Everything recorded → the big card shrinks to a slim green success line
+  // (still tappable, so photos stay reviewable/replaceable).
+  if(total&&done>=total)
+    return `<button class="inv-success" style="margin-bottom:20px" onclick="openInventory()">✓ Equipment inventory complete · ${total} of ${total} recorded</button>`;
   const pct=total?Math.round(done/total*100):0;
   return `<button class="hub-btn inv-btn" style="width:100%;margin-bottom:20px" onclick="openInventory()">
     <div class="hb-ic">🧾</div>
@@ -4284,12 +4365,26 @@ function invHubButton(){
     <div class="inv-bar"><div class="inv-fill" style="width:${pct}%"></div></div>
   </button>`;
 }
+/* Slim inventory strip for the Overwatch panel's Map and List views (the Tiles
+   hub already shows the full card). One tap opens the same store picker. */
+function invOwBar(){
+  if(!canSeeInventory())return "";
+  const stores=invStores(), per=equipItems().length;
+  const done=stores.reduce((n,sid)=>n+invDone(sid),0), total=stores.length*per;
+  if(total&&done>=total)
+    return `<button class="inv-success" style="margin-bottom:14px" onclick="openInventory()">✓ Equipment inventory complete · ${stores.length} store${stores.length===1?"":"s"}</button>`;
+  const pct=total?Math.round(done/total*100):0;
+  return `<button class="inv-ow" onclick="openInventory()">
+    <span>🧾 Equipment inventory</span><span class="inv-frac">${done} / ${total}</span>
+    <span class="inv-bar sm" style="display:block;flex:1;min-width:60px;margin-top:0"><span class="inv-fill" style="width:${pct}%;display:block"></span></span>
+  </button>`;
+}
 /* Store picker */
 function openInventory(){
   const stores=invStores(), per=equipItems().length;
   const rows=stores.map(sid=>{
     const d=invDone(sid), pct=per?Math.round(d/per*100):0;
-    return `<button class="inv-row" onclick="openInventoryStore('${sid}')">
+    return `<button class="inv-row${d>=per&&per?" full":""}" onclick="openInventoryStore('${sid}')">
       <div style="flex:1;min-width:0">
         <div class="inv-name">${esc(storeName(sid))}</div>
         <div class="inv-bar sm"><div class="inv-fill" style="width:${pct}%"></div></div>
@@ -4333,8 +4428,10 @@ function openInventoryStore(sid){
     </div>`;}).join("");
   modal(`<div class="sheet-head"><h2>${esc(storeName(sid))}</h2><button class="x-btn" onclick="openInventory()">✕</button></div>
     <div class="sheet-body">
-      <div class="inv-head"><b>${done} of ${per}</b> recorded
-        <div class="inv-bar"><div class="inv-fill" style="width:${per?Math.round(done/per*100):0}%"></div></div></div>
+      ${per&&done>=per
+        ?`<div class="inv-success" style="margin-bottom:12px">✓ All ${per} items recorded — inventory complete</div>`
+        :`<div class="inv-head"><b>${done} of ${per}</b> recorded
+        <div class="inv-bar"><div class="inv-fill" style="width:${per?Math.round(done/per*100):0}%"></div></div></div>`}
       <input type="file" id="invFile" accept="image/*" style="display:none" onchange="invUpload(this)">
       ${rows}
     </div>
@@ -4388,13 +4485,19 @@ async function invSave(sid,key,val){
   const rec={...val,by:SESSION.name,at:now()};
   MASTER.admins=MASTER.admins||{};
   MASTER.admins.equipInv=MASTER.admins.equipInv||{};
-  MASTER.admins.equipInv[sid]={...(MASTER.admins.equipInv[sid]||{}),[key]:rec};
+  const node=MASTER.admins.equipInv[sid]=MASTER.admins.equipInv[sid]||{};
+  const prev=node[key];                    // kept for rollback
+  node[key]=rec;
+  INV_ECHO[sid+"/"+key]=rec;               // survives refresh() until the CDN catches up
   openInventoryStore(sid);
   try{
     await apiWrite(`admins/equipInv/${sid}/${key}`,rec);
     refreshInBackground();
   }catch(e){
-    delete MASTER.admins.equipInv[sid][key];
+    // Restore what was there before — deleting outright would locally wipe a
+    // previously-saved photo just because a *replace* attempt failed.
+    if(prev)node[key]=prev; else delete node[key];
+    delete INV_ECHO[sid+"/"+key];
     toast((e.message||"Could not save")+" — not saved","err");
     openInventoryStore(sid);
   }
