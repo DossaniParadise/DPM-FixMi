@@ -257,6 +257,39 @@ html,body{max-width:100%;overflow-x:hidden}
 .hub-btn .hb-t{font-family:var(--disp);font-weight:800;font-size:17px}
 .hub-btn .hb-d{font-size:13px;color:var(--ink-dim);line-height:1.4}
 .hub-btn.accent{background:linear-gradient(135deg,rgba(29,118,187,.14),transparent 70%);border-color:var(--amber-deep)}
+.inv-btn{background:linear-gradient(135deg,rgba(29,118,187,.10),transparent 70%);border-color:var(--amber-deep)}
+.inv-frac{font-family:var(--mono);font-size:13px;color:var(--amber-deep);margin-left:6px}
+.inv-bar{height:6px;border-radius:99px;background:var(--panel-2);border:1px solid var(--line);overflow:hidden;margin-top:8px}
+.inv-bar.sm{height:5px;margin-top:6px}
+.inv-fill{height:100%;background:linear-gradient(90deg,var(--amber),var(--amber-deep));border-radius:99px;transition:width .25s}
+.inv-row{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);
+  border-radius:11px;padding:12px 13px;margin-bottom:8px;cursor:pointer}
+.inv-row:hover{border-color:var(--amber)}
+.inv-name{font-weight:700;font-size:14px}
+.inv-count{font-family:var(--mono);font-size:12px;color:var(--ink-dim);white-space:nowrap}
+.inv-count.full{color:var(--green,#16a34a);font-weight:700}
+.inv-head{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:12px;font-size:13.5px}
+.inv-item{display:flex;align-items:center;gap:11px;padding:9px 4px;border-bottom:1px solid var(--line)}
+.inv-thumb{width:52px;height:52px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);
+  display:grid;place-items:center;overflow:hidden;flex-shrink:0}
+.inv-thumb img{width:100%;height:100%;object-fit:cover;cursor:pointer}
+.inv-na{font-size:11px;font-weight:800;color:var(--ink-dim);letter-spacing:.04em}
+.inv-todo{color:var(--ink-dim)}
+.inv-label{font-weight:600;font-size:13.5px}
+.inv-by{font-size:11px;color:var(--ink-dim);margin-top:2px}
+.inv-acts{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+.inv-item.done .inv-thumb{border-color:var(--green,#16a34a)}
+.inv-item.na .inv-thumb{background:var(--panel);border-style:dashed}
+.inv-item.rej .inv-thumb{border-color:var(--red);background:rgba(248,113,113,.08)}
+.inv-item.rej .inv-todo{color:var(--red);font-weight:800}
+.inv-rej{font-size:11.5px;color:var(--red);background:rgba(248,113,113,.08);border-left:3px solid var(--red);
+  border-radius:5px;padding:6px 9px;margin-top:5px;line-height:1.45}
+.inv-rej b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+@media(max-width:600px){
+  .inv-item{flex-wrap:wrap}
+  .inv-acts{width:100%;justify-content:stretch}
+  .inv-acts .btn{flex:1;min-height:40px}
+}
 .store-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
 .store-tile{display:flex;flex-direction:column;justify-content:space-between;gap:14px;min-height:120px;text-align:left;
   background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;transition:.15s;cursor:pointer}
@@ -684,7 +717,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.3";
+const APP_VERSION = "6.5";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1464,7 +1497,7 @@ function viewAsRoster(){
   const myCoaches=isDir?new Set(myStoreIds().flatMap(id=>storeCoachIds(id))):null;
   const myTechs=isDir?new Set(myStoreIds().flatMap(id=>storeTechIds(id))):null;
   if(!isDir) Object.entries(MASTER.directors||{}).forEach(([id,d])=>list.push({kind:"director",id,primary:"Director — "+d.name,secondary:"",search:(d.name+" director").toLowerCase(),sortk:"1"+d.name}));
-  Object.entries(MASTER.areaCoaches||{}).filter(([id])=>!isDir||myCoaches.has(id)).forEach(([id,c])=>list.push({kind:"coach",id,primary:"Area Coach — "+c.name,secondary:"",search:(c.name+" area coach").toLowerCase(),sortk:"2"+c.name}));
+  Object.entries(MASTER.areaCoaches||{}).filter(([id])=>!isDir||myCoaches.has(id)).forEach(([id,c])=>list.push({kind:"coach",id,primary:"District Manager — "+c.name,secondary:"",search:(c.name+" district manager area coach dm").toLowerCase(),sortk:"2"+c.name}));
   Object.entries(MASTER.repairTechnicians||{}).filter(([id])=>!isDir||myTechs.has(id)).forEach(([id,t])=>list.push({kind:"tech",id,primary:"Repair Tech — "+t.name,secondary:"",search:(t.name+" tech").toLowerCase(),sortk:"3"+t.name}));
   Object.keys(RESTAURANTS).filter(id=>!isDir||myStores.has(id)).forEach(id=>{
     const s=RESTAURANTS[id];
@@ -1810,6 +1843,7 @@ function renderCoachHub(){
       <div class="hb-ic">📝</div><div class="hb-t">New ticket</div>
       <div class="hb-d">Open a ticket for any of your stores.</div>
     </button>
+    ${invHubButton()}
     ${paymiBanner()}
     ${ids.length?`<div class="store-grid">${tiles}</div>`
       :`<div class="empty"><div class="empty-mark">🏪</div><h3>No stores in your area</h3><p>Managed in the master.</p></div>`}`;
@@ -4208,6 +4242,158 @@ async function impStepSave(){
     IMP_FAIL++;
     if(btn){btn.disabled=false;btn.innerHTML="✓ Import this ticket"}
     toast(e.message||"Could not save that ticket","err");
+  }
+}
+
+
+/* ============================================================ EQUIPMENT INVENTORY
+   Burger King stores only. For each of the 19 tracked items a DM either uploads
+   ONE photo showing the model + serial plate, or marks it N/A when the store
+   doesn't have that equipment. Both count as complete.
+   Stored at admins/equipInv/{storeId} — the only node prefix FixMi may write
+   besides tickets and vendors. Visible to the store's DM, their Director, and
+   Overwatch. */
+function equipItems(){
+  const eq=(catsForDivision("bk")||[]).find(c=>c.key==="equipment");
+  // "Other" isn't a physical asset, so it isn't part of the inventory.
+  return ((eq&&eq.subs)||[]).filter(x=>x.key!=="equipment_other");
+}
+function invFor(sid){return ((MASTER.admins||{}).equipInv||{})[sid]||{}}
+function invDone(sid){
+  const rec=invFor(sid), items=equipItems();
+  return items.filter(x=>{const e=rec[x.key];return e&&(e.na||e.photo)}).length;
+}
+/* BK stores in the viewer's scope. Overwatch sees all, others their own. */
+function invStores(){
+  const ids=(SESSION.role==="admin")?Object.keys(RESTAURANTS):myStoreIds();
+  return ids.filter(sid=>storeDivision(sid)==="bk").sort((a,b)=>storeName(a).localeCompare(storeName(b)));
+}
+function canSeeInventory(){return ["coach","director","admin"].includes(SESSION.role)&&invStores().length>0}
+function invHubButton(){
+  if(!canSeeInventory())return "";
+  const stores=invStores(), per=equipItems().length;
+  const done=stores.reduce((n,sid)=>n+invDone(sid),0), total=stores.length*per;
+  const pct=total?Math.round(done/total*100):0;
+  return `<button class="hub-btn inv-btn" style="width:100%;margin-bottom:20px" onclick="openInventory()">
+    <div class="hb-ic">🧾</div>
+    <div class="hb-t">Equipment inventory <span class="inv-frac">${done} / ${total}</span></div>
+    <div class="hb-d">Model &amp; serial photos for each piece of equipment.</div>
+    <div class="inv-bar"><div class="inv-fill" style="width:${pct}%"></div></div>
+  </button>`;
+}
+/* Store picker */
+function openInventory(){
+  const stores=invStores(), per=equipItems().length;
+  const rows=stores.map(sid=>{
+    const d=invDone(sid), pct=per?Math.round(d/per*100):0;
+    return `<button class="inv-row" onclick="openInventoryStore('${sid}')">
+      <div style="flex:1;min-width:0">
+        <div class="inv-name">${esc(storeName(sid))}</div>
+        <div class="inv-bar sm"><div class="inv-fill" style="width:${pct}%"></div></div>
+      </div>
+      <span class="inv-count${d>=per?" full":""}">${d} / ${per}</span>
+    </button>`;}).join("");
+  modal(`<div class="sheet-head"><h2>Equipment inventory</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body">
+      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Burger King stores. For each item, add one photo showing the model and serial plate — or mark it N/A if the store doesn't have it.</p>
+      ${rows||'<div class="rp-empty">No Burger King stores in your scope.</div>'}
+    </div>`);
+}
+/* The 19 items for one store */
+let INV_SID=null;
+function openInventoryStore(sid){
+  INV_SID=sid;
+  const rec=invFor(sid), items=equipItems();
+  const done=invDone(sid), per=items.length;
+  const rows=items.map(x=>{
+    const e=rec[x.key]||{};
+    const recorded=!!(e.photo||e.na);
+    // A rejected item counts as NOT done, and carries Overwatch's reason until
+    // the DM replaces it — that's how the fraction drops and they learn why.
+    const rejected=!recorded&&!!e.rejectNote;
+    const state=e.na?"na":(e.photo?"done":(rejected?"rej":"todo"));
+    const who=e.by?`${esc(e.by)}${e.at?" · "+fmtDateShort(e.at):""}`:"";
+    const isOw=SESSION.role==="admin";
+    return `<div class="inv-item ${state}">
+      <div class="inv-thumb">${e.photo?`<img src="${escA(e.photo)}" loading="lazy" decoding="async" alt="" onclick="openPhoto('${escA(e.photo)}')">`
+        :(e.na?`<span class="inv-na">N/A</span>`:`<span class="inv-todo">${rejected?"!":"—"}</span>`)}</div>
+      <div style="flex:1;min-width:0">
+        <div class="inv-label">${esc(x.label)}</div>
+        ${who&&recorded?`<div class="inv-by">${who}</div>`:(rejected?"":`<div class="inv-by">Not recorded yet</div>`)}
+        ${rejected?`<div class="inv-rej"><b>Rejected by ${esc(e.rejectBy||"Overwatch")}${e.rejectAt?" · "+fmtDateShort(e.rejectAt):""}</b>${esc(e.rejectNote)}</div>`:""}
+      </div>
+      <div class="inv-acts">
+        <button class="btn btn-ghost btn-sm" onclick="invPick('${x.key}')">${e.photo?"Replace":(rejected?"📷 Retake":"📷 Photo")}</button>
+        <button class="btn btn-ghost btn-sm${e.na?" tk-cur":""}" onclick="invSetNA('${x.key}',${e.na?"false":"true"})">${e.na?"✓ N/A":"N/A"}</button>
+        ${(isOw&&recorded)?`<button class="btn btn-danger btn-sm" onclick="invReject('${x.key}')">✕ Reject</button>`:""}
+      </div>
+    </div>`;}).join("");
+  modal(`<div class="sheet-head"><h2>${esc(storeName(sid))}</h2><button class="x-btn" onclick="openInventory()">✕</button></div>
+    <div class="sheet-body">
+      <div class="inv-head"><b>${done} of ${per}</b> recorded
+        <div class="inv-bar"><div class="inv-fill" style="width:${per?Math.round(done/per*100):0}%"></div></div></div>
+      <input type="file" id="invFile" accept="image/*" style="display:none" onchange="invUpload(this)">
+      ${rows}
+    </div>
+    <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="openInventory()">Back to stores</button></div>`);
+}
+let INV_KEY=null;
+function invPick(key){INV_KEY=key;$("invFile").click();}
+async function invUpload(input){
+  const f=input.files&&input.files[0]; input.value="";
+  if(!f||!INV_KEY||!INV_SID)return;
+  const key=INV_KEY, sid=INV_SID;
+  toast("Uploading photo…");
+  try{
+    const url=await uploadPhoto(f);
+    await invSave(sid,key,{photo:url,na:false,rejectNote:"",rejectBy:"",rejectAt:0});
+  }catch(e){toast(e.message||"Photo upload failed","err")}
+}
+/* Overwatch rejects a recorded item with a reason. The photo is cleared so the
+   store's fraction drops, and the reason stays visible to the DM until they
+   record it again. */
+function invReject(key){
+  const sid=INV_SID; if(!sid)return;
+  const item=equipItems().find(x=>x.key===key);
+  modal(`<div class="sheet-head"><h2>Reject this photo?</h2><button class="x-btn" onclick="openInventoryStore('${sid}')">✕</button></div>
+    <div class="sheet-body">
+      <p style="margin:0;font-size:14px"><b>${esc(item?item.label:key)}</b> at ${esc(storeName(sid))}</p>
+      <div class="field" style="margin-top:12px"><label class="label">Why is it being rejected?</label>
+        <textarea class="input" id="invRejNote" rows="3" placeholder="e.g. Serial plate isn't readable — please retake closer."></textarea>
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">The District Manager sees this note and their progress count drops by one.</div>
+      </div>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-ghost" style="flex:1" onclick="openInventoryStore('${sid}')">Cancel</button>
+      <button class="btn btn-danger" style="flex:1" onclick="invDoReject('${key}')">Reject &amp; request retake</button>
+    </div>`);
+  setTimeout(()=>{const el=$("invRejNote");if(el)el.focus()},60);
+}
+async function invDoReject(key){
+  const sid=INV_SID; if(!sid)return;
+  const note=(($("invRejNote")||{}).value||"").trim();
+  if(!note){toast("Add a short reason","err");return}
+  await invSave(sid,key,{photo:"",na:false,rejectNote:note,rejectBy:SESSION.name,rejectAt:now()});
+  toast("Rejected — retake requested");
+}
+async function invSetNA(key,on){
+  const sid=INV_SID; if(!sid)return;
+  await invSave(sid,key,on?{na:true,photo:"",rejectNote:"",rejectBy:"",rejectAt:0}:{na:false,photo:""});
+}
+/* Optimistic write — this endpoint is rarely warm, so don't make them wait. */
+async function invSave(sid,key,val){
+  const rec={...val,by:SESSION.name,at:now()};
+  MASTER.admins=MASTER.admins||{};
+  MASTER.admins.equipInv=MASTER.admins.equipInv||{};
+  MASTER.admins.equipInv[sid]={...(MASTER.admins.equipInv[sid]||{}),[key]:rec};
+  openInventoryStore(sid);
+  try{
+    await apiWrite(`admins/equipInv/${sid}/${key}`,rec);
+    refreshInBackground();
+  }catch(e){
+    delete MASTER.admins.equipInv[sid][key];
+    toast((e.message||"Could not save")+" — not saved","err");
+    openInventoryStore(sid);
   }
 }
 
