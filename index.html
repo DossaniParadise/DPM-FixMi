@@ -717,7 +717,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.5";
+const APP_VERSION = "6.6";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1017,14 +1017,17 @@ async function refreshPaymiCount(){
 
 function paymiBanner(){
   if(!PAYMI_COUNT&&!PAYMI_COMMENTS)return"";   // nothing to say
-  const link=`<a href="${PAYMI_URL}" target="_blank" rel="noopener noreferrer">PayMi</a>`;
+  // Deep-link each line to the right place in PayMi. A bare link dropped you on
+  // the home screen, where comments are invisible — they can sit on invoices
+  // that aren't in your approval queue at all.
+  const go=(view,label)=>`<a href="${PAYMI_URL}?view=${view}" target="_blank" rel="noopener noreferrer">${label}</a>`;
   const lines=[];
   if(PAYMI_COUNT)lines.push(PAYMI_COUNT===1
-    ?`You have an invoice to review, please visit the ${link} app to approve or deny.`
-    :`You have ${PAYMI_COUNT} invoices to approve, please visit the ${link} app to approve or deny.`);
+    ?`You have an invoice to review — ${go("pending","open it in PayMi")} to approve or deny.`
+    :`You have ${PAYMI_COUNT} invoices to approve — ${go("pending","open them in PayMi")} to approve or deny.`);
   if(PAYMI_COMMENTS)lines.push(PAYMI_COMMENTS===1
-    ?`You have 1 comment to view in the ${link} app.`
-    :`You have ${PAYMI_COMMENTS} comments to view in the ${link} app.`);
+    ?`You have 1 unread comment — ${go("comments","read it in PayMi")}.`
+    :`You have ${PAYMI_COMMENTS} unread comments — ${go("comments","read them in PayMi")}.`);
   return `<div class="paymi-note"><div class="pn-ic">🧾</div><div class="pn-t">${
     lines.map(l=>`<div>${l}</div>`).join("")}</div></div>`;
 }
