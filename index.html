@@ -270,9 +270,12 @@ html,body{max-width:100%;overflow-x:hidden}
 .inv-count.full{color:var(--green,#16a34a);font-weight:700}
 .inv-head{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:12px;font-size:13.5px}
 .inv-item{display:flex;align-items:center;gap:11px;padding:9px 4px;border-bottom:1px solid var(--line)}
-.inv-thumb{width:52px;height:52px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);
+.inv-thumb{width:52px;height:52px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);position:relative;
   display:grid;place-items:center;overflow:hidden;flex-shrink:0}
 .inv-thumb img{width:100%;height:100%;object-fit:cover;cursor:pointer}
+.inv-thumbs{display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;max-width:172px}
+.inv-ph-x{position:absolute;top:-6px;right:-6px;width:17px;height:17px;border:none;border-radius:50%;
+  background:var(--red);color:#fff;font-size:9px;line-height:1;display:grid;place-items:center;padding:0;z-index:2}
 .inv-na{font-size:11px;font-weight:800;color:var(--ink-dim);letter-spacing:.04em}
 .inv-todo{color:var(--ink-dim)}
 .inv-label{font-weight:600;font-size:13.5px}
@@ -729,7 +732,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.7";
+const APP_VERSION = "6.8";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -768,7 +771,7 @@ const FLAT_CATEGORIES = [
   {key:"safety",label:"Safety",subs:[]},{key:"structural",label:"Structural",subs:[]},
   {key:"other",label:"Other",subs:[]}
 ];
-const BK_CATEGORIES = [{"key":"equipment","label":"Equipment","subs":[{"key":"equipment_broiler","label":"Broiler"},{"key":"equipment_chef","label":"Chef"},{"key":"equipment_coffee_brewer","label":"Coffee Brewer"},{"key":"equipment_coke_machine","label":"Coke Machine"},{"key":"equipment_fry_dump","label":"Fry Dump"},{"key":"equipment_fry_freezer","label":"Fry Freezer"},{"key":"equipment_fryer","label":"Fryer"},{"key":"equipment_heat_chute","label":"Heat Chute"},{"key":"equipment_ice_machine","label":"Ice Machine"},{"key":"equipment_meat_well","label":"Meat Well"},{"key":"equipment_microwave_hopper","label":"Microwave / Hopper"},{"key":"equipment_oven","label":"Oven"},{"key":"equipment_phus","label":"PHUs"},{"key":"equipment_reach_in_cooler","label":"Reach-In Cooler"},{"key":"equipment_reach_in_freezer","label":"Reach-In Freezer"},{"key":"equipment_shake_machine","label":"Shake Machine"},{"key":"equipment_toaster","label":"Toaster"},{"key":"equipment_walk_in_cooler","label":"Walk-In Cooler"},{"key":"equipment_walk_in_freezer","label":"Walk-In Freezer"},{"key":"equipment_other","label":"Other"}]},{"key":"facilities","label":"Facilities","subs":[{"key":"facilities_bathrooms","label":"Bathrooms"},{"key":"facilities_broiler_hood","label":"Broiler Hood"},{"key":"facilities_building","label":"Building"},{"key":"facilities_ceiling_tile","label":"Ceiling Tile"},{"key":"facilities_electrical","label":"Electrical"},{"key":"facilities_fire_alarm","label":"Fire Alarm"},{"key":"facilities_flooring_tile","label":"Flooring/Tile"},{"key":"facilities_fryer_hood","label":"Fryer Hood"},{"key":"facilities_glass_window_door","label":"Glass/Window/Door"},{"key":"facilities_hvac_heat_ac","label":"HVAC (Heat/AC)"},{"key":"facilities_lighting_exterior","label":"Lighting - Exterior"},{"key":"facilities_lighting_interior","label":"Lighting - Interior"},{"key":"facilities_plumbing","label":"Plumbing"},{"key":"facilities_preventative_maintenance","label":"Preventative Maintenance"},{"key":"facilities_roof","label":"Roof"},{"key":"facilities_safe_locksmith","label":"Safe / Locksmith"},{"key":"facilities_signage","label":"Signage"},{"key":"facilities_other","label":"Other"}]},{"key":"it","label":"IT","subs":[{"key":"it_alarm","label":"Alarm"},{"key":"it_camera","label":"Camera"},{"key":"it_headset_intercom","label":"Headset/Intercom"},{"key":"it_internet","label":"Internet"},{"key":"it_lobby_atmosphere_safety_tv","label":"Lobby Atmosphere/Safety TV"},{"key":"it_music","label":"Music"},{"key":"it_network_issues","label":"Network Issues"},{"key":"it_new_user","label":"New User"},{"key":"it_office_printers","label":"Office Printers"},{"key":"it_phone","label":"Phone"},{"key":"it_other","label":"Other"}]},{"key":"ops_support","label":"OPS Support","subs":[{"key":"ops_support_bitrix","label":"Bitrix"},{"key":"ops_support_bku","label":"BKU"},{"key":"ops_support_onedrive","label":"OneDrive"},{"key":"ops_support_password_resets","label":"Password Resets"},{"key":"ops_support_paycom","label":"Paycom"},{"key":"ops_support_rsi","label":"RSI"},{"key":"ops_support_training_computer_tablet","label":"Training Computer/Tablet"},{"key":"ops_support_zenput","label":"Zenput"}]},{"key":"pos","label":"POS","subs":[{"key":"pos_credit_cards_pin_pad","label":"Credit Cards / Pin Pad"},{"key":"pos_drive_thru_director","label":"Drive Thru Director"},{"key":"pos_indoor_dmbs","label":"Indoor DMBs"},{"key":"pos_kitchen_screen","label":"Kitchen Screen"},{"key":"pos_kitchen_sticky_printer","label":"Kitchen Sticky Printer"},{"key":"pos_odmb_warranty_issues","label":"ODMB Warranty Issues"},{"key":"pos_outdoor_dmbs","label":"Outdoor DMBs"},{"key":"pos_rti","label":"RTI"},{"key":"pos_rti_labor","label":"RTI Labor"},{"key":"pos_sicom","label":"Sicom"},{"key":"pos_terminals","label":"Terminals"},{"key":"pos_thermal_printer","label":"Thermal Printer"},{"key":"pos_other","label":"Other"}]}];
+const BK_CATEGORIES = [{"key":"equipment","label":"Equipment","subs":[{"key":"equipment_broiler","label":"Broiler"},{"key":"equipment_chef","label":"Chef"},{"key":"equipment_coffee_brewer","label":"Coffee Brewer"},{"key":"equipment_coke_machine","label":"Coke Machine"},{"key":"equipment_fry_dump","label":"Fry Dump"},{"key":"equipment_fry_freezer","label":"Fry Freezer"},{"key":"equipment_fryer","label":"Fryer"},{"key":"equipment_heat_chute","label":"Heat Chute"},{"key":"equipment_ice_machine","label":"Ice Machine"},{"key":"equipment_lobby_drink_machine","label":"Lobby Drink Machine"},{"key":"equipment_meat_well","label":"Meat Well"},{"key":"equipment_microwave_hopper","label":"Microwave / Hopper"},{"key":"equipment_oven","label":"Oven"},{"key":"equipment_phus","label":"PHUs"},{"key":"equipment_reach_in_cooler","label":"Reach-In Cooler"},{"key":"equipment_reach_in_freezer","label":"Reach-In Freezer"},{"key":"equipment_shake_machine","label":"Shake Machine"},{"key":"equipment_toaster","label":"Toaster"},{"key":"equipment_under_counter_cooler","label":"Under-Counter Cooler"},{"key":"equipment_vegetable_slicer","label":"Vegetable Slicer"},{"key":"equipment_walk_in_cooler","label":"Walk-In Cooler"},{"key":"equipment_walk_in_freezer","label":"Walk-In Freezer"},{"key":"equipment_other","label":"Other"}]},{"key":"facilities","label":"Facilities","subs":[{"key":"facilities_bathrooms","label":"Bathrooms"},{"key":"facilities_broiler_hood","label":"Broiler Hood"},{"key":"facilities_building","label":"Building"},{"key":"facilities_ceiling_tile","label":"Ceiling Tile"},{"key":"facilities_electrical","label":"Electrical"},{"key":"facilities_fire_alarm","label":"Fire Alarm"},{"key":"facilities_flooring_tile","label":"Flooring/Tile"},{"key":"facilities_fryer_hood","label":"Fryer Hood"},{"key":"facilities_glass_window_door","label":"Glass/Window/Door"},{"key":"facilities_hvac_heat_ac","label":"HVAC (Heat/AC)"},{"key":"facilities_lighting_exterior","label":"Lighting - Exterior"},{"key":"facilities_lighting_interior","label":"Lighting - Interior"},{"key":"facilities_plumbing","label":"Plumbing"},{"key":"facilities_preventative_maintenance","label":"Preventative Maintenance"},{"key":"facilities_roof","label":"Roof"},{"key":"facilities_safe_locksmith","label":"Safe / Locksmith"},{"key":"facilities_signage","label":"Signage"},{"key":"facilities_other","label":"Other"}]},{"key":"it","label":"IT","subs":[{"key":"it_alarm","label":"Alarm"},{"key":"it_camera","label":"Camera"},{"key":"it_headset_intercom","label":"Headset/Intercom"},{"key":"it_internet","label":"Internet"},{"key":"it_lobby_atmosphere_safety_tv","label":"Lobby Atmosphere/Safety TV"},{"key":"it_music","label":"Music"},{"key":"it_network_issues","label":"Network Issues"},{"key":"it_new_user","label":"New User"},{"key":"it_office_printers","label":"Office Printers"},{"key":"it_phone","label":"Phone"},{"key":"it_other","label":"Other"}]},{"key":"ops_support","label":"OPS Support","subs":[{"key":"ops_support_bitrix","label":"Bitrix"},{"key":"ops_support_bku","label":"BKU"},{"key":"ops_support_onedrive","label":"OneDrive"},{"key":"ops_support_password_resets","label":"Password Resets"},{"key":"ops_support_paycom","label":"Paycom"},{"key":"ops_support_rsi","label":"RSI"},{"key":"ops_support_training_computer_tablet","label":"Training Computer/Tablet"},{"key":"ops_support_zenput","label":"Zenput"}]},{"key":"pos","label":"POS","subs":[{"key":"pos_credit_cards_pin_pad","label":"Credit Cards / Pin Pad"},{"key":"pos_drive_thru_director","label":"Drive Thru Director"},{"key":"pos_indoor_dmbs","label":"Indoor DMBs"},{"key":"pos_kitchen_screen","label":"Kitchen Screen"},{"key":"pos_kitchen_sticky_printer","label":"Kitchen Sticky Printer"},{"key":"pos_odmb_warranty_issues","label":"ODMB Warranty Issues"},{"key":"pos_outdoor_dmbs","label":"Outdoor DMBs"},{"key":"pos_rti","label":"RTI"},{"key":"pos_rti_labor","label":"RTI Labor"},{"key":"pos_sicom","label":"Sicom"},{"key":"pos_terminals","label":"Terminals"},{"key":"pos_thermal_printer","label":"Thermal Printer"},{"key":"pos_other","label":"Other"}]}];
 const DEFAULT_DIVISION_CATEGORIES = {
   bk: BK_CATEGORIES,
   cstore: FLAT_CATEGORIES, carwash: FLAT_CATEGORIES,
@@ -4327,21 +4330,40 @@ async function impStepSave(){
 
 
 /* ============================================================ EQUIPMENT INVENTORY
-   Burger King stores only. For each of the 19 tracked items a DM either uploads
-   ONE photo showing the model + serial plate, or marks it N/A when the store
-   doesn't have that equipment. Both count as complete.
-   Stored at admins/equipInv/{storeId} — the only node prefix FixMi may write
-   besides tickets and vendors. Visible to the store's DM, their Director, and
-   Overwatch. */
+   Burger King stores only. For each tracked item a DM uploads 1–3 photos (one
+   showing the model + serial plate is REQUIRED and is what completes the item;
+   the other two are optional extras), or marks it N/A when the store doesn't
+   have that equipment. Both count as complete.
+   Record shape: {photos:[url,...], photo:<photos[0] legacy mirror>, na, by, at,
+   rejectNote/By/At}. Stored at admins/equipInv/{storeId} — the only node prefix
+   FixMi may write besides tickets and vendors. Visible to the store's DM, their
+   Director, and Overwatch. */
 function equipItems(){
   const eq=(catsForDivision("bk")||[]).find(c=>c.key==="equipment");
   // "Other" isn't a physical asset, so it isn't part of the inventory.
-  return ((eq&&eq.subs)||[]).filter(x=>x.key!=="equipment_other");
+  const base=((eq&&eq.subs)||[]).filter(x=>x.key!=="equipment_other");
+  // Categories can be overridden by a server-stored list (admins/divisionCategories)
+  // that may predate these items — merge them in so the inventory always has them.
+  const extras=[
+    {key:"equipment_lobby_drink_machine",label:"Lobby Drink Machine"},
+    {key:"equipment_under_counter_cooler",label:"Under-Counter Cooler"},
+    {key:"equipment_vegetable_slicer",label:"Vegetable Slicer"}
+  ];
+  const have=new Set(base.map(x=>x.key));
+  return base.concat(extras.filter(x=>!have.has(x.key)));
 }
 function invFor(sid){return ((MASTER.admins||{}).equipInv||{})[sid]||{}}
+/* Every photo on an item, newest schema first: `photos` is the array going
+   forward; a legacy record's single `photo` string still counts as one. */
+function invPhotos(e){
+  if(!e)return [];
+  if(Array.isArray(e.photos))return e.photos.filter(Boolean);
+  return e.photo?[e.photo]:[];
+}
 function invDone(sid){
   const rec=invFor(sid), items=equipItems();
-  return items.filter(x=>{const e=rec[x.key];return e&&(e.na||e.photo)}).length;
+  // ONE photo (or N/A) is what completes an item; extra photos are optional.
+  return items.filter(x=>{const e=rec[x.key];return e&&(e.na||invPhotos(e).length>0)}).length;
 }
 /* BK stores in the viewer's scope. Overwatch sees all, others their own. */
 function invStores(){
@@ -4393,11 +4415,11 @@ function openInventory(){
     </button>`;}).join("");
   modal(`<div class="sheet-head"><h2>Equipment inventory</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
     <div class="sheet-body">
-      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Burger King stores. For each item, add one photo showing the model and serial plate — or mark it N/A if the store doesn't have it.</p>
+      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Burger King stores. For each item, add <b>1–3 photos</b> — at least one must show the model and serial plate — or mark it N/A if the store doesn't have it.</p>
       ${rows||'<div class="rp-empty">No Burger King stores in your scope.</div>'}
     </div>`);
 }
-/* The 19 items for one store */
+/* The tracked items for one store */
 let INV_SID=null;
 function openInventoryStore(sid){
   INV_SID=sid;
@@ -4405,23 +4427,29 @@ function openInventoryStore(sid){
   const done=invDone(sid), per=items.length;
   const rows=items.map(x=>{
     const e=rec[x.key]||{};
-    const recorded=!!(e.photo||e.na);
+    const phs=invPhotos(e);                       // 0–3 photos (legacy `photo` counts)
+    const recorded=phs.length>0||!!e.na;
     // A rejected item counts as NOT done, and carries Overwatch's reason until
     // the DM replaces it — that's how the fraction drops and they learn why.
     const rejected=!recorded&&!!e.rejectNote;
-    const state=e.na?"na":(e.photo?"done":(rejected?"rej":"todo"));
+    const state=e.na?"na":(phs.length?"done":(rejected?"rej":"todo"));
     const who=e.by?`${esc(e.by)}${e.at?" · "+fmtDateShort(e.at):""}`:"";
     const isOw=SESSION.role==="admin";
+    const thumbs=phs.length
+      ?`<div class="inv-thumbs">${phs.map((u,i)=>`<div class="inv-thumb">
+          <img src="${escA(u)}" loading="lazy" decoding="async" alt="" onclick="openPhoto('${escA(u)}')">
+          <button class="inv-ph-x" title="Remove photo" onclick="invRemovePhoto('${x.key}',${i})">✕</button>
+        </div>`).join("")}</div>`
+      :`<div class="inv-thumb">${e.na?`<span class="inv-na">N/A</span>`:`<span class="inv-todo">${rejected?"!":"—"}</span>`}</div>`;
     return `<div class="inv-item ${state}">
-      <div class="inv-thumb">${e.photo?`<img src="${escA(e.photo)}" loading="lazy" decoding="async" alt="" onclick="openPhoto('${escA(e.photo)}')">`
-        :(e.na?`<span class="inv-na">N/A</span>`:`<span class="inv-todo">${rejected?"!":"—"}</span>`)}</div>
+      ${thumbs}
       <div style="flex:1;min-width:0">
         <div class="inv-label">${esc(x.label)}</div>
-        ${who&&recorded?`<div class="inv-by">${who}</div>`:(rejected?"":`<div class="inv-by">Not recorded yet</div>`)}
+        ${who&&recorded?`<div class="inv-by">${who}${phs.length?` · ${phs.length}/3 photo${phs.length>1?"s":""}`:""}</div>`:(rejected?"":`<div class="inv-by">Not recorded yet</div>`)}
         ${rejected?`<div class="inv-rej"><b>Rejected by ${esc(e.rejectBy||"Overwatch")}${e.rejectAt?" · "+fmtDateShort(e.rejectAt):""}</b>${esc(e.rejectNote)}</div>`:""}
       </div>
       <div class="inv-acts">
-        <button class="btn btn-ghost btn-sm" onclick="invPick('${x.key}')">${e.photo?"Replace":(rejected?"📷 Retake":"📷 Photo")}</button>
+        ${phs.length<3?`<button class="btn btn-ghost btn-sm" onclick="invPick('${x.key}')">${phs.length?"➕ Add photo":(rejected?"📷 Retake":"📷 Photo")}</button>`:""}
         <button class="btn btn-ghost btn-sm${e.na?" tk-cur":""}" onclick="invSetNA('${x.key}',${e.na?"false":"true"})">${e.na?"✓ N/A":"N/A"}</button>
         ${(isOw&&recorded)?`<button class="btn btn-danger btn-sm" onclick="invReject('${x.key}')">✕ Reject</button>`:""}
       </div>
@@ -4432,7 +4460,7 @@ function openInventoryStore(sid){
         ?`<div class="inv-success" style="margin-bottom:12px">✓ All ${per} items recorded — inventory complete</div>`
         :`<div class="inv-head"><b>${done} of ${per}</b> recorded
         <div class="inv-bar"><div class="inv-fill" style="width:${per?Math.round(done/per*100):0}%"></div></div></div>`}
-      <input type="file" id="invFile" accept="image/*" style="display:none" onchange="invUpload(this)">
+      <input type="file" id="invFile" accept="image/*" multiple style="display:none" onchange="invUpload(this)">
       ${rows}
     </div>
     <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="openInventory()">Back to stores</button></div>`);
@@ -4440,14 +4468,30 @@ function openInventoryStore(sid){
 let INV_KEY=null;
 function invPick(key){INV_KEY=key;$("invFile").click();}
 async function invUpload(input){
-  const f=input.files&&input.files[0]; input.value="";
-  if(!f||!INV_KEY||!INV_SID)return;
+  const files=[...(input.files||[])]; input.value="";
+  if(!files.length||!INV_KEY||!INV_SID)return;
   const key=INV_KEY, sid=INV_SID;
-  toast("Uploading photo…");
+  const existing=invPhotos((invFor(sid))[key]);
+  const room=3-existing.length;
+  if(room<=0){toast("This item already has 3 photos — remove one first","err");return}
+  if(files.length>room)toast(`Only ${room} more photo${room>1?"s":""} fit — extra skipped`);
+  const take=files.slice(0,room);
+  toast(`Uploading ${take.length>1?take.length+" photos":"photo"}…`);
   try{
-    const url=await uploadPhoto(f);
-    await invSave(sid,key,{photo:url,na:false,rejectNote:"",rejectBy:"",rejectAt:0});
+    const urls=[];
+    for(const f of take)urls.push(await uploadPhoto(f));
+    await invSave(sid,key,{photos:existing.concat(urls),na:false,rejectNote:"",rejectBy:"",rejectAt:0});
   }catch(e){toast(e.message||"Photo upload failed","err")}
+}
+/* Remove one of an item's photos. Removing the last one puts the item back to
+   "not recorded" (the required photo is gone), so the fraction drops. */
+async function invRemovePhoto(key,idx){
+  const sid=INV_SID; if(!sid)return;
+  const e=(invFor(sid))[key]||{};
+  const phs=invPhotos(e).slice();
+  phs.splice(idx,1);
+  await invSave(sid,key,{photos:phs,na:false,
+    rejectNote:e.rejectNote||"",rejectBy:e.rejectBy||"",rejectAt:e.rejectAt||0});
 }
 /* Overwatch rejects a recorded item with a reason. The photo is cleared so the
    store's fraction drops, and the reason stays visible to the DM until they
@@ -4460,7 +4504,7 @@ function invReject(key){
       <p style="margin:0;font-size:14px"><b>${esc(item?item.label:key)}</b> at ${esc(storeName(sid))}</p>
       <div class="field" style="margin-top:12px"><label class="label">Why is it being rejected?</label>
         <textarea class="input" id="invRejNote" rows="3" placeholder="e.g. Serial plate isn't readable — please retake closer."></textarea>
-        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">The District Manager sees this note and their progress count drops by one.</div>
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">All photos on this item are cleared, the District Manager sees this note, and their progress count drops by one.</div>
       </div>
     </div>
     <div class="sheet-foot">
@@ -4473,16 +4517,19 @@ async function invDoReject(key){
   const sid=INV_SID; if(!sid)return;
   const note=(($("invRejNote")||{}).value||"").trim();
   if(!note){toast("Add a short reason","err");return}
-  await invSave(sid,key,{photo:"",na:false,rejectNote:note,rejectBy:SESSION.name,rejectAt:now()});
+  await invSave(sid,key,{photos:[],na:false,rejectNote:note,rejectBy:SESSION.name,rejectAt:now()});
   toast("Rejected — retake requested");
 }
 async function invSetNA(key,on){
   const sid=INV_SID; if(!sid)return;
-  await invSave(sid,key,on?{na:true,photo:"",rejectNote:"",rejectBy:"",rejectAt:0}:{na:false,photo:""});
+  await invSave(sid,key,on?{na:true,photos:[],rejectNote:"",rejectBy:"",rejectAt:0}:{na:false,photos:[]});
 }
 /* Optimistic write — this endpoint is rarely warm, so don't make them wait. */
 async function invSave(sid,key,val){
-  const rec={...val,by:SESSION.name,at:now()};
+  const photos=Array.isArray(val.photos)?val.photos.filter(Boolean).slice(0,3):invPhotos(val);
+  // `photos` is the schema going forward; `photo` mirrors photos[0] so any
+  // not-yet-reloaded older client still renders something sensible.
+  const rec={...val,photos,photo:photos[0]||"",by:SESSION.name,at:now()};
   MASTER.admins=MASTER.admins||{};
   MASTER.admins.equipInv=MASTER.admins.equipInv||{};
   const node=MASTER.admins.equipInv[sid]=MASTER.admins.equipInv[sid]||{};
