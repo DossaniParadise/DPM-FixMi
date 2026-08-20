@@ -760,7 +760,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.11";
+const APP_VERSION = "6.12";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2996,7 +2996,10 @@ function ticketControls(t){
 }
 function statusGrid(t,targets){
   return `<div class="status-grid">${targets.map(s=>{const st=STATUSES[s];const cur=t.status===s?"cur":"";
-    return `<button class="status-opt ${cur}" onclick="setStatus('${t._id}','${s}')"><span class="dot" style="background:${st.color}"></span>${st.label}${cur?" ·":""}</button>`}).join("")}</div>`;
+    // Closing is the one status worth a note, so route it through the confirm
+    // sheet (which carries the optional notes box) rather than a silent set.
+    const act = s==="closed" ? `confirmClose('${t._id}')` : `setStatus('${t._id}','${s}')`;
+    return `<button class="status-opt ${cur}" onclick="${act}"><span class="dot" style="background:${st.color}"></span>${st.label}${cur?" ·":""}</button>`}).join("")}</div>`;
 }
 function assignControls(t){
   // Order of preference: (1) the in-house tech for THIS store, (2) vendors who
@@ -3169,6 +3172,7 @@ let finishPhotos=[];
 let finishThenStart=null; // ticket id to put in_progress after this finish (chaining)
 function openFinish(id,opts){
   finishPhotos=[];
+  const keepNote=(($("finNote")||{}).value||"");
   finishThenStart=(opts&&opts.thenStart)||null;
   const cancelAct = finishThenStart ? `closeModal()` : `openTicket('${id}')`;
   modal(`<div class="sheet-head"><h2>Finish job</h2><button class="x-btn" onclick="${cancelAct}">✕</button></div>
@@ -3180,6 +3184,10 @@ function openFinish(id,opts){
       </div>
       <input type="file" id="finFile" accept="image/*" multiple style="display:none" onchange="addFinishPhotos('${id}',this)">
       <div class="preview-strip" id="finPreview"></div>
+      <div class="field" style="margin-top:14px"><label class="label">Notes
+        <span style="font-weight:400;color:var(--ink-dim)">· optional</span></label>
+        <textarea class="input" id="finNote" rows="2" placeholder="What you did, or anything the office should know…">${esc(keepNote)}</textarea>
+      </div>
     </div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="${cancelAct}">Cancel</button>
@@ -3232,10 +3240,16 @@ async function confirmFinish(id){
 async function finalizeFinish(id){
   const urls=finishPhotos.filter(p=>p.url).map(p=>p.url);
   const btn=$("finConfirm");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Finishing…'}
+  // Optional — an empty box finishes exactly as before.
+  const note=(($("finNote")||{}).value||"").trim();
   const t=TICKETS[id];const photos=(t&&Array.isArray(t.photos)?t.photos.slice():[]).concat(urls);
   const patch={status:"finished",finishedAt:now(),photos};
   if(t&&t.clockInAt&&!t.clockOutAt)patch.clockOutAt=now();
-  const noteTxt = urls.length ? `Finished with ${urls.length} photo${urls.length>1?"s":""}` : "Finished (no photo)";
+  let noteTxt = urls.length ? `Finished with ${urls.length} photo${urls.length>1?"s":""}` : "Finished (no photo)";
+  if(note){
+    noteTxt = note;
+    patch.closeNote={text:note,by:SESSION.name,at:now()};
+  }
   if(await patchTicket(id,patch,{action:"clockout",toStatus:"finished",note:noteTxt})){
     finishPhotos=[];
     const next=finishThenStart;finishThenStart=null;
