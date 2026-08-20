@@ -375,6 +375,9 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .detail-row{display:flex;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px solid var(--line-soft);font-size:14px}
 .detail-row .k{color:var(--ink-dim);font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;padding-top:2px}
 .detail-row .v{text-align:right;color:var(--ink)}
+.close-note{background:var(--panel-2);border-left:3px solid var(--ink-dim);border-radius:6px;padding:9px 12px;
+  margin:0 0 16px;font-size:13px;color:var(--ink-mid);line-height:1.5;white-space:pre-wrap}
+.close-note b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-dim);margin-bottom:3px}
 .detail-desc{background:var(--panel-2);border:1px solid var(--line-soft);border-radius:9px;padding:13px 15px;font-size:14px;color:var(--ink-mid);line-height:1.55;margin:4px 0 16px}
 .photo-grid{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 18px}
 .photo-grid img{width:84px;height:84px;border-radius:9px;object-fit:cover;border:1px solid var(--line);cursor:pointer}
@@ -757,7 +760,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.10";
+const APP_VERSION = "6.11";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2262,7 +2265,10 @@ function ticketRow(t){
     }else if(t.status==="finished"){
       below=`<div class="row-bar" onclick="event.stopPropagation()">
         <span><b>Finished</b> — ready to close out?</span>
-        <div class="rb-btns"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();closeOutTicket('${t._id}')">✓ Close out</button></div></div>`;
+        <div class="rb-btns">
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();confirmClose('${t._id}')" title="Close and leave a note">✎ Close with note</button>
+          <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();closeOutTicket('${t._id}')">✓ Close out</button>
+        </div></div>`;
     }else if(t.status==="closed"){
       below=`<div class="row-bar" onclick="event.stopPropagation()">
         <span><b>Closed</b> — reopen to?</span>
@@ -2796,6 +2802,9 @@ function openTicket(id){
         ${storeGeoUrl(sid)?`<a class="btn btn-ghost btn-sm gps-btn" href="${escA(storeGeoUrl(sid))}" target="_blank" rel="noopener">📍 Open GPS</a>`:""}
       </div>
       <div class="detail-desc">${esc(t.description||"No description")}</div>
+      ${(t.closeNote&&t.closeNote.text)?`<div class="close-note">
+        <b>Closing notes — ${esc(t.closeNote.by||"")}${t.closeNote.at?" · "+fmtDateShort(t.closeNote.at):""}</b>
+        ${esc(t.closeNote.text)}</div>`:""}
       ${photoThumbs(t)}
       <div class="detail-row"><span class="k">Category</span><span class="v">${esc(catPath(t))}</span></div>
       <div class="detail-row"><span class="k">Priority</span><span class="v">${PRIORITIES[t.priority]||"Normal"}</span></div>
@@ -3057,7 +3066,11 @@ function confirmClose(id){
     <div class="sheet-body">
       <p style="margin:0;color:var(--ink-mid);font-size:14px">${esc(storeName(t.storeId))} · ${esc(t.shortId||"")}</p>
       <p style="margin:10px 0 0;font-size:14px">${esc(t.description||"")}</p>
-      <p style="margin:14px 0 0;color:var(--ink-dim);font-size:13px">Once closed, this ticket disappears from all dashboards except Overwatch. Only Overwatch can reopen it.</p>
+      <div class="field" style="margin-top:14px"><label class="label">Closing notes
+        <span style="font-weight:400;color:var(--ink-dim)">· optional</span></label>
+        <textarea class="input" id="closeNote" rows="2" placeholder="What was done, or why this is being closed…"></textarea>
+      </div>
+      <p style="margin:12px 0 0;color:var(--ink-dim);font-size:13px">Once closed, this ticket disappears from all dashboards except Overwatch. Only Overwatch can reopen it.</p>
     </div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
@@ -3066,8 +3079,12 @@ function confirmClose(id){
 }
 async function doClose(id){
   const btn=$("closeConfirm");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Closing…'}
-  if(await patchTicket(id,{status:"closed"},{action:"status",toStatus:"closed"})){
-    toast("Ticket closed");closeModal();render();
+  // Notes are optional — an empty box closes exactly as before.
+  const note=(($("closeNote")||{}).value||"").trim();
+  const patch={status:"closed"};
+  if(note)patch.closeNote={text:note,by:SESSION.name,at:now()};
+  if(await patchTicket(id,patch,{action:"status",toStatus:"closed",note:note||""})){
+    toast(note?"Closed with notes":"Ticket closed");closeModal();render();
   }else if(btn){btn.disabled=false;btn.innerHTML="✕ Mark closed"}
 }
 /* One-click close-out from the Finished list (overwatch). Immediately sets that
