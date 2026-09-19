@@ -952,7 +952,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.20";
+const APP_VERSION = "6.22";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -3185,6 +3185,15 @@ function ticketControls(t){
     return h;
   }
 
+  // Manager -> DM, DM -> Director: send this ticket's details any time, not
+  // only at creation. Same sheet, same message, same logging.
+  if((role==="manager"||role==="coach")&&!isClosed){
+    const {to,label}=escalationFor(t.storeId);
+    if(to.length){
+      h+=`<button class="btn btn-ghost btn-block" style="margin-bottom:12px" onclick="promptContactDM('${t._id}',true)">
+        ${IS_MOBILE?"✉ Text":"@ Email"} my ${esc(label)} about this</button>`;
+    }
+  }
   // STORE-ACCESS people (manager / coach / director): mark in progress + close.
   // Mark FINISHED is intentionally NOT offered here — finishing is a tech /
   // overwatch action only. Closing is available to all store-access roles.
@@ -5612,6 +5621,31 @@ function dmContacts(sid){
   const dir=storeDirector(sid);
   return {dms,dir};
 }
+/* A store's Director: on the store record if set, otherwise inherited through
+   whichever DM covers it — that's how most stores actually get one. */
+function storeDirectorFor(sid){
+  const direct=storeDirector(sid); if(direct)return direct;
+  for(const cid of storeCoachIds(sid)){
+    const c=(MASTER.areaCoaches||{})[cid];
+    const d=c&&(MASTER.directors||{})[c.assignedDirectorId];
+    if(d)return d;
+  }
+  return null;
+}
+/* Who the current user escalates to about a ticket at this store.
+   Manager -> their District Manager(s).   DM -> their Director. */
+function escalationFor(sid){
+  if(SESSION.role==="manager"){
+    const {dms}=dmContacts(sid);
+    return {to:dms,cc:storeDirectorFor(sid),label:"District Manager"};
+  }
+  if(SESSION.role==="coach"){
+    const me=(MASTER.areaCoaches||{})[SESSION.refId];
+    const d=(me&&(MASTER.directors||{})[me.assignedDirectorId])||storeDirectorFor(sid);
+    return {to:d?[d]:[],cc:null,label:"Director"};
+  }
+  return {to:[],cc:null,label:""};
+}
 function dmNames(dms){
   const f=dms.map(d=>(d.name||"").trim().split(/\s+/)[0]).filter(Boolean);
   return f.length<=1?(f[0]||"your DM"):f.slice(0,-1).join(", ")+" and "+f[f.length-1];
@@ -5623,49 +5657,60 @@ function dmMessage(t,dms){
   return `Hi ${dmNames(dms)}, this is ${gm} at ${storeName(t.storeId)}. I just submitted a ticket for the following issue:\n\n`
        + `Category: ${cat}\nPriority: ${PRIORITIES[t.priority]||"Normal"}\n\n${t.description||""}`;
 }
-function promptContactDM(id){
+function promptContactDM(id,fromTicket){
   const t=TICKETS[id]; if(!t)return;
-  const {dms,dir}=dmContacts(t.storeId);
-  if(!dms.length){dmLog(id,"no District Manager is assigned to this store, so no reminder could be shown");return;}
+  const {to,cc,label}=escalationFor(t.storeId);
+  if(!to.length){
+    if(!fromTicket) dmLog(id,`no ${label||"contact"} is assigned to this store, so no reminder could be shown`);
+    else toast(`No ${label||"contact"} is set up for this store in FindMi`,"err");
+    return;
+  }
   DM_PROMPT_TID=id;
-  const msg=dmMessage(t,dms);
-  const subj=`${PRIORITIES[t.priority]||"Urgent"} ticket at ${storeName(t.storeId)} — ${t.shortId||""}`;
-  const phones=dms.map(d=>d.phone).filter(Boolean);
-  const emails=dms.map(d=>d.email).filter(Boolean);
-  const cc=(dir&&dir.email)?dir.email:"";
+  const msg=dmMessage(t,to);
+  const subj=`${PRIORITIES[t.priority]||"Normal"} ticket at ${storeName(t.storeId)} — ${t.shortId||""}`;
+  const phones=to.map(d=>d.phone).filter(Boolean);
+  const emails=to.map(d=>d.email).filter(Boolean);
+  const ccEmail=(cc&&cc.email)?cc.email:"";
   let contactBtn="";
   if(IS_MOBILE&&phones.length){
-    // one thread to all DMs on the store (iOS honours the list; Android may pre-fill the first)
     const nums=phones.map(p=>String(p).replace(/[^0-9+]/g,"")).join(",");
-    contactBtn=`<a class="btn btn-primary btn-block" href="sms:${nums}?&body=${encodeURIComponent(msg)}" onclick="dmChoice('${id}','text')">✉ Text ${esc(dmNames(dms))}</a>`;
+    contactBtn=`<a class="btn btn-primary btn-block" href="sms:${nums}?&body=${encodeURIComponent(msg)}" onclick="dmChoice('${id}','text')">✉ Text ${esc(dmNames(to))}</a>`;
   }else if(emails.length){
-    const mailto="mailto:"+emails.join(",")+"?subject="+encodeURIComponent(subj)+(cc?"&cc="+encodeURIComponent(cc):"")+"&body="+encodeURIComponent(msg);
-    contactBtn=`<a class="btn btn-primary btn-block" href="${escA(mailto)}" target="_blank" rel="noopener" onclick="dmChoice('${id}','email')">@ Email ${esc(dmNames(dms))}</a>`;
+    const mailto="mailto:"+emails.join(",")+"?subject="+encodeURIComponent(subj)+(ccEmail?"&cc="+encodeURIComponent(ccEmail):"")+"&body="+encodeURIComponent(msg);
+    contactBtn=`<a class="btn btn-primary btn-block" href="${escA(mailto)}" target="_blank" rel="noopener" onclick="dmChoice('${id}','email')">@ Email ${esc(dmNames(to))}</a>`;
   }else{
-    contactBtn=`<div class="rp-empty">${esc(dmNames(dms))} has no ${IS_MOBILE?"phone":"email"} on file — please reach out another way.</div>`;
+    contactBtn=`<div class="rp-empty">${esc(dmNames(to))} has no ${IS_MOBILE?"phone":"email"} on file — please reach out another way.</div>`;
   }
-  modal(`<div class="sheet-head"><h2>Tell your District Manager</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+  // At creation the copy is a nudge; from the ticket later it's just a tool.
+  const lead=fromTicket
+    ? `Send the details of this ticket to your ${esc(label)}.`
+    : `Make sure you ${IS_MOBILE?"text":"email"} your ${esc(label)} and let them know about this issue.
+       <b>Submitting a ticket will not automatically solve your problem.</b>`;
+  modal(`<div class="sheet-head"><h2>Tell your ${esc(label)}</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
     <div class="sheet-body">
-      <p style="font-size:15px;margin:0;line-height:1.5">Make sure you ${IS_MOBILE?"text":"email"} your District Manager and let them know about this issue.
-        <b>Submitting a ticket will not automatically solve your problem.</b></p>
+      <p style="font-size:15px;margin:0;line-height:1.5">${lead}</p>
       <div class="dm-card">
-        <div class="dm-who">${dms.map(d=>`<div><b>${esc(d.name||"")}</b>${d.phone?` <span class="mono">${esc(fmtPhone(d.phone))}</span>`:""}</div>`).join("")}</div>
+        <div class="dm-who">${to.map(d=>`<div><b>${esc(d.name||"")}</b>${d.phone?` <span class="mono">${esc(fmtPhone(d.phone))}</span>`:""}</div>`).join("")}</div>
         <div class="dm-msg">${esc(msg)}</div>
       </div>
       ${contactBtn}
     </div>
     <div class="sheet-foot">
-      <button class="btn btn-ghost" style="flex:1" onclick="dmChoice('${id}','later')">I'll do this later</button>
-      <button class="btn btn-ghost" style="flex:1" onclick="dmChoice('${id}','done')">I already did</button>
+      ${fromTicket
+        ? `<button class="btn btn-ghost btn-block" onclick="DM_PROMPT_TID=null;closeModal()">Close</button>`
+        : `<button class="btn btn-ghost" style="flex:1" onclick="dmChoice('${id}','later')">I'll do this later</button>
+           <button class="btn btn-ghost" style="flex:1" onclick="dmChoice('${id}','done')">I already did</button>`}
     </div>`);
 }
 async function dmChoice(id,what){
   DM_PROMPT_TID=null;                 // we're logging deliberately; don't double-log on close
+  const who=ROLE_LABEL[SESSION.role]||"User";
+  const tgt=(escalationFor((TICKETS[id]||{}).storeId).label)||"District Manager";
   const text={
-    text:"Manager opened a text to the District Manager about this ticket",
-    email:"Manager opened an email to the District Manager about this ticket",
-    done:"Manager reported they already contacted the District Manager",
-    later:"Manager will contact the District Manager later",
+    text:`${who} opened a text to the ${tgt} about this ticket`,
+    email:`${who} opened an email to the ${tgt} about this ticket`,
+    done:`${who} reported they already contacted the ${tgt}`,
+    later:`${who} will contact the ${tgt} later`,
   }[what]||what;
   await dmLog(id,text);
   if(what!=="text"&&what!=="email"){ const o=$("modalOverlay"); if(o){o.classList.remove("on");setTimeout(()=>{o.innerHTML=""},220);} }
@@ -5736,23 +5781,51 @@ function onboardingEmailText(dmId){
     .sort((a,b)=>storeName(a).localeCompare(storeName(b)));
   const withEmail=stores.filter(sid=>(store(sid).email||"").trim());
   const noEmail=stores.filter(sid=>!(store(sid).email||"").trim());
-  const creds=withEmail.map(sid=>`${storeName(sid)}\n  ${(store(sid).email||"").trim()} // ${storePassword(sid)}`).join("\n\n");
-  const missing=noEmail.length?`\n\n(Not yet set up — no store email in FindMi: ${noEmail.map(storeName).join(", ")})`:"";
+  const sep="- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -";
+
+  // One ready-to-forward block per GM. The DM copies from one dashed line to
+  // the next and sends it — nothing to retype.
+  const blocks=withEmail.map(sid=>{
+    const st=store(sid);
+    const gm=(st.storeManager||"").trim().split(/\s+/)[0]||"there";
+    return `${sep}
+${storeName(sid)}
+
+Hi ${gm}, here are your credentials for the Repair and Maintenance App, FixMi.
+
+  Website:   ${FIXMI_URL}
+  Email:     ${(st.email||"").trim()}
+  Password:  ${storePassword(sid)}
+
+Put it on your phone like an app: open the website in Safari (iPhone) or Chrome (Android), then tap Share / the ⋮ menu and choose "Add to Home Screen". It's also on the Dossani Portal: ${PORTAL_URL}
+
+I'll teach you how to use it and how to report and follow up on R&M tickets next time I see you.
+${sep}`;
+  }).join("\n\n");
+
+  const missing=noEmail.length
+    ? `\n\nNot set up yet (no store email in FindMi, so no login can be issued): ${noEmail.map(storeName).join(", ")}`
+    : "";
+
   return `Hi ${first},
 
-I set up accounts for your GMs in FixMi.
+I've set up FixMi accounts for every GM in your district. This email has everything you need to get your team on it.
 
-They can log in with the following credentials.
+HOW IT WORKS FOR YOU
 
-${creds||"(no stores with an email on file)"}${missing}
+When a GM submits an Urgent or Emergency ticket, FixMi immediately prompts them to text you (on a phone) or email you (on a computer) with the ticket details — the store, the category, and what's wrong. Submitting a ticket doesn't page anyone on its own, so that prompt is how you hear about it right away.
 
-When they submit an issue that is Urgent or Emergency, FixMi will prompt them to text you (on a phone) or email you (on a computer) with the ticket details, so you hear about it right away. Submitting a ticket on its own doesn't page anyone — that reminder is there so they actually reach you.
+If they tap "I'll do this later" or close the reminder without confirming, that's logged as a comment on the ticket. So if a GM tells you they let you know and there's no record, the ticket will show it. They can also send you any ticket's details later from a button on the ticket itself.
 
-To put FixMi on their phone like an app:
-  iPhone: open ${FIXMI_URL} in Safari, tap the Share button, then "Add to Home Screen".
-  Android: open ${FIXMI_URL} in Chrome, tap the ⋮ menu, then "Add to Home screen".
+You have the same thing with your Director: every open ticket has a button to text or email your DO the details, if something needs to go up the chain.
 
-The FixMi link is also on the Dossani Portal: ${PORTAL_URL}
+You can log in at ${FIXMI_URL} — it's also on the Dossani Portal at ${PORTAL_URL}.
+
+SENDING LOGINS TO YOUR GMs
+
+Below is one message per GM, each between dashed lines. Select from one dashed line to the next, copy, and text or email it to that GM. Each one is already addressed to them with their own store, login and password.
+
+${blocks||"(no stores with an email on file)"}${missing}
 
 If you have any further questions or concerns with your GMs and how to use FixMi, please let me know.`;
 }
