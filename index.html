@@ -515,6 +515,10 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .imp-done p{color:var(--ink-dim);font-size:13px;margin:0}
 .imp-bad{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:rgba(248,113,113,.14);color:var(--red);border-radius:99px;padding:3px 8px}
 .imp-warn{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:rgba(245,158,11,.16);color:var(--amber-deep);border-radius:99px;padding:3px 8px}
+.dm-card{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:14px 0}
+.dm-who{font-size:13.5px;margin-bottom:8px;display:flex;flex-direction:column;gap:3px}
+.dm-who .mono{font-size:12px;color:var(--ink-dim);margin-left:6px}
+.dm-msg{font-size:12.5px;color:var(--ink-mid);white-space:pre-wrap;line-height:1.5;border-top:1px solid var(--line);padding-top:8px}
 .cr-hero{display:flex;align-items:center;gap:16px;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
 .cr-big{font-family:var(--disp);font-weight:800;font-size:52px;line-height:1;color:var(--amber-deep)}
 .cr-sub{font-size:13.5px;color:var(--ink-mid);line-height:1.5}
@@ -948,12 +952,37 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.17";
+const APP_VERSION = "6.19";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
-  admin:"Overwatch@76051", director:"DO@76051", coach:"DM@76051", manager:"Dossani@76051", tech:"Repair@76051",
+  admin:"Overwatch@76051", director:"DO@76051", coach:"DM@76051", tech:"Repair@76051",
+  // manager: no shared password any more — each store's is COMPUTED from FindMi
+  // by storePassword(). Add a store with an email there and its login works.
 };
+/* ---- store (Manager) passwords: derived, never stored ----------------------
+   Pattern: rm + <code> + !
+     Burger King / Subway / any numeric store: 5-digit number, zero-padded
+         #23086 -> rm23086!      #2390 -> rm02390!     #22411 -> rm22411!
+     Paradise Quick Stop:  PQS + 2-digit number       #17 -> rmPQS17!
+     Paradise Car Wash:    PCW + 2-digit number       #1  -> rmPCW01!
+     Scarborough Travel Stop -> rmSTS01!   Scarborough Car Wash -> rmSCW01!
+   Comparison is case-insensitive, so RM23086! / Rm23086! / rmpqs17! all work. */
+function storePasswordCode(rid){
+  const st=store(rid);
+  const name=String(st.storeName||"").toLowerCase();
+  const raw=String(st.storeNumber||"").replace(/^#/,"").trim();
+  const digits=raw.replace(/\D/g,"");
+  if(/scarborough/.test(name)&&/travel/.test(name))        return "STS01";
+  if(/scarborough/.test(name)&&/car\s*wash|\bwash\b/.test(name)) return "SCW01";
+  if(/paradise/.test(name)&&/car\s*wash|\bwash\b/.test(name))    return "PCW"+(digits||"1").padStart(2,"0");
+  if(/quick\s*stop/.test(name)||storeDivision(rid)==="cstore")     return "PQS"+(digits||"0").padStart(2,"0");
+  return digits.padStart(5,"0");
+}
+function storePassword(rid){return "rm"+storePasswordCode(rid)+"!";}
+function checkStorePassword(rid,pw){
+  return String(pw||"").trim().toUpperCase()===storePassword(rid).toUpperCase();
+}
 const ADMIN_EMAILS = ["itsupport@dossaniparadise.com","rahim@dossaniparadise.com"];
 const TICKETS_NODE = "maintenanceTickets";
 const VENDORS_NODE = "maintenanceVendors";
@@ -1132,7 +1161,7 @@ function vendorCatLabel(v){
 }
 const PRIORITIES = {normal:"Normal",urgent:"Urgent",emergency:"Emergency"};
 const WAITING_REASONS = ["Awaiting parts","Awaiting third-party tech","Awaiting approval","Awaiting access","Scheduled — future date","Other"];
-const ROLE_LABEL = {admin:"Overwatch",director:"Director",coach:"Area Coach",manager:"Store Manager",tech:"Repair Tech"};
+const ROLE_LABEL = {admin:"Overwatch",director:"Director",coach:"District Manager",manager:"Manager",tech:"Repair Tech"};
 const ROLE_PREFIX = {admin:"o",director:"d",coach:"a",tech:"r",manager:"m"};
 
 /* ============================================================ STATE */
@@ -1728,13 +1757,13 @@ function resolveSession(email,pw){
   if(dId){if(pw!==ROLE_PASSWORDS.director)return{error:"That password doesn't match the director role."};
     return{email:lc,role:"director",name:dirs[dId].name,scope:"director",refId:dId}}
   const co=MASTER.areaCoaches||{}, cId=Object.keys(co).find(id=>me(co,id));
-  if(cId){if(pw!==ROLE_PASSWORDS.coach)return{error:"That password doesn't match the area coach role."};
+  if(cId){if(pw!==ROLE_PASSWORDS.coach)return{error:"That password doesn't match the district manager role."};
     return{email:lc,role:"coach",name:co[cId].name,scope:"stores",refField:"assignedAreaCoachId",refId:cId}}
   const te=MASTER.repairTechnicians||{}, tId=Object.keys(te).find(id=>me(te,id));
   if(tId){if(pw!==ROLE_PASSWORDS.tech)return{error:"That password doesn't match the technician role."};
     return{email:lc,role:"tech",name:te[tId].name,scope:"stores",refField:"assignedRepairTechnicianId",refId:tId}}
   const sId=Object.keys(RESTAURANTS).find(r=>(RESTAURANTS[r].email||"").toLowerCase()===lc);
-  if(sId){if(pw!==ROLE_PASSWORDS.manager)return{error:"That password doesn't match the store role."};
+  if(sId){if(!checkStorePassword(sId,pw))return{error:"That password doesn't match this store."};
     return{email:lc,role:"manager",name:RESTAURANTS[sId].storeManager||storeName(sId),scope:"single",storeId:sId}}
   return{error:"We couldn't find that email in the alignment master. Check it's the email on file."};
 }
@@ -2657,7 +2686,9 @@ function modal(html){
   requestAnimationFrame(()=>{o.classList.add("on");applyTags()});
   activeModal=o;
 }
-function closeModal(){const o=$("modalOverlay");if(o){o.classList.remove("on");o._wipeTimer=setTimeout(()=>{if(o){o.innerHTML="";o._wipeTimer=null;}},220)}activeModal=null}
+function closeModal(){
+  if(DM_PROMPT_TID){const t=DM_PROMPT_TID;DM_PROMPT_TID=null;dmLog(t,"dismissed the reminder without confirming");}
+  const o=$("modalOverlay");if(o){o.classList.remove("on");o._wipeTimer=setTimeout(()=>{if(o){o.innerHTML="";o._wipeTimer=null;}},220)}activeModal=null}
 
 /* ============================================================ CREATE */
 let draftPhotos=[];
@@ -2774,6 +2805,8 @@ async function submitTicket(){
     openGroups[sid]=true;render();
     // Area coach: offer to dispatch straight to the store's in-house tech.
     if((SESSION.role==="coach"||SESSION.role==="director")&&!mine) askDispatchToTech(id,sid);
+    // Manager filing something urgent: a ticket alone doesn't wake anyone up.
+    if(SESSION.role==="manager"&&(ticket.priority==="urgent"||ticket.priority==="emergency")) promptContactDM(id);
   }catch(e){toast(e.message||"Could not create ticket","err");btn.disabled=false;btn.textContent="Create ticket"}
 }
 
@@ -5566,6 +5599,183 @@ document.addEventListener("click",e=>{
   });
 });
 
+
+/* ============================================================ CONTACT-YOUR-DM PROMPT
+   Shown to a Manager right after they file an Urgent or Emergency ticket.
+   Filing a ticket doesn't page anyone, so this nudges them to text (mobile)
+   or email (desktop) their District Manager — and logs whichever choice they
+   make as a comment on the ticket, including closing it without choosing. */
+let DM_PROMPT_TID=null;
+function dmContacts(sid){
+  const ids=storeCoachIds(sid);
+  const dms=ids.map(id=>(MASTER.areaCoaches||{})[id]).filter(Boolean);
+  const dir=storeDirector(sid);
+  return {dms,dir};
+}
+function dmNames(dms){
+  const f=dms.map(d=>(d.name||"").trim().split(/\s+/)[0]).filter(Boolean);
+  return f.length<=1?(f[0]||"your DM"):f.slice(0,-1).join(", ")+" and "+f[f.length-1];
+}
+function dmMessage(t,dms){
+  return `Hi ${dmNames(dms)}, I just submitted a ticket for my store ${storeName(t.storeId)}, for the following issue:\n${t.description||""}`;
+}
+function promptContactDM(id){
+  const t=TICKETS[id]; if(!t)return;
+  const {dms,dir}=dmContacts(t.storeId);
+  if(!dms.length){dmLog(id,"no District Manager is assigned to this store, so no reminder could be shown");return;}
+  DM_PROMPT_TID=id;
+  const msg=dmMessage(t,dms);
+  const subj=`${PRIORITIES[t.priority]||"Urgent"} ticket at ${storeName(t.storeId)} — ${t.shortId||""}`;
+  const phones=dms.map(d=>d.phone).filter(Boolean);
+  const emails=dms.map(d=>d.email).filter(Boolean);
+  const cc=(dir&&dir.email)?dir.email:"";
+  let contactBtn="";
+  if(IS_MOBILE&&phones.length){
+    // one thread to all DMs on the store (iOS honours the list; Android may pre-fill the first)
+    const nums=phones.map(p=>String(p).replace(/[^0-9+]/g,"")).join(",");
+    contactBtn=`<a class="btn btn-primary btn-block" href="sms:${nums}?&body=${encodeURIComponent(msg)}" onclick="dmChoice('${id}','text')">✉ Text ${esc(dmNames(dms))}</a>`;
+  }else if(emails.length){
+    const mailto="mailto:"+emails.join(",")+"?subject="+encodeURIComponent(subj)+(cc?"&cc="+encodeURIComponent(cc):"")+"&body="+encodeURIComponent(msg);
+    contactBtn=`<a class="btn btn-primary btn-block" href="${escA(mailto)}" target="_blank" rel="noopener" onclick="dmChoice('${id}','email')">@ Email ${esc(dmNames(dms))}</a>`;
+  }else{
+    contactBtn=`<div class="rp-empty">${esc(dmNames(dms))} has no ${IS_MOBILE?"phone":"email"} on file — please reach out another way.</div>`;
+  }
+  modal(`<div class="sheet-head"><h2>Tell your District Manager</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body">
+      <p style="font-size:15px;margin:0;line-height:1.5">Make sure you ${IS_MOBILE?"text":"email"} your District Manager and let them know about this issue.
+        <b>Submitting a ticket will not automatically solve your problem.</b></p>
+      <div class="dm-card">
+        <div class="dm-who">${dms.map(d=>`<div><b>${esc(d.name||"")}</b>${d.phone?` <span class="mono">${esc(fmtPhone(d.phone))}</span>`:""}</div>`).join("")}</div>
+        <div class="dm-msg">${esc(msg)}</div>
+      </div>
+      ${contactBtn}
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-ghost" style="flex:1" onclick="dmChoice('${id}','later')">I'll do this later</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="dmChoice('${id}','done')">I already did</button>
+    </div>`);
+}
+async function dmChoice(id,what){
+  DM_PROMPT_TID=null;                 // we're logging deliberately; don't double-log on close
+  const text={
+    text:"Manager opened a text to the District Manager about this ticket",
+    email:"Manager opened an email to the District Manager about this ticket",
+    done:"Manager reported they already contacted the District Manager",
+    later:"Manager will contact the District Manager later",
+  }[what]||what;
+  await dmLog(id,text);
+  if(what!=="text"&&what!=="email"){ const o=$("modalOverlay"); if(o){o.classList.remove("on");setTimeout(()=>{o.innerHTML=""},220);} }
+}
+/* Append a system comment to the ticket. Optimistic; the write echo keeps it
+   visible even while the CDN copy lags. */
+async function dmLog(id,text){
+  const t=TICKETS[id]; if(!t)return;
+  const comments=Array.isArray(t.comments)?t.comments.slice():[];
+  comments.push({id:uid(),by:SESSION.name,role:SESSION.role,email:SESSION.email||"",text:"📣 "+text,ts:now(),system:true});
+  await patchTicket(id,{comments},{action:"note",note:text});
+}
+
+
+/* ============================================================ MANAGER LOGIN EXPORT (overwatch)
+   One row per store: DM, Director, store, login email, computed password.
+   Read live from FindMi so it's never stale; stores with no email are still
+   listed and flagged, since those Managers can't log in until it's added. */
+function managerLoginRows(){
+  const rows=[];
+  Object.keys(RESTAURANTS).forEach(sid=>{
+    const st=store(sid);
+    const dms=storeCoachIds(sid).map(id=>(MASTER.areaCoaches||{})[id]).filter(Boolean);
+    const dir=storeDirector(sid);
+    const email=String(st.email||"").trim();
+    // a store with two DMs appears under each, so every DM's list is complete
+    (dms.length?dms:[null]).forEach(dm=>{
+      rows.push({
+        dm: dm?(dm.name||""):"(no DM assigned)",
+        dmEmail: dm?(dm.email||""):"",
+        director: dir?(dir.name||""):"",
+        store: storeName(sid),
+        division: (typeof divisionLabel==="function")?divisionLabel(storeDivision(sid)):storeDivision(sid),
+        manager: st.storeManager||"",
+        email: email||"(no email in FindMi — cannot log in)",
+        password: email?storePassword(sid):"",
+      });
+    });
+  });
+  return rows.sort((a,b)=>a.dm.localeCompare(b.dm)||a.store.localeCompare(b.store));
+}
+function downloadManagerLogins(){
+  const rows=managerLoginRows();
+  const cols=[["dm","District Manager"],["dmEmail","DM email"],["director","Director"],["store","Store"],
+              ["division","Division"],["manager","Manager"],["email","Login email"],["password","Password"]];
+  const q=v=>{const x=String(v??"");return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;};
+  const csv=[cols.map(c=>c[1]).join(",")].concat(rows.map(r=>cols.map(([k])=>q(r[k])).join(","))).join("\r\n");
+  const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="FixMi-Manager-Logins-"+new Date().toISOString().slice(0,10)+".csv";
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  const missing=rows.filter(r=>!r.password).length;
+  toast(`${rows.length} rows${missing?` · ${missing} store${missing===1?"":"s"} missing an email`:""}`);
+}
+
+
+/* ============================================================ DM ONBOARDING EMAIL (overwatch)
+   One DM at a time: every store in their district, each Manager's login email and
+   computed password, plus the how-to. Copy, paste, send. */
+const FIXMI_URL="https://dossaniparadise.github.io/DPM-FixMi/";
+const PORTAL_URL="https://dossaniparadise.github.io/DossaniPortal/";
+function onboardingEmailText(dmId){
+  const dm=(MASTER.areaCoaches||{})[dmId]; if(!dm)return "";
+  const first=(dm.name||"").trim().split(/\s+/)[0]||dm.name;
+  const stores=Object.keys(RESTAURANTS).filter(sid=>storeCoachIds(sid).includes(dmId))
+    .sort((a,b)=>storeName(a).localeCompare(storeName(b)));
+  const withEmail=stores.filter(sid=>(store(sid).email||"").trim());
+  const noEmail=stores.filter(sid=>!(store(sid).email||"").trim());
+  const creds=withEmail.map(sid=>`${storeName(sid)}\n  ${(store(sid).email||"").trim()} // ${storePassword(sid)}`).join("\n\n");
+  const missing=noEmail.length?`\n\n(Not yet set up — no store email in FindMi: ${noEmail.map(storeName).join(", ")})`:"";
+  return `Hi ${first},
+
+I set up accounts for your GMs in FixMi.
+
+They can log in with the following credentials.
+
+${creds||"(no stores with an email on file)"}${missing}
+
+When they submit an issue that is Urgent or Emergency, FixMi will prompt them to text you (on a phone) or email you (on a computer) with the ticket details, so you hear about it right away. Submitting a ticket on its own doesn't page anyone — that reminder is there so they actually reach you.
+
+To put FixMi on their phone like an app:
+  iPhone: open ${FIXMI_URL} in Safari, tap the Share button, then "Add to Home Screen".
+  Android: open ${FIXMI_URL} in Chrome, tap the ⋮ menu, then "Add to Home screen".
+
+The FixMi link is also on the Dossani Portal: ${PORTAL_URL}
+
+If you have any further questions or concerns with your GMs and how to use FixMi, please let me know.`;
+}
+function openOnboardingEmail(){
+  const dmId=($("obDm")||{}).value;
+  if(!dmId){toast("Choose a District Manager first","err");return}
+  const dm=(MASTER.areaCoaches||{})[dmId]||{};
+  const text=onboardingEmailText(dmId);
+  const subj="Your GMs' FixMi logins";
+  const mailto=dm.email?`mailto:${encodeURIComponent(dm.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(text)}`:"";
+  modal(`<div class="sheet-head"><h2>Onboarding email</h2><button class="x-btn" onclick="openSettings()">✕</button></div>
+    <div class="sheet-body">
+      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">To <b>${esc(dm.name||"")}</b>${dm.email?` · ${esc(dm.email)}`:" · no email on file"}</p>
+      <textarea class="input mono" id="obText" rows="18" style="font-size:12px;line-height:1.5" readonly>${esc(text)}</textarea>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-ghost" style="flex:1" onclick="openSettings()">Back</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="copyOnboarding()">📋 Copy</button>
+      ${mailto?`<a class="btn btn-primary" style="flex:1" href="${escA(mailto)}" target="_blank" rel="noopener">@ Open in email</a>`:""}
+    </div>`);
+}
+async function copyOnboarding(){
+  const ta=$("obText"); if(!ta)return;
+  try{ await navigator.clipboard.writeText(ta.value); toast("Copied"); }
+  catch(e){ ta.select(); document.execCommand("copy"); toast("Copied"); }
+}
+
 /* ============================================================ VENDORS */
 function openSettings(){
   const adminEmails=[...new Set([...ADMIN_EMAILS,...Object.values(MASTER.admins||{}).map(a=>(a.email||"").toLowerCase()).filter(Boolean)])];
@@ -5588,9 +5798,23 @@ function openSettings(){
       <p style="color:var(--ink-dim);font-size:13px;margin-top:0">What each role lands on. Everyone can still switch between Map, List and Tiles.</p>
       <div id="vdRows">${["admin","director","coach","tech","manager"].map(rk=>`
         <div class="vd-row" data-role="${rk}">
-          <span class="vd-name">${esc({admin:"Overwatch",director:"Director (DO)",coach:"District Manager",tech:"Technician",manager:"Store Manager"}[rk])}</span>
+          <span class="vd-name">${esc({admin:"Overwatch",director:"Director (DO)",coach:"District Manager",tech:"Technician",manager:"Manager"}[rk])}</span>
           <select class="input">${["map","list","tiles"].map(v=>`<option value="${v}"${defaultViewFor(rk)===v?" selected":""}>${v[0].toUpperCase()+v.slice(1)}</option>`).join("")}</select>
         </div>`).join("")}</div>
+      <div class="section-label" style="margin-top:22px">Manager logins<span class="ln"></span></div>
+      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Every store's login, computed live from FindMi and grouped by District Manager — ready to paste into an email or send as a sheet.</p>
+      <button class="btn btn-ghost btn-block" onclick="downloadManagerLogins()">⬇ Download Manager logins (CSV)</button>
+      <div class="field" style="margin-top:12px"><label class="label">Onboarding email for a District Manager</label>
+        <div style="display:flex;gap:8px">
+          <select class="input" id="obDm" style="flex:1">
+            <option value="">— choose a District Manager —</option>
+            ${Object.entries(MASTER.areaCoaches||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""))
+              .map(([id,c])=>`<option value="${id}">${esc(c.name||id)}</option>`).join("")}
+          </select>
+          <button class="btn btn-primary" onclick="openOnboardingEmail()">Generate</button>
+        </div>
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Lists every Manager login in their district, ready to copy into an email.</div>
+      </div>
       <div class="section-label" style="margin-top:22px">Import<span class="ln"></span></div>
       <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Bring in open tickets from an OwlOps export. Nothing is written until you approve the preview.</p>
       <button class="btn btn-ghost btn-block" onclick="openImport()">📥 Import tickets from OwlOps</button>
