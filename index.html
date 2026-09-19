@@ -515,6 +515,8 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .imp-done p{color:var(--ink-dim);font-size:13px;margin:0}
 .imp-bad{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:rgba(248,113,113,.14);color:var(--red);border-radius:99px;padding:3px 8px}
 .imp-warn{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:rgba(245,158,11,.16);color:var(--amber-deep);border-radius:99px;padding:3px 8px}
+.ob-preview{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px;max-height:52vh;overflow-y:auto;color:#1a2230}
+.ob-preview a{color:#1d76bb}
 .dm-card{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:14px 0}
 .dm-who{font-size:13.5px;margin-bottom:8px;display:flex;flex-direction:column;gap:3px}
 .dm-who .mono{font-size:12px;color:var(--ink-dim);margin-left:6px}
@@ -952,7 +954,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.22";
+const APP_VERSION = "6.23";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -5774,46 +5776,86 @@ function downloadManagerLogins(){
    computed password, plus the how-to. Copy, paste, send. */
 const FIXMI_URL="https://dossaniparadise.github.io/DPM-FixMi/";
 const PORTAL_URL="https://dossaniparadise.github.io/DossaniPortal/";
-function onboardingEmailText(dmId){
-  const dm=(MASTER.areaCoaches||{})[dmId]; if(!dm)return "";
+/* Shared shape for both the rich (HTML) and plain versions. */
+function onboardingData(dmId){
+  const dm=(MASTER.areaCoaches||{})[dmId]; if(!dm)return null;
   const first=(dm.name||"").trim().split(/\s+/)[0]||dm.name;
   const stores=Object.keys(RESTAURANTS).filter(sid=>storeCoachIds(sid).includes(dmId))
     .sort((a,b)=>storeName(a).localeCompare(storeName(b)));
-  const withEmail=stores.filter(sid=>(store(sid).email||"").trim());
-  const noEmail=stores.filter(sid=>!(store(sid).email||"").trim());
-  const sep="- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -";
-
-  // One ready-to-forward block per GM. The DM copies from one dashed line to
-  // the next and sends it — nothing to retype.
-  const blocks=withEmail.map(sid=>{
+  const gms=stores.filter(sid=>(store(sid).email||"").trim()).map(sid=>{
     const st=store(sid);
-    const gm=(st.storeManager||"").trim().split(/\s+/)[0]||"there";
-    return `${sep}
-${storeName(sid)}
+    return {sid,storeName:storeName(sid),gm:(st.storeManager||"").trim().split(/\s+/)[0]||"there",
+            email:(st.email||"").trim(),pw:storePassword(sid)};
+  });
+  const missing=stores.filter(sid=>!(store(sid).email||"").trim()).map(storeName);
+  return {dm,first,gms,missing};
+}
+const OB_SEP="- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -";
 
-Hi ${gm}, here are your credentials for the Repair and Maintenance App, FixMi.
+/* Rich text — what lands in Gmail/Outlook when they paste. Inline styles only,
+   since mail clients strip <style>. Literal dashed lines (not <hr>) so the DM
+   can select from one to the next exactly as the instructions say. */
+function onboardingEmailHtml(dmId){
+  const d=onboardingData(dmId); if(!d)return "";
+  const P=x=>`<p style="margin:0 0 12px">${x}</p>`;
+  const H=x=>`<p style="margin:18px 0 8px"><b>${x}</b></p>`;
+  const A=(href,txt)=>`<a href="${escA(href)}" style="color:#1d76bb">${esc(txt)}</a>`;
+  const sep=`<div style="margin:14px 0 6px;color:#8b93a1;letter-spacing:1px">${OB_SEP}</div>`;
+  const blocks=d.gms.map(g=>`${sep}
+    <div style="margin:0 0 2px;color:#6b7280;font-size:12px">To: ${esc(g.email)}</div>
+    <div style="margin:0 0 8px"><b>${esc(g.storeName)}</b></div>
+    ${P(`Hi ${esc(g.gm)}, here are your credentials for the Repair and Maintenance App, <b>DPM FixMi</b>.`)}
+    <div style="margin:0 0 10px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.7">
+      Website: &nbsp;${A(FIXMI_URL,FIXMI_URL)}<br>
+      Email: &nbsp;&nbsp;&nbsp;&nbsp;${esc(g.email)}<br>
+      Password: <b>${esc(g.pw)}</b></div>
+    ${P(`Put it on your phone like an app: open the website in Safari (iPhone) or Chrome (Android), then tap Share / the ⋮ menu and choose <b>"Add to Home Screen"</b>. It's also on the ${A(PORTAL_URL,"Dossani Portal")}.`)}
+    ${P(`I'll teach you how to use it and how to report and follow up on R&amp;M tickets next time I see you.`)}
+    ${sep}`).join("");
+  const missing=d.missing.length
+    ? P(`<span style="color:#b45309"><b>Not set up yet</b> (no store email in FindMi, so no login can be issued): ${esc(d.missing.join(", "))}</span>`):"";
+  return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;line-height:1.55;color:#1a2230;max-width:640px">
+    ${P(`Hi ${esc(d.first)},`)}
+    ${P(`I've set up FixMi accounts for every GM in your district. This email has everything you need to get your team on it.`)}
+    ${H("HOW IT WORKS FOR YOU")}
+    ${P(`When a GM submits an <b>Urgent</b> or <b>Emergency</b> ticket, FixMi immediately prompts them to <b>text you</b> (on a phone) or <b>email you</b> (on a computer) with the ticket details — the store, the category, and what's wrong.`)}
+    ${P(`Submitting a ticket doesn't page anyone on its own, so that prompt is how you hear about it right away. (for now)`)}
+    ${P(`If they tap <b>"I'll do this later"</b> or close the reminder without confirming, that's logged as a comment on the ticket. So if a GM tells you they let you know and there's no record, the ticket will show it. They can also send you any ticket's details later from a button on the ticket itself.`)}
+    ${P(`You have the same thing with your Director: every open ticket has a button to text or email your DO the details, if something needs to go up the chain.`)}
+    ${P(`You can log in at ${A(FIXMI_URL,"DPM FixMi")} — it's also on the ${A(PORTAL_URL,"Dossani Portal")}.`)}
+    ${H("SENDING LOGINS TO YOUR GMs")}
+    ${P(`Below is one message per GM, each between dashed lines. <b>Select from one dashed line to the next, copy, and text or email it to that GM.</b> Each one is already addressed to them with their own store, login and password — the "To:" line shows which store email it belongs to.`)}
+    ${blocks||P("(no stores with an email on file)")}
+    ${missing}
+    ${P(`If you have any further questions or concerns with your GMs and how to use FixMi, please let me know.`)}
+  </div>`;
+}
+/* Plain text — the mailto fallback and anything that can't take HTML. */
+function onboardingEmailText(dmId){
+  const d=onboardingData(dmId); if(!d)return "";
+  const blocks=d.gms.map(g=>`${OB_SEP}
+To: ${g.email}
+${g.storeName}
 
-  Website:   ${FIXMI_URL}
-  Email:     ${(st.email||"").trim()}
-  Password:  ${storePassword(sid)}
+Hi ${g.gm}, here are your credentials for the Repair and Maintenance App, DPM FixMi.
+
+Website:  ${FIXMI_URL}
+Email:    ${g.email}
+Password: ${g.pw}
 
 Put it on your phone like an app: open the website in Safari (iPhone) or Chrome (Android), then tap Share / the ⋮ menu and choose "Add to Home Screen". It's also on the Dossani Portal: ${PORTAL_URL}
 
 I'll teach you how to use it and how to report and follow up on R&M tickets next time I see you.
-${sep}`;
-  }).join("\n\n");
-
-  const missing=noEmail.length
-    ? `\n\nNot set up yet (no store email in FindMi, so no login can be issued): ${noEmail.map(storeName).join(", ")}`
-    : "";
-
-  return `Hi ${first},
+${OB_SEP}`).join("\n\n");
+  const missing=d.missing.length?`\n\nNot set up yet (no store email in FindMi, so no login can be issued): ${d.missing.join(", ")}`:"";
+  return `Hi ${d.first},
 
 I've set up FixMi accounts for every GM in your district. This email has everything you need to get your team on it.
 
 HOW IT WORKS FOR YOU
 
-When a GM submits an Urgent or Emergency ticket, FixMi immediately prompts them to text you (on a phone) or email you (on a computer) with the ticket details — the store, the category, and what's wrong. Submitting a ticket doesn't page anyone on its own, so that prompt is how you hear about it right away.
+When a GM submits an Urgent or Emergency ticket, FixMi immediately prompts them to text you (on a phone) or email you (on a computer) with the ticket details — the store, the category, and what's wrong.
+Submitting a ticket doesn't page anyone on its own, so that prompt is how you hear about it right away. (for now)
 
 If they tap "I'll do this later" or close the reminder without confirming, that's logged as a comment on the ticket. So if a GM tells you they let you know and there's no record, the ticket will show it. They can also send you any ticket's details later from a button on the ticket itself.
 
@@ -5823,7 +5865,7 @@ You can log in at ${FIXMI_URL} — it's also on the Dossani Portal at ${PORTAL_U
 
 SENDING LOGINS TO YOUR GMs
 
-Below is one message per GM, each between dashed lines. Select from one dashed line to the next, copy, and text or email it to that GM. Each one is already addressed to them with their own store, login and password.
+Below is one message per GM, each between dashed lines. Select from one dashed line to the next, copy, and text or email it to that GM. Each one is already addressed to them with their own store, login and password — the "To:" line shows which store email it belongs to.
 
 ${blocks||"(no stores with an email on file)"}${missing}
 
@@ -5833,24 +5875,43 @@ function openOnboardingEmail(){
   const dmId=($("obDm")||{}).value;
   if(!dmId){toast("Choose a District Manager first","err");return}
   const dm=(MASTER.areaCoaches||{})[dmId]||{};
-  const text=onboardingEmailText(dmId);
+  const html=onboardingEmailHtml(dmId), text=onboardingEmailText(dmId);
   const subj="Your GMs' FixMi logins";
   const mailto=dm.email?`mailto:${encodeURIComponent(dm.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(text)}`:"";
   modal(`<div class="sheet-head"><h2>Onboarding email</h2><button class="x-btn" onclick="openSettings()">✕</button></div>
     <div class="sheet-body">
-      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">To <b>${esc(dm.name||"")}</b>${dm.email?` · ${esc(dm.email)}`:" · no email on file"}</p>
-      <textarea class="input mono" id="obText" rows="18" style="font-size:12px;line-height:1.5" readonly>${esc(text)}</textarea>
+      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">To <b>${esc(dm.name||"")}</b>${dm.email?` · ${esc(dm.email)}`:" · no email on file"}
+        &nbsp;·&nbsp; <b>Copy</b> keeps the bold and links when you paste into Gmail or Outlook.</p>
+      <div class="ob-preview" id="obHtml">${html}</div>
+      <textarea id="obText" style="position:absolute;left:-9999px;top:0" readonly>${esc(text)}</textarea>
     </div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="openSettings()">Back</button>
-      <button class="btn btn-ghost" style="flex:1" onclick="copyOnboarding()">📋 Copy</button>
-      ${mailto?`<a class="btn btn-primary" style="flex:1" href="${escA(mailto)}" target="_blank" rel="noopener">@ Open in email</a>`:""}
+      <button class="btn btn-primary" style="flex:1" onclick="copyOnboarding()">📋 Copy formatted</button>
+      ${mailto?`<a class="btn btn-ghost" style="flex:1" href="${escA(mailto)}" target="_blank" rel="noopener" title="Plain text — mail links can't carry formatting">@ Open in email</a>`:""}
     </div>`);
 }
+/* Copy as rich text with a plain-text fallback, so it pastes formatted into a
+   mail client and still works in a plain box. */
 async function copyOnboarding(){
-  const ta=$("obText"); if(!ta)return;
-  try{ await navigator.clipboard.writeText(ta.value); toast("Copied"); }
-  catch(e){ ta.select(); document.execCommand("copy"); toast("Copied"); }
+  const el=$("obHtml"), ta=$("obText"); if(!el)return;
+  const html=el.innerHTML, text=ta?ta.value:el.innerText;
+  try{
+    if(navigator.clipboard&&window.ClipboardItem){
+      await navigator.clipboard.write([new ClipboardItem({
+        "text/html":new Blob([html],{type:"text/html"}),
+        "text/plain":new Blob([text],{type:"text/plain"})})]);
+      toast("Copied with formatting");return;
+    }
+  }catch(e){}
+  // Fallback: select the rendered block and use the legacy command, which
+  // copies rich text in every major browser.
+  try{
+    const r=document.createRange(); r.selectNodeContents(el);
+    const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    document.execCommand("copy"); sel.removeAllRanges();
+    toast("Copied with formatting");
+  }catch(e){ if(ta){ta.select();document.execCommand("copy");} toast("Copied (plain text)"); }
 }
 
 /* ============================================================ VENDORS */
