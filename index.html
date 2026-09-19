@@ -952,7 +952,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.19";
+const APP_VERSION = "6.20";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -5617,7 +5617,11 @@ function dmNames(dms){
   return f.length<=1?(f[0]||"your DM"):f.slice(0,-1).join(", ")+" and "+f[f.length-1];
 }
 function dmMessage(t,dms){
-  return `Hi ${dmNames(dms)}, I just submitted a ticket for my store ${storeName(t.storeId)}, for the following issue:\n${t.description||""}`;
+  // Lead with WHO is writing and from WHERE — that's the accountability line.
+  const gm=(SESSION.name||"").trim().split(/\s+/)[0]||"the manager";
+  const cat=catPath(t);                         // "POS → Kitchen Screen" or flat "Plumbing"
+  return `Hi ${dmNames(dms)}, this is ${gm} at ${storeName(t.storeId)}. I just submitted a ticket for the following issue:\n\n`
+       + `Category: ${cat}\nPriority: ${PRIORITIES[t.priority]||"Normal"}\n\n${t.description||""}`;
 }
 function promptContactDM(id){
   const t=TICKETS[id]; if(!t)return;
