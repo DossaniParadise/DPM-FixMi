@@ -954,7 +954,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.23";
+const APP_VERSION = "6.24";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -5914,6 +5914,85 @@ async function copyOnboarding(){
   }catch(e){ if(ta){ta.select();document.execCommand("copy");} toast("Copied (plain text)"); }
 }
 
+
+/* ============================================================ INVENTORY FOLLOW-UP (overwatch)
+   For one Director: every DM under them, every BK store, and how many of the
+   equipment items have a photo or N/A. Splits DMs into "still owe" and
+   "complete" so the email can nag and thank in one go. */
+function inventoryReportData(doId){
+  const dir=(MASTER.directors||{})[doId]; if(!dir)return null;
+  const first=(dir.name||"").trim().split(/\s+/)[0]||dir.name;
+  const per=equipItems().length;
+  const dms=Object.entries(MASTER.areaCoaches||{})
+    .filter(([,c])=>c&&c.assignedDirectorId===doId)
+    .map(([cid,c])=>{
+      const stores=Object.keys(RESTAURANTS)
+        .filter(sid=>storeDivision(sid)==="bk"&&storeCoachIds(sid).includes(cid))
+        .sort((a,b)=>storeName(a).localeCompare(storeName(b)))
+        .map(sid=>({sid,name:storeName(sid),done:invDone(sid),per}));
+      const total=stores.reduce((n,x)=>n+x.per,0), done=stores.reduce((n,x)=>n+x.done,0);
+      return {cid,name:c.name||"",stores,done,total,complete:stores.length>0&&done>=total};
+    })
+    .filter(d=>d.stores.length)                                   // DMs with no BK stores have nothing to upload
+    .sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  return {dir,first,per,pending:dms.filter(d=>!d.complete),complete:dms.filter(d=>d.complete)};
+}
+function inventoryReportHtml(doId){
+  const d=inventoryReportData(doId); if(!d)return "";
+  const P=x=>`<p style="margin:0 0 12px">${x}</p>`;
+  const dmBlock=dm=>`<div style="margin:0 0 14px">
+      <div style="margin:0 0 4px"><b>${esc(dm.name)}</b> <span style="color:#6b7280">— ${dm.done} of ${dm.total}</span></div>
+      ${dm.stores.map(st=>`<div style="margin:0 0 2px 14px">${esc(st.name)}: <b>${st.done}/${st.per}</b>${st.done>=st.per?' <span style="color:#16a34a">✓</span>':""}</div>`).join("")}
+    </div>`;
+  return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;line-height:1.55;color:#1a2230;max-width:640px">
+    ${P(`Hi ${esc(d.first)},`)}
+    ${P(`As you know, having accurate inventory and parts in my records really helps me when ordering equipment or parts. ${d.pending.length?`The following District Managers have not completed uploads of their inventory. Please let them know to get this submitted to me ASAP, as we already requested this information last month.`:`Every District Manager under you has completed their inventory photos — thank you.`}`)}
+    ${d.pending.map(dmBlock).join("")}
+    ${d.complete.length?P(`On the other hand, the following District Manager${d.complete.length===1?" has":"s have"} completed all of their inventory photos and ${d.complete.length===1?"has":"have"} no items pending. Please convey my gratitude to ${d.complete.length===1?"them":"them"}.`)+d.complete.map(dm=>`<div style="margin:0 0 6px 14px"><b>${esc(dm.name)}</b> <span style="color:#16a34a">✓ ${dm.done}/${dm.total}</span></div>`).join("")+`<div style="height:8px"></div>`:""}
+    ${P(`The uploads are done in FixMi under <b>Equipment inventory</b> on their home screen — one photo of the model and serial plate per item, or N/A if the store doesn't have it.`)}
+    ${P(`Thanks for your help with this.`)}
+  </div>`;
+}
+function inventoryReportText(doId){
+  const d=inventoryReportData(doId); if(!d)return "";
+  const block=dm=>`${dm.name} — ${dm.done} of ${dm.total}\n`+dm.stores.map(st=>`  ${st.name}: ${st.done}/${st.per}${st.done>=st.per?" ✓":""}`).join("\n");
+  return `Hi ${d.first},
+
+As you know, having accurate inventory and parts in my records really helps me when ordering equipment or parts. ${d.pending.length?"The following District Managers have not completed uploads of their inventory. Please let them know to get this submitted to me ASAP, as we already requested this information last month.":"Every District Manager under you has completed their inventory photos — thank you."}
+
+${d.pending.map(block).join("\n\n")}${d.complete.length?`
+
+On the other hand, the following District Manager${d.complete.length===1?" has":"s have"} completed all of their inventory photos and ${d.complete.length===1?"has":"have"} no items pending. Please convey my gratitude to them.
+
+${d.complete.map(dm=>`${dm.name} ✓ ${dm.done}/${dm.total}`).join("\n")}`:""}
+
+The uploads are done in FixMi under Equipment inventory on their home screen — one photo of the model and serial plate per item, or N/A if the store doesn't have it.
+
+Thanks for your help with this.`;
+}
+function openInventoryReport(){
+  const doId=($("ivDo")||{}).value;
+  if(!doId){toast("Choose a Director first","err");return}
+  const dir=(MASTER.directors||{})[doId]||{};
+  const d=inventoryReportData(doId);
+  if(d&&!d.pending.length&&!d.complete.length){toast("No Burger King stores under this Director's DMs","err");return}
+  const html=inventoryReportHtml(doId), text=inventoryReportText(doId);
+  const subj="Equipment inventory photos — follow-up";
+  const mailto=dir.email?`mailto:${encodeURIComponent(dir.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(text)}`:"";
+  modal(`<div class="sheet-head"><h2>Inventory follow-up</h2><button class="x-btn" onclick="openSettings()">✕</button></div>
+    <div class="sheet-body">
+      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">To <b>${esc(dir.name||"")}</b>${dir.email?` · ${esc(dir.email)}`:" · no email on file"}
+        &nbsp;·&nbsp; ${d.pending.length} DM${d.pending.length===1?"":"s"} pending, ${d.complete.length} complete.</p>
+      <div class="ob-preview" id="obHtml">${html}</div>
+      <textarea id="obText" style="position:absolute;left:-9999px;top:0" readonly>${esc(text)}</textarea>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-ghost" style="flex:1" onclick="openSettings()">Back</button>
+      <button class="btn btn-primary" style="flex:1" onclick="copyOnboarding()">📋 Copy formatted</button>
+      ${mailto?`<a class="btn btn-ghost" style="flex:1" href="${escA(mailto)}" target="_blank" rel="noopener" title="Plain text — mail links can't carry formatting">@ Open in email</a>`:""}
+    </div>`);
+}
+
 /* ============================================================ VENDORS */
 function openSettings(){
   const adminEmails=[...new Set([...ADMIN_EMAILS,...Object.values(MASTER.admins||{}).map(a=>(a.email||"").toLowerCase()).filter(Boolean)])];
@@ -5942,6 +6021,17 @@ function openSettings(){
       <div class="section-label" style="margin-top:22px">Manager logins<span class="ln"></span></div>
       <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Every store's login, computed live from FindMi and grouped by District Manager — ready to paste into an email or send as a sheet.</p>
       <button class="btn btn-ghost btn-block" onclick="downloadManagerLogins()">⬇ Download Manager logins (CSV)</button>
+      <div class="field" style="margin-top:12px"><label class="label">Inventory follow-up for a Director</label>
+        <div style="display:flex;gap:8px">
+          <select class="input" id="ivDo" style="flex:1">
+            <option value="">— choose a Director —</option>
+            ${Object.entries(MASTER.directors||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""))
+              .map(([id,d])=>`<option value="${id}">${esc(d.name||id)}</option>`).join("")}
+          </select>
+          <button class="btn btn-primary" onclick="openInventoryReport()">Generate</button>
+        </div>
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Which DMs still owe equipment photos, grouped and ready to send.</div>
+      </div>
       <div class="field" style="margin-top:12px"><label class="label">Onboarding email for a District Manager</label>
         <div style="display:flex;gap:8px">
           <select class="input" id="obDm" style="flex:1">
