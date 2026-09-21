@@ -965,7 +965,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.26";
+const APP_VERSION = "6.27";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2802,14 +2802,10 @@ function syncCreateSubs(){
    district, then add a couple of strays. */
 let MS_SEL=new Set();
 /* Who may broadcast a ticket to many stores. Gated on the PERSON, not the
-   role, because Kyle is a technician. Rahim and IT are matched on email; Kyle
-   is matched on his directory name so it follows his record if the email ever
-   changes. Add exact emails here to extend. */
-const BROADCAST_EMAILS=["rahim@dossaniparadise.com","itsupport@dossaniparadise.com"];
+   role, because Kyle is a technician. Exact emails, case-insensitive. */
+const BROADCAST_EMAILS=["rahim@dossaniparadise.com","itsupport@dossaniparadise.com","kyle@dossaniparadise.com"];
 function canBroadcast(){
-  const e=(SESSION.email||"").toLowerCase();
-  if(BROADCAST_EMAILS.includes(e))return true;
-  return SESSION.role==="tech"&&/^kyle\b/i.test((SESSION.name||"").trim());
+  return BROADCAST_EMAILS.includes((SESSION.email||"").toLowerCase());
 }
 function toggleMultiStore(on){
   const w=$("cMultiWrap"); if(!w)return;
