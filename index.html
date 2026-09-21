@@ -381,6 +381,10 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 @media(max-width:639px){.sheet{max-height:calc(100vh - 62px)}}
 .overlay.on .sheet{transform:translateY(0)}
 .x-float{position:absolute;top:14px;right:14px;z-index:5}
+.guest-sheet{transform:none;max-height:none;margin:0 auto;max-width:640px}
+.guest-note{background:var(--panel-2);border:1px dashed var(--line);border-radius:9px;padding:10px 13px;font-size:13px;color:var(--ink-mid);margin:0 0 14px}
+.guest-id{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+@media(max-width:480px){.guest-id{grid-template-columns:1fr}}
 .sheet-head:has(.x-btn){padding-right:20px}
 .sheet-head{position:sticky;top:0;z-index:2;background:var(--panel);display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--line-soft)}
 .sheet-head h2{font-family:var(--disp);font-weight:800;font-size:19px;margin:0;flex:1}
@@ -950,6 +954,22 @@ body.simulating .wrap{padding-bottom:40px}
   <div class="wrap" id="mainView"></div>
 </div>
 
+<!-- ===================== GUEST (vendor link, no sign-in) ===================== -->
+<div id="guest" class="hidden">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div>
+        <div class="brand-name">DPM FixMi</div>
+        <div class="brand-sub">Shared ticket · view only</div>
+      </div>
+    </div>
+    <div class="topbar-spacer"></div>
+    <button class="btn btn-ghost btn-sm" onclick="guestSignIn()">Staff sign in</button>
+  </div>
+  <div class="wrap" id="guestView"></div>
+</div>
+
 <div class="poll-dot hidden" id="pollDot"><span class="d"></span><span id="pollTxt">live</span></div>
 <div class="toast" id="toast"></div>
 <div class="loader hidden" id="loader"><div class="spin"></div></div>
@@ -1174,7 +1194,7 @@ function vendorCatLabel(v){
 }
 const PRIORITIES = {normal:"Normal",urgent:"Urgent",emergency:"Emergency"};
 const WAITING_REASONS = ["Awaiting parts","Awaiting third-party tech","Awaiting approval","Awaiting access","Scheduled — future date","Other"];
-const ROLE_LABEL = {admin:"Overwatch",director:"Director",coach:"District Manager",manager:"Manager",tech:"Repair Tech"};
+const ROLE_LABEL = {admin:"Overwatch",director:"Director",coach:"District Manager",manager:"Manager",tech:"Repair Tech",guest:"Vendor / guest",email:"via email"};
 const ROLE_PREFIX = {admin:"o",director:"d",coach:"a",tech:"r",manager:"m"};
 
 /* ============================================================ STATE */
@@ -3140,6 +3160,135 @@ function openPhoto(url){
   requestAnimationFrame(()=>o.classList.add("on"));
 }
 function closePhoto(){const o=$("photoOverlay");if(o){o.classList.remove("on");setTimeout(()=>{if(o)o.innerHTML=""},200)}}
+/* ---- guest / vendor view (v6.28) ----------------------------------------------
+   A ticket can be shared with someone who has no FixMi login (a vendor) at
+     <app url>#g/<shareToken>
+   The token is random, generated only when a staff member clicks "Create link"
+   on the ticket, and cleared by "Stop sharing" — so a vendor can see exactly
+   one ticket and can't wander to others by editing the URL. The page is
+   view-only: no status/assign controls. Guests CAN comment; the first time
+   they're asked for first + last name (kept in this browser so they aren't
+   asked again). Guest comments carry role:"guest" and no email. */
+const GUEST_KEY="dpm_guest_identity";
+let GUEST_ID=null, _guestTimer=null;
+function guestToken(){const m=location.hash.match(/^#g\/([A-Za-z0-9_-]{12,})$/);return m?m[1]:null}
+function newShareToken(){
+  const a=new Uint8Array(15);crypto.getRandomValues(a);
+  return btoa(String.fromCharCode(...a)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function guestUrl(id){const t=TICKETS[id]||{};return t.shareToken?location.origin+location.pathname+location.search+"#g/"+t.shareToken:""}
+async function createGuestLink(id){
+  const token=newShareToken();
+  if(await patchTicket(id,{shareToken:token},{action:"share_on"})){await copyGuestLink(id);openTicket(id)}
+}
+async function copyGuestLink(id){
+  const url=guestUrl(id);if(!url){toast("No vendor link on this ticket","err");return}
+  try{await navigator.clipboard.writeText(url);toast("Vendor link copied — anyone with it can view this ticket")}
+  catch(e){window.prompt("Copy this link:",url)}
+}
+async function revokeGuestLink(id){
+  if(!confirm("Stop sharing this ticket? The vendor link will stop working."))return;
+  if(await patchTicket(id,{shareToken:null},{action:"share_off"}))openTicket(id);
+}
+function guestIdentity(){try{return JSON.parse(localStorage.getItem(GUEST_KEY)||"null")}catch(e){return null}}
+function saveGuestIdentity(g){try{localStorage.setItem(GUEST_KEY,JSON.stringify(g))}catch(e){}}
+function guestSignIn(){try{history.replaceState(null,"",location.pathname+location.search)}catch(e){}location.reload()}
+/* Boot path: a #g/ link skips the login screen entirely. */
+async function tryGuestView(){
+  const token=guestToken();if(!token)return false;
+  showLoader(true);
+  try{await refresh()}catch(e){showLoader(false);toast("Couldn't load the ticket — check your connection and reload","err");return false}
+  showLoader(false);
+  const id=Object.keys(TICKETS).find(k=>TICKETS[k].shareToken===token);
+  if(!id){toast("This link is no longer active","err");return false}
+  enterGuest(id);return true;
+}
+function enterGuest(id){
+  GUEST_ID=id;cmtPhotos=[];
+  $("loginStage").classList.add("hidden");$("app").classList.add("hidden");$("guest").classList.remove("hidden");
+  renderGuest();
+  if(_guestTimer)clearInterval(_guestTimer);_guestTimer=setInterval(guestRefresh,POLL_MS);
+}
+async function guestRefresh(){
+  if(_uploadsInFlight>0)return;
+  try{await refresh()}catch(e){return}
+  const t=TICKETS[GUEST_ID];
+  if(!t||t.shareToken!==guestToken()){clearInterval(_guestTimer);toast("This link is no longer active","err");setTimeout(guestSignIn,1500);return}
+  const list=$("guestComments");if(list)list.innerHTML=renderComments(t);
+  const st=STATUSES[t.status]||STATUSES.open, b=$("guestStatus");
+  if(b){b.style.color=st.color;b.style.background=st.color+"1a";b.innerHTML=`<span class="dot"></span>${st.label}`}
+}
+function renderGuest(){
+  const id=GUEST_ID, t={_id:id,...TICKETS[id]}, st=STATUSES[t.status]||STATUSES.open, sid=t.storeId;
+  const g=guestIdentity()||{};
+  let assignee=null;
+  if(t.assignedTechId){const n=techName(t.assignedTechId);assignee=n?("🔧 "+n+" (in-house)"):null}
+  else if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];assignee=v?("🏢 "+v.name):null}
+  const activity=(t.activity||[]).slice().reverse().map(a=>`
+    <div class="tl-item"><div class="tl-dot" style="background:${(STATUSES[a.toStatus]||{}).color||'var(--amber)'}"></div>
+      <div class="tl-c"><div class="tl-act">${esc(actionText(a))}</div>
+      <div class="tl-meta">${esc(a.by||"")} · ${fmtDate(a.ts)}</div>
+      ${a.note?`<div class="tl-note">"${esc(a.note)}"</div>`:""}</div></div>`).join("");
+  $("guestView").innerHTML=`<div class="sheet guest-sheet">
+    <div class="sheet-head">
+      <h2>#${esc(t.shortId||id.slice(0,6).toUpperCase())}</h2>
+      <span class="sbadge" id="guestStatus" style="color:${st.color};background:${st.color}1a"><span class="dot"></span>${st.label}</span>
+    </div>
+    <div class="sheet-body">
+      <div class="guest-note">You're viewing a shared ticket. You can read the thread and add comments; staff at Dossani Paradise are notified when you do.</div>
+      <div class="detail-store">
+        <div style="font-weight:700;font-size:17px">${esc(storeName(sid))}${storeNum(sid)?` <span style="color:var(--ink-dim);font-weight:500">#${esc(String(storeNum(sid)))}</span>`:""}</div>
+        ${storeGeoUrl(sid)?`<a class="btn btn-ghost btn-sm gps-btn" href="${escA(storeGeoUrl(sid))}" target="_blank" rel="noopener">📍 Open GPS</a>`:""}
+      </div>
+      <div class="detail-desc">${esc(t.description||"No description")}</div>
+      ${photoThumbs(t)}
+      <div class="detail-row"><span class="k">Category</span><span class="v">${esc(catPath(t))}</span></div>
+      <div class="detail-row"><span class="k">Priority</span><span class="v">${PRIORITIES[t.priority]||"Normal"}</span></div>
+      ${assignee?`<div class="detail-row"><span class="k">Assigned</span><span class="v">${esc(assignee)}</span></div>`:""}
+      <div class="detail-row"><span class="k">Opened</span><span class="v">${fmtDate(t.createdAt)}</span></div>
+      ${t.waitingReason?`<div class="detail-row"><span class="k">Waiting on</span><span class="v">${esc(t.waitingReason)}</span></div>`:""}
+      <div class="section-label">Comments<span class="ln"></span></div>
+      <div class="comments" id="guestComments">${renderComments(t)}</div>
+      <div class="comment-add">
+        <div class="guest-id">
+          <input class="input" id="gFirst" placeholder="First name" autocomplete="given-name" value="${escA(g.first||"")}">
+          <input class="input" id="gLast" placeholder="Last name" autocomplete="family-name" value="${escA(g.last||"")}">
+        </div>
+        <input class="input" id="gCompany" placeholder="Company (optional)" autocomplete="organization" value="${escA(g.company||"")}" style="margin-bottom:8px">
+        <textarea class="input" id="cmtInput" placeholder="Add a comment…" style="min-height:64px"></textarea>
+        <input type="file" id="cmtFile" accept="image/*" multiple style="display:none" onchange="addCommentPhotos(this)">
+        <div class="preview-strip" id="cmtPreview" style="margin-top:0;display:none"></div>
+        <div class="cmt-actions">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="$('cmtFile').click()">📷 Add photo</button>
+          <button class="btn btn-primary btn-sm" id="cmtSend" onclick="guestAddComment()">Post comment</button>
+        </div>
+      </div>
+      <div class="section-label">Activity<span class="ln"></span></div>
+      <div class="timeline">${activity||'<div style="color:var(--ink-dim);font-size:13px">No activity yet.</div>'}</div>
+    </div>
+  </div>`;
+}
+async function guestAddComment(){
+  const id=GUEST_ID, t=TICKETS[id];if(!t)return;
+  const first=$("gFirst").value.trim(), last=$("gLast").value.trim(), company=$("gCompany").value.trim();
+  if(!first||!last){toast("Please enter your first and last name","err");$(first?"gLast":"gFirst").focus();return}
+  const text=$("cmtInput").value.trim();
+  const photos=cmtPhotos.filter(p=>p.url).map(p=>p.url);
+  if(!text&&!photos.length){toast("Write something or add a photo","err");return}
+  if(cmtPhotos.some(p=>p.uploading)){toast("Hold on — a photo is still uploading","err");return}
+  saveGuestIdentity({first,last,company});
+  const by=company?`${first} ${last} (${company})`:`${first} ${last}`;
+  const btn=$("cmtSend");btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>';
+  const comments=Array.isArray(t.comments)?t.comments.slice():[];
+  comments.push({id:uid(),by,role:"guest",email:null,guest:true,text,ts:now(),...(photos.length?{photos}:{})});
+  const updated={...t,comments,updatedAt:now()};
+  showLoader(true);
+  try{
+    await apiWrite(`${TICKETS_NODE}/${id}`,updated);
+    TICKETS[id]=updated;LOCAL_ECHO[id]=updated;
+    showLoader(false);cmtPhotos=[];toast("Comment posted");renderGuest();
+  }catch(e){showLoader(false);toast(e.message||"Couldn't post — try again","err");btn.disabled=false;btn.textContent="Post comment"}
+}
 /* ---- per-ticket links (v6.28) ------------------------------------------------
    Every ticket is addressable at  <app url>#t/<shortId>  (e.g. #t/23086-PLM-0004).
    Hash routing works on GitHub Pages with no server config and survives login:
@@ -3222,6 +3371,9 @@ function openTicket(id){
       <div class="detail-row"><span class="k">Opened</span><span class="v">${fmtDate(t.createdAt)}</span></div>
       ${costDetail(id)}
       ${t.waitingReason?`<div class="detail-row"><span class="k">Waiting on</span><span class="v">${esc(t.waitingReason)}</span></div>`:""}
+      ${hasStoreAccess()?`<div class="detail-row"><span class="k">Vendor link</span><span class="v">${t.shareToken
+        ?`<button type="button" class="btn btn-ghost btn-sm" onclick="copyGuestLink('${id}')">Copy link</button> <button type="button" class="btn btn-ghost btn-sm" onclick="revokeGuestLink('${id}')">Stop sharing</button>`
+        :`<button type="button" class="btn btn-ghost btn-sm" onclick="createGuestLink('${id}')">Create link</button>`}</span></div>`:""}
       ${ticketControls(t)}
       <div class="section-label">Comments<span class="ln"></span></div>
       <div class="comments" id="commentList">${renderComments(t)}</div>
@@ -3246,6 +3398,8 @@ function actionText(a){
   if(a.action==="clockin")return"Tech clocked in";
   if(a.action==="clockout")return"Tech clocked out";
   if(a.action==="edit")return"Ticket details edited";
+  if(a.action==="share_on")return"Vendor link created";
+  if(a.action==="share_off")return"Vendor link removed";
   return a.action;
 }
 function renderComments(t){
@@ -6542,7 +6696,7 @@ function toggleTags(){SHOW_REF_TAGS=!SHOW_REF_TAGS;applyTags();toast(SHOW_REF_TA
   ["emailIn","pwIn"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()}));
   window.addEventListener("resize",()=>{if(SESSION)applyTags()});
   window.addEventListener("hashchange",()=>{if(SESSION&&/^#t\//.test(location.hash))openTicketFromUrl()});
-  tryRestoreSession(); // stay logged in across refresh
+  if(guestToken()) tryGuestView(); else tryRestoreSession(); // vendor link, or stay logged in across refresh
 })();
 </script>
 </body>
