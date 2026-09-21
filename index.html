@@ -427,6 +427,7 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .cmt-head{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap}
 .cmt-who{font-weight:700;font-size:13px}
 .cmt-role{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--amber);background:rgba(29,118,187,.12);padding:2px 6px;border-radius:4px}
+.cmt-mail{font-family:var(--mono);font-size:10px;color:var(--ink-dim);word-break:break-all}
 .cmt-time{font-size:10px;color:var(--ink-dim);margin-left:auto}
 .cmt-body{font-size:13.5px;color:var(--ink-mid);line-height:1.5;white-space:pre-wrap;word-break:break-word}
 .comment-add{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
@@ -991,7 +992,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.31";
+const APP_VERSION = "9.3";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1508,33 +1509,43 @@ function cmpVer(a,b){ // 1 if a>b, -1 if a<b, 0 equal
   for(let i=0;i<Math.max(pa.length,pb.length);i++){const x=pa[i]||0,y=pb[i]||0;if(x!==y)return x>y?1:-1;}
   return 0;
 }
+const RELOAD_KEY="dpm_reloaded_for";
 function checkAppVersion(){
   const server=((MASTER.admins||{}).appMeta||{}).version;
   if(!server || cmpVer(APP_VERSION,server)>0){
-    // I'm the newest build seen so far — publish (once per session).
+    // I'm the newest build seen so far — publish (once per session). This is
+    // also what heals a master whose appMeta got ahead of what's deployed.
     if(!_versionPublished){
       _versionPublished=true;
       apiWrite("admins/appMeta",{version:APP_VERSION,updatedAt:now()}).catch(()=>{_versionPublished=false;});
     }
-  }else if(cmpVer(server,APP_VERSION)>0){
-    // A newer build exists — pull it. Two guards against reload loops: a
-    // per-tab marker, plus an in-memory flag in case sessionStorage is
-    // unavailable (private windows with site data blocked) — without the
-    // second one a failed write here means reloading on every poll.
-    if(_reloadArmed)return;
-    let done=null;try{done=sessionStorage.getItem("reloadedFor");}catch(e){}
-    if(done!==server){
-      _reloadArmed=true;
-      try{sessionStorage.setItem("reloadedFor",server);}catch(e){}
-      toast("Updating app to v"+server+"…");
-      // KEEP THE HASH. It carries the ticket someone followed a link to; dropping
-      // it landed guests (and deep-linked staff) on the sign-in screen instead.
-      setTimeout(()=>{
-        const q=new URLSearchParams(location.search); q.set("v",server);
-        location.replace(location.pathname+"?"+q.toString()+location.hash);
-      },900);
-    }
+    return;
   }
+  if(cmpVer(server,APP_VERSION)<=0) return;                 // same build, nothing to do
+  /* A newer build is published. Three rules, learned the hard way:
+     1. NEVER auto-update someone who isn't signed in. A vendor opening a ticket
+        link is not here to update our app — reloading under them is what made
+        shared links feel broken (sometimes the ticket, sometimes "Updating
+        app…", sometimes the sign-in screen).
+     2. One reload per page life (_reloadArmed), in case storage is blocked.
+     3. Remember the attempt in localStorage, keyed by BOTH versions, so it is
+        shared across tabs: if we already reloaded for v9.1 and came back still
+        running this same build, the new file isn't actually reachable (CDN lag,
+        or appMeta is just ahead of what's deployed). Trying again would only
+        loop, so we stay put and keep working. */
+  if(!SESSION) return;
+  if(_reloadArmed) return;
+  const attempt=server+"|"+APP_VERSION;
+  let done=null;try{done=localStorage.getItem(RELOAD_KEY)}catch(e){}
+  if(done===attempt) return;
+  _reloadArmed=true;
+  try{localStorage.setItem(RELOAD_KEY,attempt)}catch(e){}
+  toast("Updating app to v"+server+"…");
+  // KEEP THE HASH — it carries the ticket someone followed a link to.
+  setTimeout(()=>{
+    const q=new URLSearchParams(location.search); q.set("v",server);
+    location.replace(location.pathname+"?"+q.toString()+location.hash);
+  },900);
 }
 
 /* ============================================================ IMGBB */
@@ -3259,7 +3270,7 @@ function renderGuest(){
       <span class="sbadge" id="guestStatus" style="color:${st.color};background:${st.color}1a"><span class="dot"></span>${st.label}</span>
     </div>
     <div class="sheet-body">
-      <div class="guest-note">You're viewing a shared ticket. You can read the thread and add comments; staff at Dossani Paradise are notified when you do.</div>
+      <div class="guest-note">You're viewing a shared ticket. You can read the thread and add comments — give your name and email so we know who's writing, and staff at Dossani Paradise are notified when you do.</div>
       <div class="detail-store">
         <div style="font-weight:700;font-size:17px">${esc(storeName(sid))}${storeNum(sid)?` <span style="color:var(--ink-dim);font-weight:500">#${esc(String(storeNum(sid)))}</span>`:""}</div>
         ${storeGeoUrl(sid)?`<a class="btn btn-ghost btn-sm gps-btn" href="${escA(storeGeoUrl(sid))}" target="_blank" rel="noopener">📍 Open GPS</a>`:""}
@@ -3278,6 +3289,7 @@ function renderGuest(){
           <input class="input" id="gFirst" placeholder="First name" autocomplete="given-name" value="${escA(g.first||"")}">
           <input class="input" id="gLast" placeholder="Last name" autocomplete="family-name" value="${escA(g.last||"")}">
         </div>
+        <input class="input" id="gEmail" type="email" placeholder="Email address" autocomplete="email" autocapitalize="off" spellcheck="false" value="${escA(g.email||"")}" style="margin-bottom:8px">
         <input class="input" id="gCompany" placeholder="Company (optional)" autocomplete="organization" value="${escA(g.company||"")}" style="margin-bottom:8px">
         <textarea class="input" id="cmtInput" placeholder="Add a comment…" style="min-height:64px"></textarea>
         <input type="file" id="cmtFile" accept="image/*" multiple style="display:none" onchange="addCommentPhotos(this)">
@@ -3292,20 +3304,26 @@ function renderGuest(){
     </div>
   </div>`;
 }
+function validEmail(e){return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)}
 async function guestAddComment(){
   const id=GUEST_ID, t=TICKETS[id];if(!t)return;
-  const first=$("gFirst").value.trim(), last=$("gLast").value.trim(), company=$("gCompany").value.trim();
+  const first=$("gFirst").value.trim(), last=$("gLast").value.trim();
+  const email=$("gEmail").value.trim().toLowerCase(), company=$("gCompany").value.trim();
   if(!first||!last){toast("Please enter your first and last name","err");$(first?"gLast":"gFirst").focus();return}
+  if(!validEmail(email)){toast("Please enter a valid email address","err");$("gEmail").focus();return}
   const text=$("cmtInput").value.trim();
   const photos=cmtPhotos.filter(p=>p.url).map(p=>p.url);
   if(!text&&!photos.length){toast("Write something or add a photo","err");return}
   if(cmtPhotos.some(p=>p.uploading)){toast("Hold on — a photo is still uploading","err");return}
-  saveGuestIdentity({first,last,company});
+  saveGuestIdentity({first,last,email,company});
   const by=company?`${first} ${last} (${company})`:`${first} ${last}`;
   const btn=$("cmtSend");btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>';
   const comments=Array.isArray(t.comments)?t.comments.slice():[];
-  comments.push({id:uid(),by,role:"guest",email:null,guest:true,text,ts:now(),...(photos.length?{photos}:{})});
-  const updated={...t,comments,updatedAt:now()};
+  comments.push({id:uid(),by,role:"guest",email,guest:true,text,ts:now(),...(photos.length?{photos}:{})});
+  // Everyone who has commented from a link, so the API can keep them on the
+  // thread when it emails out the next update.
+  const watchers=[...new Set([...(Array.isArray(t.guestWatchers)?t.guestWatchers:[]),email])];
+  const updated={...t,comments,guestWatchers:watchers,updatedAt:now()};
   showLoader(true);
   try{
     await apiWrite(`${TICKETS_NODE}/${id}`,updated);
@@ -3466,6 +3484,7 @@ function renderComments(t){
     <div class="cmt">
       <div class="cmt-head"><span class="cmt-who">${esc(c.by)}</span>
         <span class="cmt-role">${esc(ROLE_LABEL[c.role]||c.role||"")}</span>
+        ${(c.guest&&c.email)?`<span class="cmt-mail" title="Email address given when commenting">${esc(c.email)}</span>`:""}
         <span class="cmt-time mono">${fmtDate(c.ts)}</span></div>
       ${c.text?`<div class="cmt-body">${esc(c.text)}</div>`:""}
       ${Array.isArray(c.photos)&&c.photos.length?`<div class="cmt-photos">${c.photos.map(u=>
