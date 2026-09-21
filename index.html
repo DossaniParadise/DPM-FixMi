@@ -965,7 +965,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.27";
+const APP_VERSION = "6.28";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2020,6 +2020,7 @@ function enterApp(){
   myStoreIds().forEach(id=>openGroups[id]=true);
   render();
   startPoll();
+  openTicketFromUrl(); // #t/<shortId> from an email link or copied URL
   refreshPaymiCount();
   if(!window.__paymiTimer)window.__paymiTimer=setInterval(refreshPaymiCount,5*60*1000);
 }
@@ -2700,6 +2701,7 @@ function modal(html){
   activeModal=o;
 }
 function closeModal(){
+  clearTicketHash();
   if(DM_PROMPT_TID){const t=DM_PROMPT_TID;DM_PROMPT_TID=null;dmLog(t,"dismissed the reminder without confirming");}
   const o=$("modalOverlay");if(o){o.classList.remove("on");o._wipeTimer=setTimeout(()=>{if(o){o.innerHTML="";o._wipeTimer=null;}},220)}activeModal=null}
 
@@ -3138,9 +3140,48 @@ function openPhoto(url){
   requestAnimationFrame(()=>o.classList.add("on"));
 }
 function closePhoto(){const o=$("photoOverlay");if(o){o.classList.remove("on");setTimeout(()=>{if(o)o.innerHTML=""},200)}}
+/* ---- per-ticket links (v6.28) ------------------------------------------------
+   Every ticket is addressable at  <app url>#t/<shortId>  (e.g. #t/23086-PLM-0004).
+   Hash routing works on GitHub Pages with no server config and survives login:
+   the hash is still there when tryRestoreSession()/doLogin() reach enterApp(),
+   which then opens the ticket. Email notifications link here. */
+function ticketUrl(id){
+  const t=TICKETS[id]||{};
+  return location.origin+location.pathname+location.search+"#t/"+encodeURIComponent(t.shortId||id);
+}
+function setTicketHash(id){
+  const t=TICKETS[id]||{};
+  try{history.replaceState(null,"","#t/"+encodeURIComponent(t.shortId||id))}catch(e){}
+}
+function clearTicketHash(){
+  if(/^#t\//.test(location.hash)){try{history.replaceState(null,"",location.pathname+location.search)}catch(e){}}
+}
+async function copyTicketLink(id){
+  const url=ticketUrl(id);
+  try{await navigator.clipboard.writeText(url);toast("Link copied")}
+  catch(e){window.prompt("Copy this link:",url)}
+}
+/* Resolve a #t/<shortId or id> hash to a ticket the signed-in person is allowed
+   to see, then open it. Closed tickets aren't in the first payload for
+   admins/directors, so fall back to the closed fetch before giving up. */
+async function openTicketFromUrl(){
+  const m=location.hash.match(/^#t\/(.+)$/);
+  if(!m||!SESSION)return false;
+  const key=decodeURIComponent(m[1]).trim().toUpperCase();
+  const find=()=>Object.keys(TICKETS).find(k=>String(TICKETS[k].shortId||"").toUpperCase()===key||k.toUpperCase()===key);
+  let id=find();
+  if(!id && canSeeClosedReport()){ if(await ensureClosedLoaded()) id=find(); }
+  if(!id){toast("Ticket "+key+" wasn't found","err");clearTicketHash();return false}
+  const t=TICKETS[id];
+  const visible=myStoreIds().includes(t.storeId) && ticketsForStore(t.storeId).some(x=>x._id===id);
+  if(!visible){toast("You don't have access to ticket "+key,"err");clearTicketHash();return false}
+  openTicket(id);
+  return true;
+}
 function openTicket(id){
   cmtPhotos=[];               // fresh comment-photo draft per ticket sheet
   const t={_id:id,...TICKETS[id]};
+  setTicketHash(id);
   const st=STATUSES[t.status]||STATUSES.open;
   const sid=t.storeId;
   const dir=storeDirector(sid), coach=storeCoach(sid), tech=storeTech(sid);
@@ -3159,6 +3200,7 @@ function openTicket(id){
     <div class="sheet-head">
       <h2>#${esc(t.shortId||id.slice(0,6).toUpperCase())}</h2>
       <span class="sbadge" style="color:${st.color};background:${st.color}1a"><span class="dot"></span>${st.label}</span>
+      <button type="button" class="btn btn-ghost btn-sm" title="Copy a link to this ticket" onclick="copyTicketLink('${id}')">🔗 Link</button>
       <button class="x-btn" onclick="closeModal()">✕</button>
     </div>
     <div class="sheet-body">
@@ -6499,6 +6541,7 @@ function toggleTags(){SHOW_REF_TAGS=!SHOW_REF_TAGS;applyTags();toast(SHOW_REF_TA
   document.getElementById("appVersion").textContent="v"+APP_VERSION;
   ["emailIn","pwIn"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()}));
   window.addEventListener("resize",()=>{if(SESSION)applyTags()});
+  window.addEventListener("hashchange",()=>{if(SESSION&&/^#t\//.test(location.hash))openTicketFromUrl()});
   tryRestoreSession(); // stay logged in across refresh
 })();
 </script>
