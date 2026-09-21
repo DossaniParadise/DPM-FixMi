@@ -674,6 +674,12 @@ body.simulating .wrap{padding-bottom:40px}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .toast.ok{border-color:rgba(52,211,153,.4)}
 .toast.err{border-color:rgba(248,113,113,.4)}
+/* Big, hard-to-miss confirmation for "link copied" (v6.30). */
+.toast.big{padding:18px 26px;font-size:17px;font-weight:800;border-radius:12px;bottom:34px}
+.toast.big.ok{background:var(--green);border-color:#047857;color:#fff}
+/* The Link button turns green and blinks while the link sits on the clipboard. */
+.btn-copied{background:var(--green)!important;border-color:#047857!important;color:#fff!important;animation:copyBlink .5s ease-in-out 3}
+@keyframes copyBlink{0%,100%{box-shadow:0 0 0 0 rgba(5,150,105,.6)}50%{box-shadow:0 0 0 8px rgba(5,150,105,0)}}
 .fab{position:fixed;right:20px;bottom:22px;z-index:50;background:var(--amber);color:#fff;border:1px solid var(--amber-deep);border-radius:14px;padding:14px 18px;font-weight:700;font-size:15px;display:flex;align-items:center;gap:9px;box-shadow:var(--shadow)}
 .fab:hover{background:#ffbe2e}
 .loader{position:fixed;inset:0;z-index:90;display:grid;place-items:center;background:var(--ground)}
@@ -979,13 +985,13 @@ body.simulating .wrap{padding-bottom:40px}
 /* ============================================================
    CONFIG — satellite app. No Firebase SDK. Reads/writes via the
    alignment API. The store location is the immutable anchor for a
-   ticket; coach/director/tech are resolved LIVE from the master.
+   ticket; DM/director/tech are resolved LIVE from the master.
    ============================================================ */
 const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.29";
+const APP_VERSION = "6.30";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1211,7 +1217,7 @@ const PAYMI_FS="https://firestore.googleapis.com/v1/projects/gen-lang-client-035
 let PAYMI_COUNT=null;   // null = unknown/not fetched; number once known
 let PAYMI_COMMENTS=null; // unread finance/discussion comments for this person
 
-/* Which PayMi ids this RM session answers to. Coaches/directors: their
+/* Which PayMi ids this RM session answers to. DMs/directors: their
    directory id (chains embed it). Rahim + ITSupport sign PayMi's Rate
    Verification step, but they log into THIS app as admins — map by email. */
 function paymiIdsFor(sess){
@@ -1638,9 +1644,10 @@ function store(rid){return RESTAURANTS[rid]||{}}
 function storeName(rid){return store(rid).storeName||"Unknown store"}
 function storeNum(rid){return store(rid).storeNumber||""}
 function storeDirector(rid){const id=store(rid).assignedDirectorId;return (MASTER.directors||{})[id]||null}
-/* A store can have SEVERAL area coaches. FindMi stores the full list in
-   assignedAreaCoachIds and mirrors only the FIRST into the legacy singular
-   field — so reading the singular field hid every coach but the first (the
+/* A store can have SEVERAL district managers. FindMi stores the full list in
+   assignedAreaCoachIds (the field name predates the "district manager" rename
+   and must stay) and mirrors only the FIRST into the legacy singular field —
+   so reading the singular field hid every DM but the first (the
    same bug class that hid Kyle's stores). Always read through this. */
 function storeCoachIds(rid){
   const s=store(rid);
@@ -1651,7 +1658,7 @@ function storeCoachIds(rid){
   const all=MASTER.areaCoaches||{};
   return [...new Set(ids.filter(id=>id&&all[id]))];
 }
-/* Primary coach, for single-name display. */
+/* Primary district manager, for single-name display. */
 function storeCoach(rid){const ids=storeCoachIds(rid);return ids.length?(MASTER.areaCoaches||{})[ids[0]]:null}
 function storeTech(rid){const ids=storeTechIds(rid);return ids.length?(MASTER.repairTechnicians||{})[ids[0]]:null}
 function techName(tid){return (MASTER.repairTechnicians||{})[tid]?.name||null}
@@ -1823,7 +1830,7 @@ function viewAsRoster(){
   const myCoaches=isDir?new Set(myStoreIds().flatMap(id=>storeCoachIds(id))):null;
   const myTechs=isDir?new Set(myStoreIds().flatMap(id=>storeTechIds(id))):null;
   if(!isDir) Object.entries(MASTER.directors||{}).forEach(([id,d])=>list.push({kind:"director",id,primary:"Director — "+d.name,secondary:"",search:(d.name+" director").toLowerCase(),sortk:"1"+d.name}));
-  Object.entries(MASTER.areaCoaches||{}).filter(([id])=>!isDir||myCoaches.has(id)).forEach(([id,c])=>list.push({kind:"coach",id,primary:"District Manager — "+c.name,secondary:"",search:(c.name+" district manager area coach dm").toLowerCase(),sortk:"2"+c.name}));
+  Object.entries(MASTER.areaCoaches||{}).filter(([id])=>!isDir||myCoaches.has(id)).forEach(([id,c])=>list.push({kind:"coach",id,primary:"District Manager — "+c.name,secondary:"",search:(c.name+" district manager dm").toLowerCase(),sortk:"2"+c.name}));
   Object.entries(MASTER.repairTechnicians||{}).filter(([id])=>!isDir||myTechs.has(id)).forEach(([id,t])=>list.push({kind:"tech",id,primary:"Repair Tech — "+t.name,secondary:"",search:(t.name+" tech").toLowerCase(),sortk:"3"+t.name}));
   Object.keys(RESTAURANTS).filter(id=>!isDir||myStores.has(id)).forEach(id=>{
     const s=RESTAURANTS[id];
@@ -1834,7 +1841,7 @@ function viewAsRoster(){
       search:[storeNum(id),storeName(id),s.storeManager,"manager store"].filter(Boolean).join(" ").toLowerCase(),
       sortk:"4"+(storeNum(id)||"")});
   });
-  // default order: directors, coaches, techs, then managers by store number
+  // default order: directors, DMs, techs, then managers by store number
   return list.sort((a,b)=>a.sortk.localeCompare(b.sortk,undefined,{numeric:true}));
 }
 function startViewAs(kind,id){
@@ -1898,7 +1905,7 @@ function myStoreIds(){
   if(SESSION.scope==="single") return [SESSION.storeId];
   if(SESSION.scope==="director"){
     // Director sees: stores stamped directly with their id, PLUS every store
-    // under any area coach who reports to them (areaCoaches[].assignedDirectorId).
+    // under any district manager who reports to them (areaCoaches[].assignedDirectorId).
     const myCoaches=Object.keys(MASTER.areaCoaches||{}).filter(cid=>(MASTER.areaCoaches[cid].assignedDirectorId)===SESSION.refId);
     const coachSet=new Set(myCoaches);
     return Object.keys(RESTAURANTS).filter(r=>{
@@ -1913,7 +1920,7 @@ function myStoreIds(){
   // via storeTechIds(), which falls back to the legacy field when needed.
   if(SESSION.role==="tech")
     return Object.keys(RESTAURANTS).filter(r=>storeTechIds(r).includes(SESSION.refId));
-  // coach: stores listing me among their area coaches (a store may have several)
+  // DM: stores listing me among their district managers (a store may have several)
   if(SESSION.role==="coach")
     return Object.keys(RESTAURANTS).filter(r=>storeCoachIds(r).includes(SESSION.refId));
   return Object.keys(RESTAURANTS).filter(r=>RESTAURANTS[r][SESSION.refField]===SESSION.refId);
@@ -2128,7 +2135,7 @@ function renderManagerHub(){
     </div>
     <div class="sg-people" style="padding:0 0 16px">
       ${dir?`<span><b>Director:</b> ${esc(dir.name)}</span>`:""}
-      ${coach?`<span><b>Coach:</b> ${esc(coach.name)}</span>`:""}
+      ${coach?`<span><b>DM:</b> ${esc(coach.name)}</span>`:""}
       ${tech?`<span><b>Tech:</b> ${esc(tech.name)}</span>`:`<span style="color:var(--ink-dim)">No tech assigned</span>`}
     </div>
     <button class="hub-btn accent" style="width:100%;margin-bottom:22px" onclick="openCreate('${sid}')">
@@ -2139,7 +2146,7 @@ function renderManagerHub(){
     ${cards}`;
 }
 
-/* ---- area coach hub: a tile per store with its open-ticket count.
+/* ---- district manager hub: a tile per store with its open-ticket count.
    Top button opens a ticket for ANY of their stores; each tile drills into that
    store's ticket list, where they can also open a ticket for just that store. */
 function coachStoreList(){
@@ -2204,7 +2211,7 @@ function renderCoachStore(sid){
     </div>
     <div class="sg-people" style="padding:0 0 16px">
       ${dir?`<span><b>Director:</b> ${esc(dir.name)}</span>`:""}
-      ${coach?`<span><b>Coach:</b> ${esc(coach.name)}</span>`:""}
+      ${coach?`<span><b>DM:</b> ${esc(coach.name)}</span>`:""}
       ${tech?`<span><b>Tech:</b> ${esc(tech.name)}</span>`:`<span style="color:var(--ink-dim)">No tech assigned</span>`}
     </div>
     <button class="hub-btn accent" style="width:100%;margin-bottom:20px" onclick="openCreate('${sid}')">
@@ -2374,7 +2381,7 @@ function pickStatus(key){
    entirely. Re-fetches when the cache is older than CLOSED_TTL_MS so the tab
    stays honest without ever being polled. */
 let CLOSED_ERR=null;        // last closed-fetch failure message (job-costs panel shows it)
-/* Admins see the whole company; directors and area coaches (district managers)
+/* Admins see the whole company; directors and district managers
    get the same report scoped to their own stores. */
 function canSeeClosedReport(){return ["admin","director","coach"].includes(SESSION.role)}
 async function ensureClosedLoaded(){
@@ -2567,12 +2574,12 @@ function ticketRow(t){
         ${b("finished","✓","Finished")}
       </div></div>`;
   }
-  // ----- store-access per-row actions (coach / manager / director) -----
+  // ----- store-access per-row actions (DM / manager / director) -----
   // Quick access to "Mark in progress" and "Close ticket" right from the list,
   // without opening each ticket. No finish button here (tech/overwatch only).
   if(["coach","manager","director"].includes(SESSION.role) && t.status!=="closed"){
     const canProgress = t.status!=="in_progress" && t.status!=="finished";
-    // Coach/director only: one-tap dispatch of an unassigned job to the store's tech.
+    // DM/director only: one-tap dispatch of an unassigned job to the store's tech.
     let reqBtn="";
     if(SESSION.role==="director"){
       // DOs route to their own in-house techs, or back to the pool. Third-party
@@ -2641,7 +2648,7 @@ function contactBtns(t,who){
   }
   if(who.email){
     const replyTo=SESSION.email;
-    // To: vendor/tech + the store's director + area coach, so everyone
+    // To: vendor/tech + the store's director + district manager, so everyone
     // responsible is on the thread from the first email (deduped).
     const dir=storeDirector(t.storeId), coach=storeCoach(t.storeId);
     const to=[...new Set([who.email,dir&&dir.email,coach&&coach.email]
@@ -2927,7 +2934,7 @@ async function submitTicket(){
       const m=shortId.match(/-(\d+)$/);
       shortId=shortId.replace(/-\d+$/,"-"+String(parseInt(m[1],10)+1).padStart(4,"0"));
     }
-    // NOTE: ticket stores ONLY storeId as its anchor. No coach/director/tech frozen on it.
+    // NOTE: ticket stores ONLY storeId as its anchor. No DM/director/tech frozen on it.
     const ticket={
       shortId, shareToken:newShareToken(), storeId:sid,
       category:cat, subcategory:sub, priority:$("cPri").value, description:desc, photos:urls,
@@ -2947,14 +2954,14 @@ async function submitTicket(){
     if(SESSION.role==="manager")managerScreen="list";
     if(SESSION.role==="coach"||SESSION.role==="director")coachScreen=sid;   // drop them onto the store they just filed for
     openGroups[sid]=true;render();
-    // Area coach: offer to dispatch straight to the store's in-house tech.
+    // District manager: offer to dispatch straight to the store's in-house tech.
     if((SESSION.role==="coach"||SESSION.role==="director")&&!mine) askDispatchToTech(id,sid);
     // Manager filing something urgent: a ticket alone doesn't wake anyone up.
     if(SESSION.role==="manager"&&(ticket.priority==="urgent"||ticket.priority==="emergency")) promptContactDM(id);
   }catch(e){toast(e.message||"Could not create ticket","err");btn.disabled=false;btn.textContent="Create ticket"}
 }
 
-/* ---- coach post-create prompt: request the store's tech? ----
+/* ---- district manager post-create prompt: request the store's tech? ----
    Yes → the job goes straight to Dispatched with that tech on it (one patch, so
    the person + status move together per the integrity rule). No → it stays
    Unassigned for overwatch to route. Skipped if the store has no tech. */
@@ -3127,7 +3134,7 @@ async function _doDispatchToStoreTech(id,techId){
   const btn=$("reqTechBtn");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>'}
   if(await patchTicket(id,
       {assignedTechId:techId,assignedVendorId:null,status:"dispatched",dispatchedAt:now()},
-      {action:"status",toStatus:"dispatched",note:"Coach requested "+tech.name})){
+      {action:"status",toStatus:"dispatched",note:"District Manager requested "+tech.name})){
     toast("Dispatched to "+tech.name);closeModal();render();
   }else if(btn){btn.disabled=false;btn.textContent="Yes, request tech"}
 }
@@ -3179,22 +3186,8 @@ function newShareToken(){
   const a=new Uint8Array(15);crypto.getRandomValues(a);
   return btoa(String.fromCharCode(...a)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 }
-function guestUrl(id){return TICKETS[id]&&TICKETS[id].shareToken?ticketUrl(id):""}
-async function createGuestLink(id){ // legacy tickets without a token yet
-  if(await patchTicket(id,{shareToken:newShareToken()},null)){await copyGuestLink(id);openTicket(id)}
-}
-/* Rotate the token: every link sent out so far stops working, new links carry
-   the new one. This is the "stop sharing" of a world where every ticket
-   always has a link. */
-async function resetGuestLink(id){
-  if(!confirm("Reset this ticket's link? Anyone holding the old link (including past emails) will no longer be able to open it."))return;
-  if(await patchTicket(id,{shareToken:newShareToken()},{action:"share_reset"})){toast("Link reset — copy the new one");openTicket(id)}
-}
-async function copyGuestLink(id){
-  const url=guestUrl(id);if(!url){toast("No vendor link on this ticket","err");return}
-  try{await navigator.clipboard.writeText(url);toast("Vendor link copied — anyone with it can view this ticket")}
-  catch(e){window.prompt("Copy this link:",url)}
-}
+/* One link per ticket, one way to get it: the 🔗 Link button in the ticket
+   header (or the URL in the address bar, which is the same thing). */
 
 function guestIdentity(){try{return JSON.parse(localStorage.getItem(GUEST_KEY)||"null")}catch(e){return null}}
 function saveGuestIdentity(g){try{localStorage.setItem(GUEST_KEY,JSON.stringify(g))}catch(e){}}
@@ -3321,16 +3314,40 @@ function setTicketHash(id){try{history.replaceState(null,"",ticketPath(id))}catc
 function clearTicketHash(){
   if(/^#t\//.test(location.hash)){try{history.replaceState(null,"",location.pathname+location.search)}catch(e){}}
 }
+/* Clipboard write that also works where the async API is unavailable
+   (older iOS Safari, any non-HTTPS origin): fall back to a hidden textarea. */
+async function writeClipboard(text){
+  try{
+    if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return true}
+  }catch(e){}
+  try{
+    const ta=document.createElement("textarea");
+    ta.value=text;ta.setAttribute("readonly","");
+    ta.style.cssText="position:fixed;left:-9999px;top:0";
+    document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,ta.value.length);
+    const ok=document.execCommand("copy");document.body.removeChild(ta);
+    return ok;
+  }catch(e){return false}
+}
+/* Look the button up fresh each time — the sheet may have been re-rendered
+   between the click and the clipboard resolving. */
+function flashCopied(){
+  const b=$("lnkBtn");if(!b)return;
+  b.classList.remove("btn-copied");void b.offsetWidth;   // restart the blink
+  b.classList.add("btn-copied");b.innerHTML="✓ Copied!";
+  clearTimeout(b._cpT);
+  b._cpT=setTimeout(()=>{const n=$("lnkBtn");if(n){n.classList.remove("btn-copied");n.innerHTML="🔗 Link"}},2400);
+}
 async function copyTicketLink(id){
   // Older tickets predate link tokens — mint one first so the copied link
   // also works for someone who isn't signed in.
   if(SESSION&&TICKETS[id]&&!TICKETS[id].shareToken){
     if(!(await patchTicket(id,{shareToken:newShareToken()},null)))return;
-    openTicket(id); // re-draw the sheet so the Share link row reflects the new token
+    openTicket(id); // re-draw the sheet against the ticket that now has a token
   }
   const url=ticketUrl(id);
-  try{await navigator.clipboard.writeText(url);toast("Link copied")}
-  catch(e){window.prompt("Copy this link:",url)}
+  if(await writeClipboard(url)){flashCopied();toast("✓ Link copied — paste it anywhere","ok big")}
+  else window.prompt("Copy this link:",url);
 }
 /* Resolve a #t/<shortId or id> hash to a ticket the signed-in person is allowed
    to see, then open it. Closed tickets aren't in the first payload for
@@ -3371,7 +3388,7 @@ function openTicket(id){
     <div class="sheet-head">
       <h2>#${esc(t.shortId||id.slice(0,6).toUpperCase())}</h2>
       <span class="sbadge" style="color:${st.color};background:${st.color}1a"><span class="dot"></span>${st.label}</span>
-      <button type="button" class="btn btn-ghost btn-sm" title="Copy a link to this ticket" onclick="copyTicketLink('${id}')">🔗 Link</button>
+      <button type="button" id="lnkBtn" class="btn btn-ghost btn-sm" title="Copy a link to this ticket" onclick="copyTicketLink('${id}')">🔗 Link</button>
       <button class="x-btn" onclick="closeModal()">✕</button>
     </div>
     <div class="sheet-body">
@@ -3388,14 +3405,11 @@ function openTicket(id){
       <div class="detail-row"><span class="k">Priority</span><span class="v">${PRIORITIES[t.priority]||"Normal"}</span></div>
       <div class="detail-row"><span class="k">Assigned</span><span class="v">${assignee?esc(assignee):"<span style='color:var(--ink-dim)'>Unassigned</span>"}</span></div>
       <div class="detail-row"><span class="k">Director</span><span class="v">${dir?esc(dir.name):"—"}</span></div>
-      <div class="detail-row"><span class="k">Area coach</span><span class="v">${coach?esc(coach.name):"—"}</span></div>
+      <div class="detail-row"><span class="k">District Manager</span><span class="v">${coach?esc(coach.name):"—"}</span></div>
       <div class="detail-row"><span class="k">Reported by</span><span class="v">${esc(t.createdByName||t.createdBy||"—")}</span></div>
       <div class="detail-row"><span class="k">Opened</span><span class="v">${fmtDate(t.createdAt)}</span></div>
       ${costDetail(id)}
       ${t.waitingReason?`<div class="detail-row"><span class="k">Waiting on</span><span class="v">${esc(t.waitingReason)}</span></div>`:""}
-      ${hasStoreAccess()?`<div class="detail-row"><span class="k">Share link</span><span class="v">${t.shareToken
-        ?`<button type="button" class="btn btn-ghost btn-sm" onclick="copyGuestLink('${id}')">Copy link</button> <button type="button" class="btn btn-ghost btn-sm" onclick="resetGuestLink('${id}')">Reset link</button>`
-        :`<button type="button" class="btn btn-ghost btn-sm" onclick="createGuestLink('${id}')">Create link</button>`}</span></div>`:""}
       ${ticketControls(t)}
       <div class="section-label">Comments<span class="ln"></span></div>
       <div class="comments" id="commentList">${renderComments(t)}</div>
@@ -3492,9 +3506,9 @@ async function addComment(id){
 /* ---- who can do what (new lifecycle) ----
    unassigned -> (admin) assign to vendor=assigned, or to in-house tech=dispatched
    waiting     -> rmtech or overwatch
-   in_progress -> tech clock-in, or anyone with store access (mgr/coach/dir/admin)
+   in_progress -> tech clock-in, or anyone with store access (mgr/DM/dir/admin)
    finished    -> any of those, or tech clock-out
-   closed      -> mgr/coach/dir/admin (vanishes from all views except overwatch)
+   closed      -> mgr/DM/dir/admin (vanishes from all views except overwatch)
 */
 function hasStoreAccess(){return ["manager","coach","director","admin"].includes(SESSION.role)}
 function ticketControls(t){
@@ -3535,7 +3549,7 @@ function ticketControls(t){
         ${IS_MOBILE?"✉ Text":"@ Email"} my ${esc(label)} about this</button>`;
     }
   }
-  // STORE-ACCESS people (manager / coach / director): mark in progress + close.
+  // STORE-ACCESS people (manager / DM / director): mark in progress + close.
   // Mark FINISHED is intentionally NOT offered here — finishing is a tech /
   // overwatch action only. Closing is available to all store-access roles.
   if(hasStoreAccess()){
@@ -3559,7 +3573,7 @@ function ticketControls(t){
       h+=`<button class="btn btn-ghost btn-block" style="margin-top:9px" onclick="requestThirdParty('${t._id}')">🏢 Leave unassigned — needs a third-party</button>
         <div style="font-size:11px;color:var(--ink-dim);margin:5px 0 4px">Overwatch selects and dispatches the vendor.</div>`;
         }else if(role==="coach"){
-      // DMs (Area Coaches): request their own in-house tech, or leave it in the
+      // DMs: request their own in-house tech, or leave it in the
       // pool for Overwatch. They never see the vendor roster.
       const elig=eligibleTechsFor(t);
       const assignedNow=t.assignedTechId||t.assignedVendorId;
@@ -3581,7 +3595,7 @@ function ticketControls(t){
       h+=`<button class="btn btn-ghost btn-block" onclick="setStatus('${t._id}','in_progress')">▶ Mark in progress</button>`;
     h+=`<button class="btn btn-danger btn-block" onclick="confirmClose('${t._id}')">✕ Mark closed</button>`;
     h+=`</div><div style="font-size:11px;color:var(--ink-dim);margin-top:8px">Closing removes the ticket from all views except Overwatch.</div>`;
-    // Overwatch, Directors and Area Coaches can correct a ticket's details.
+    // Overwatch, Directors and District Managers can correct a ticket's details.
     if(canEditContent())
       h+=`<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="openEdit('${t._id}')">✎ ${role==="director"?"Edit all details":"Edit details &amp; urgency"}</button>`;
     return h;
@@ -3863,7 +3877,7 @@ function openWaiting(id){
       </div>
       <div class="field" style="margin-top:16px"><label class="label">Add a comment</label>
         <textarea class="input" id="wNote" rows="3" placeholder="e.g. part ordered from supplier, ETA Friday"></textarea>
-        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Posts to the ticket so the store and your coach can see it.</div>
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Posts to the ticket so the store and your District Manager can see it.</div>
       </div>
     </div>
     <div class="sheet-foot"><button class="btn btn-ghost" style="flex:1" onclick="openTicket('${id}')">Cancel</button>
@@ -5134,7 +5148,7 @@ async function invUpload(input){
     await invSave(sid,key,{photos:existing.concat(urls),na:false,rejectNote:"",rejectBy:"",rejectAt:0});
   }catch(e){toast(e.message||"Photo upload failed","err")}
 }
-/* Remove one of an item's photos. Anyone who can open this sheet (DM/coach,
+/* Remove one of an item's photos. Anyone who can open this sheet (DM,
    Director, Overwatch) can delete. Extras go instantly; removing the LAST
    photo un-completes the item and drops the count, so that one asks first. */
 function invRemovePhoto(key,idx){
