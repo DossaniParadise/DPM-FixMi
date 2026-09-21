@@ -991,7 +991,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.30";
+const APP_VERSION = "6.31";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1502,7 +1502,7 @@ async function refresh(){
    numbers than overwatch). Fix: the newest client publishes its version to
    admins/appMeta; every client compares on load + every poll, and a stale
    client force-reloads itself with a cache-busting URL. */
-let _versionPublished=false;
+let _versionPublished=false, _reloadArmed=false;
 function cmpVer(a,b){ // 1 if a>b, -1 if a<b, 0 equal
   const pa=String(a||"0").split(".").map(Number), pb=String(b||"0").split(".").map(Number);
   for(let i=0;i<Math.max(pa.length,pb.length);i++){const x=pa[i]||0,y=pb[i]||0;if(x!==y)return x>y?1:-1;}
@@ -1517,13 +1517,22 @@ function checkAppVersion(){
       apiWrite("admins/appMeta",{version:APP_VERSION,updatedAt:now()}).catch(()=>{_versionPublished=false;});
     }
   }else if(cmpVer(server,APP_VERSION)>0){
-    // A newer build exists — pull it. Guard against reload loops: only try once
-    // per server version per tab.
+    // A newer build exists — pull it. Two guards against reload loops: a
+    // per-tab marker, plus an in-memory flag in case sessionStorage is
+    // unavailable (private windows with site data blocked) — without the
+    // second one a failed write here means reloading on every poll.
+    if(_reloadArmed)return;
     let done=null;try{done=sessionStorage.getItem("reloadedFor");}catch(e){}
     if(done!==server){
+      _reloadArmed=true;
       try{sessionStorage.setItem("reloadedFor",server);}catch(e){}
       toast("Updating app to v"+server+"…");
-      setTimeout(()=>{location.replace(location.pathname+"?v="+encodeURIComponent(server));},900);
+      // KEEP THE HASH. It carries the ticket someone followed a link to; dropping
+      // it landed guests (and deep-linked staff) on the sign-in screen instead.
+      setTimeout(()=>{
+        const q=new URLSearchParams(location.search); q.set("v",server);
+        location.replace(location.pathname+"?"+q.toString()+location.hash);
+      },900);
     }
   }
 }
@@ -2051,7 +2060,11 @@ function enterApp(){
   refreshPaymiCount();
   if(!window.__paymiTimer)window.__paymiTimer=setInterval(refreshPaymiCount,5*60*1000);
 }
-function logout(){SESSION=null;REAL_SESSION=null;clearSession();stopPoll();location.reload()}
+function logout(){SESSION=null;REAL_SESSION=null;clearSession();stopPoll();
+  // Drop the ticket hash first, or the reload would re-enter the ticket as a guest.
+  try{history.replaceState(null,"",appBaseUrl())}catch(e){}
+  location.reload();
+}
 /* ---- session persistence (stay logged in across refresh) ----
    Stores email + role password locally and silently re-resolves against the
    live master on load. We persist the password because identity is verified
@@ -3309,7 +3322,14 @@ function ticketPath(id){
   const t=TICKETS[id]||{};
   return "#t/"+encodeURIComponent(t.shortId||id)+(t.shareToken?"/"+t.shareToken:"");
 }
-function ticketUrl(id){return location.origin+location.pathname+location.search+ticketPath(id)}
+/* This app's URL without the internal ?v= cache-buster the self-updater adds —
+   so a copied link never pins someone to an old build. */
+function appBaseUrl(){
+  let qs="";
+  try{const q=new URLSearchParams(location.search);q.delete("v");qs=q.toString()}catch(e){}
+  return location.origin+location.pathname+(qs?"?"+qs:"");
+}
+function ticketUrl(id){return appBaseUrl()+ticketPath(id)}
 function setTicketHash(id){try{history.replaceState(null,"",ticketPath(id))}catch(e){}}
 function clearTicketHash(){
   if(/^#t\//.test(location.hash)){try{history.replaceState(null,"",location.pathname+location.search)}catch(e){}}
