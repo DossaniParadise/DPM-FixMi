@@ -985,7 +985,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "6.28";
+const APP_VERSION = "6.29";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2898,7 +2898,7 @@ async function submitTicket(){
         while(taken.has(shortId)&&guard++<50){const m=shortId.match(/-(\d+)$/);shortId=shortId.replace(/-\d+$/,"-"+String(parseInt(m[1],10)+1).padStart(4,"0"));}
         taken.add(shortId);
         const id=uid();
-        const ticket={shortId,storeId:tsid,category:tcat,subcategory:tsub,priority:$("cPri").value,description:desc,photos:urls,
+        const ticket={shortId,shareToken:newShareToken(),storeId:tsid,category:tcat,subcategory:tsub,priority:$("cPri").value,description:desc,photos:urls,
           status:(mine?"dispatched":"unassigned"),assignedVendorId:null,assignedTechId:(mine?SESSION.refId:null),
           ...(mine?{dispatchedAt:now()}:{}),
           createdBy:SESSION.email,createdByRole:SESSION.role,createdByName:SESSION.name,
@@ -2929,7 +2929,7 @@ async function submitTicket(){
     }
     // NOTE: ticket stores ONLY storeId as its anchor. No coach/director/tech frozen on it.
     const ticket={
-      shortId, storeId:sid,
+      shortId, shareToken:newShareToken(), storeId:sid,
       category:cat, subcategory:sub, priority:$("cPri").value, description:desc, photos:urls,
       status:(mine?"dispatched":"unassigned"), assignedVendorId:null, assignedTechId:(mine?SESSION.refId:null),
       ...(mine?{dispatchedAt:now()}:{}),
@@ -3171,36 +3171,54 @@ function closePhoto(){const o=$("photoOverlay");if(o){o.classList.remove("on");s
    asked again). Guest comments carry role:"guest" and no email. */
 const GUEST_KEY="dpm_guest_identity";
 let GUEST_ID=null, _guestTimer=null;
-function guestToken(){const m=location.hash.match(/^#g\/([A-Za-z0-9_-]{12,})$/);return m?m[1]:null}
+function guestToken(){
+  const m=location.hash.match(/^#g\/([A-Za-z0-9_-]{12,})$/)||location.hash.match(/^#t\/[^\/]+\/([A-Za-z0-9_-]{12,})$/);
+  return m?m[1]:null;
+}
 function newShareToken(){
   const a=new Uint8Array(15);crypto.getRandomValues(a);
   return btoa(String.fromCharCode(...a)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 }
-function guestUrl(id){const t=TICKETS[id]||{};return t.shareToken?location.origin+location.pathname+location.search+"#g/"+t.shareToken:""}
-async function createGuestLink(id){
-  const token=newShareToken();
-  if(await patchTicket(id,{shareToken:token},{action:"share_on"})){await copyGuestLink(id);openTicket(id)}
+function guestUrl(id){return TICKETS[id]&&TICKETS[id].shareToken?ticketUrl(id):""}
+async function createGuestLink(id){ // legacy tickets without a token yet
+  if(await patchTicket(id,{shareToken:newShareToken()},null)){await copyGuestLink(id);openTicket(id)}
+}
+/* Rotate the token: every link sent out so far stops working, new links carry
+   the new one. This is the "stop sharing" of a world where every ticket
+   always has a link. */
+async function resetGuestLink(id){
+  if(!confirm("Reset this ticket's link? Anyone holding the old link (including past emails) will no longer be able to open it."))return;
+  if(await patchTicket(id,{shareToken:newShareToken()},{action:"share_reset"})){toast("Link reset — copy the new one");openTicket(id)}
 }
 async function copyGuestLink(id){
   const url=guestUrl(id);if(!url){toast("No vendor link on this ticket","err");return}
   try{await navigator.clipboard.writeText(url);toast("Vendor link copied — anyone with it can view this ticket")}
   catch(e){window.prompt("Copy this link:",url)}
 }
-async function revokeGuestLink(id){
-  if(!confirm("Stop sharing this ticket? The vendor link will stop working."))return;
-  if(await patchTicket(id,{shareToken:null},{action:"share_off"}))openTicket(id);
-}
+
 function guestIdentity(){try{return JSON.parse(localStorage.getItem(GUEST_KEY)||"null")}catch(e){return null}}
 function saveGuestIdentity(g){try{localStorage.setItem(GUEST_KEY,JSON.stringify(g))}catch(e){}}
-function guestSignIn(){try{history.replaceState(null,"",location.pathname+location.search)}catch(e){}location.reload()}
+function guestSignIn(){
+  if(_guestTimer){clearInterval(_guestTimer);_guestTimer=null}
+  GUEST_ID=null;$("guest").classList.add("hidden");$("loginStage").classList.remove("hidden");
+  setTimeout(()=>{const e=$("emailIn");if(e)e.focus()},50);
+}
 /* Boot path: a #g/ link skips the login screen entirely. */
 async function tryGuestView(){
   const token=guestToken();if(!token)return false;
   showLoader(true);
   try{await refresh()}catch(e){showLoader(false);toast("Couldn't load the ticket — check your connection and reload","err");return false}
   showLoader(false);
-  const id=Object.keys(TICKETS).find(k=>TICKETS[k].shareToken===token);
-  if(!id){toast("This link is no longer active","err");return false}
+  let id=Object.keys(TICKETS).find(k=>TICKETS[k].shareToken===token);
+  if(!id){ // closed tickets aren't in the live payload — check that set before giving up
+    try{
+      const r=await fetchWithTimeout(API_BASE_URL+"?closed=only",{cache:"no-store"},60000);
+      if(r.ok){const data=await r.json();const closed=data[TICKETS_NODE]||{};
+        id=Object.keys(closed).find(k=>closed[k].shareToken===token);
+        if(id){CLOSED_TICKETS[id]=closed[id];TICKETS[id]=closed[id];}}
+    }catch(e){}
+  }
+  if(!id){toast("This link isn't valid or is no longer active","err");return false}
   enterGuest(id);return true;
 }
 function enterGuest(id){
@@ -3294,18 +3312,22 @@ async function guestAddComment(){
    Hash routing works on GitHub Pages with no server config and survives login:
    the hash is still there when tryRestoreSession()/doLogin() reach enterApp(),
    which then opens the ticket. Email notifications link here. */
-function ticketUrl(id){
+function ticketPath(id){
   const t=TICKETS[id]||{};
-  return location.origin+location.pathname+location.search+"#t/"+encodeURIComponent(t.shortId||id);
+  return "#t/"+encodeURIComponent(t.shortId||id)+(t.shareToken?"/"+t.shareToken:"");
 }
-function setTicketHash(id){
-  const t=TICKETS[id]||{};
-  try{history.replaceState(null,"","#t/"+encodeURIComponent(t.shortId||id))}catch(e){}
-}
+function ticketUrl(id){return location.origin+location.pathname+location.search+ticketPath(id)}
+function setTicketHash(id){try{history.replaceState(null,"",ticketPath(id))}catch(e){}}
 function clearTicketHash(){
   if(/^#t\//.test(location.hash)){try{history.replaceState(null,"",location.pathname+location.search)}catch(e){}}
 }
 async function copyTicketLink(id){
+  // Older tickets predate link tokens — mint one first so the copied link
+  // also works for someone who isn't signed in.
+  if(SESSION&&TICKETS[id]&&!TICKETS[id].shareToken){
+    if(!(await patchTicket(id,{shareToken:newShareToken()},null)))return;
+    openTicket(id); // re-draw the sheet so the Share link row reflects the new token
+  }
   const url=ticketUrl(id);
   try{await navigator.clipboard.writeText(url);toast("Link copied")}
   catch(e){window.prompt("Copy this link:",url)}
@@ -3314,7 +3336,7 @@ async function copyTicketLink(id){
    to see, then open it. Closed tickets aren't in the first payload for
    admins/directors, so fall back to the closed fetch before giving up. */
 async function openTicketFromUrl(){
-  const m=location.hash.match(/^#t\/(.+)$/);
+  const m=location.hash.match(/^#t\/([^\/]+)(?:\/[^\/]*)?$/); // token after the number is ignored when signed in
   if(!m||!SESSION)return false;
   const key=decodeURIComponent(m[1]).trim().toUpperCase();
   const find=()=>Object.keys(TICKETS).find(k=>String(TICKETS[k].shortId||"").toUpperCase()===key||k.toUpperCase()===key);
@@ -3371,8 +3393,8 @@ function openTicket(id){
       <div class="detail-row"><span class="k">Opened</span><span class="v">${fmtDate(t.createdAt)}</span></div>
       ${costDetail(id)}
       ${t.waitingReason?`<div class="detail-row"><span class="k">Waiting on</span><span class="v">${esc(t.waitingReason)}</span></div>`:""}
-      ${hasStoreAccess()?`<div class="detail-row"><span class="k">Vendor link</span><span class="v">${t.shareToken
-        ?`<button type="button" class="btn btn-ghost btn-sm" onclick="copyGuestLink('${id}')">Copy link</button> <button type="button" class="btn btn-ghost btn-sm" onclick="revokeGuestLink('${id}')">Stop sharing</button>`
+      ${hasStoreAccess()?`<div class="detail-row"><span class="k">Share link</span><span class="v">${t.shareToken
+        ?`<button type="button" class="btn btn-ghost btn-sm" onclick="copyGuestLink('${id}')">Copy link</button> <button type="button" class="btn btn-ghost btn-sm" onclick="resetGuestLink('${id}')">Reset link</button>`
         :`<button type="button" class="btn btn-ghost btn-sm" onclick="createGuestLink('${id}')">Create link</button>`}</span></div>`:""}
       ${ticketControls(t)}
       <div class="section-label">Comments<span class="ln"></span></div>
@@ -3400,6 +3422,7 @@ function actionText(a){
   if(a.action==="edit")return"Ticket details edited";
   if(a.action==="share_on")return"Vendor link created";
   if(a.action==="share_off")return"Vendor link removed";
+  if(a.action==="share_reset")return"Ticket link reset";
   return a.action;
 }
 function renderComments(t){
@@ -3610,6 +3633,7 @@ async function patchTicket(id,patch,activityEntry){
   const activity=Array.isArray(t.activity)?t.activity.slice():[];
   if(activityEntry)activity.push({ts:now(),by:SESSION.name,role:SESSION.role,...activityEntry});
   const updated={...t,...patch,activity,updatedAt:now()};
+  if(!updated.shareToken)updated.shareToken=newShareToken(); // v6.29: every ticket carries a link token
   showLoader(true);
   try{
     await apiWrite(`${TICKETS_NODE}/${id}`,updated);
@@ -6696,7 +6720,9 @@ function toggleTags(){SHOW_REF_TAGS=!SHOW_REF_TAGS;applyTags();toast(SHOW_REF_TA
   ["emailIn","pwIn"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()}));
   window.addEventListener("resize",()=>{if(SESSION)applyTags()});
   window.addEventListener("hashchange",()=>{if(SESSION&&/^#t\//.test(location.hash))openTicketFromUrl()});
-  if(guestToken()) tryGuestView(); else tryRestoreSession(); // vendor link, or stay logged in across refresh
+  // Saved staff session wins (the ticket in the URL opens inside the app);
+  // otherwise a tokened link opens the view-only guest page; otherwise sign in.
+  tryRestoreSession().then(ok=>{if(!ok&&guestToken())tryGuestView()});
 })();
 </script>
 </body>
