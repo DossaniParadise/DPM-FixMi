@@ -992,11 +992,12 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.3";
+const APP_VERSION = "9.4";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
   admin:"Overwatch@76051", director:"DO@76051", coach:"DM@76051", tech:"Repair@76051",
+  support:"76051",
   // manager: no shared password any more — each store's is COMPUTED from FindMi
   // by storePassword(). Add a store with an email there and its login works.
 };
@@ -1024,6 +1025,25 @@ function checkStorePassword(rid,pw){
   return String(pw||"").trim().toUpperCase()===storePassword(rid).toUpperCase();
 }
 const ADMIN_EMAILS = ["itsupport@dossaniparadise.com","rahim@dossaniparadise.com"];
+/* ---- SUPPORT STAFF (v9.4) ---------------------------------------------------
+   Office/support people who need to see and file tickets for every store, but
+   who don't dispatch, change status, close, or edit anything.
+
+   The alignment master doesn't publish support staff yet — FindMi keeps them
+   somewhere this API doesn't expose — so the roster lives here as a fallback,
+   the same way ADMIN_EMAILS does. It is checked LAST: the moment the master
+   carries them (a supportStaff node, or an admins entry whose tier is
+   "support"), the data wins and this list can be emptied. */
+const SUPPORT_STAFF = {"karim@dossaniparadise.com":"Karim"};
+function supportRecord(lc){
+  const node=MASTER.supportStaff||MASTER.support||{};
+  const hit=Object.values(node).find(p=>p&&(p.email||"").toLowerCase()===lc);
+  if(hit)return hit;
+  const tiered=Object.values(MASTER.admins||{}).find(a=>a&&(a.email||"").toLowerCase()===lc&&String(a.tier||"").toLowerCase()==="support");
+  if(tiered)return tiered;
+  if(SUPPORT_STAFF[lc])return{email:lc,name:SUPPORT_STAFF[lc]};
+  return null;
+}
 const TICKETS_NODE = "maintenanceTickets";
 const VENDORS_NODE = "maintenanceVendors";
 
@@ -1201,8 +1221,8 @@ function vendorCatLabel(v){
 }
 const PRIORITIES = {normal:"Normal",urgent:"Urgent",emergency:"Emergency"};
 const WAITING_REASONS = ["Awaiting parts","Awaiting third-party tech","Awaiting approval","Awaiting access","Scheduled — future date","Other"];
-const ROLE_LABEL = {admin:"Overwatch",director:"Director",coach:"District Manager",manager:"Manager",tech:"Repair Tech",guest:"Vendor / guest",email:"via email"};
-const ROLE_PREFIX = {admin:"o",director:"d",coach:"a",tech:"r",manager:"m"};
+const ROLE_LABEL = {admin:"Overwatch",director:"Director",coach:"District Manager",manager:"Manager",tech:"Repair Tech",support:"Support",guest:"Vendor / guest",email:"via email"};
+const ROLE_PREFIX = {admin:"o",director:"d",coach:"a",tech:"r",manager:"m",support:"s"};
 
 /* ============================================================ STATE */
 let MASTER=null, SESSION=null;
@@ -1370,7 +1390,7 @@ let coachScreen="hub";   // "hub" (store tiles) or a storeId (drilled into one s
    setting (admins/viewDefaults) that Overwatch can change; these are the
    fallbacks. Tech deliberately defaults to LIST because their list is already
    sorted by priority then distance. */
-const DEFAULT_VIEW_BY_ROLE={admin:"map",tech:"list",director:"tiles",coach:"tiles",manager:"tiles"};
+const DEFAULT_VIEW_BY_ROLE={admin:"map",tech:"list",director:"tiles",coach:"tiles",manager:"tiles",support:"tiles"};
 let VIEW_DEFAULTS={...DEFAULT_VIEW_BY_ROLE};
 let owView=null;                 // resolved on entry from the role default
 function loadViewDefaults(){
@@ -1807,6 +1827,13 @@ async function doLogin(){
 function resolveSession(email,pw){
   const lc=email.toLowerCase(), me=(o,id)=>(o[id]?.email||"").toLowerCase()===lc;
   const admins=MASTER.admins||{};
+  // Support first: an admins row tiered "support" must not fall into the
+  // admin branch below and inherit Overwatch's powers.
+  const sup=supportRecord(lc);
+  if(sup){
+    if(pw!==ROLE_PASSWORDS.support)return{error:"That password doesn't match the support role."};
+    return{email:lc,role:"support",name:sup.name||"Support",scope:"all"};
+  }
   if(ADMIN_EMAILS.includes(lc)||Object.keys(admins).some(id=>me(admins,id))){
     if(pw!==ROLE_PASSWORDS.admin)return{error:"That password doesn't match the admin role."};
     const a=Object.values(admins).find(x=>(x.email||"").toLowerCase()===lc);
@@ -3639,6 +3666,8 @@ function ticketControls(t){
       h+=`<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="openEdit('${t._id}')">✎ ${role==="director"?"Edit all details":"Edit details &amp; urgency"}</button>`;
     return h;
   }
+  if(role==="support")
+    h+=`<div class="section-label">Updates<span class="ln"></span></div><div style="color:var(--ink-dim);font-size:13px">You can read this ticket and add comments. Dispatching, status changes and closing are handled by Overwatch and the store's team.</div>`;
   return h;
 }
 function statusGrid(t,targets){
