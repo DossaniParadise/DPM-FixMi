@@ -178,8 +178,8 @@ body.no-reftags .reftag{display:none}
 .tl-card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
 .rp-empty{color:var(--ink-dim);font-size:13px;padding:18px;text-align:center;background:var(--panel-2);border-radius:10px}
 .rp-head{font-weight:800;font-size:16px;margin-bottom:12px}
-.rp-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-.rp-stat{flex:1;min-width:64px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 8px;text-align:center}
+.rp-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px;margin-bottom:16px}
+.rp-stat{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 8px;text-align:center}
 .rp-stat .rp-n{font-family:var(--disp);font-weight:800;font-size:22px;color:var(--amber-deep)}
 .rp-stat .rp-l{font-size:10px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
 .rp-map-wrap{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel-2)}
@@ -197,6 +197,43 @@ body.no-reftags .reftag{display:none}
 .rp-act{font-weight:700;font-size:13.5px}
 .rp-store{font-size:12.5px;color:var(--ink-mid);margin-top:1px}
 .rp-note{font-size:12.5px;color:var(--ink-dim);margin-top:3px;font-style:italic}
+.rp-presets{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 12px}
+.rp-preset{border:1px solid var(--line);background:var(--panel-2);color:var(--ink-mid);border-radius:999px;padding:6px 13px;font-size:12.5px;font-weight:600;cursor:pointer}
+.rp-preset.on{background:var(--amber);border-color:var(--amber-deep);color:#fff}
+.rp-day{margin-top:14px}
+.rp-day-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 8px;background:var(--panel-2);border-radius:8px;font-weight:800;font-size:13px}
+.rp-day-m{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink-dim);text-align:right}
+.rp-click{cursor:pointer}
+.tr-week{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.tr-week-l{flex:1;text-align:center}
+.tr-week-t{font-weight:800;font-size:14.5px}
+.tr-week-s{font-size:11px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em}
+.tr-nav{width:38px;height:38px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);border-radius:9px;font-size:19px;line-height:1;cursor:pointer}
+.tr-nav.off{opacity:.35;cursor:default}
+.tr-today{border:1px solid var(--line);background:var(--panel-2);color:var(--ink-mid);border-radius:999px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer}
+.tr-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
+.tr-day{min-width:0;display:flex;flex-direction:column;align-items:center;gap:1px;padding:8px 2px 7px;border:1px solid var(--line);background:var(--panel-2);border-radius:10px;cursor:pointer;min-height:66px;justify-content:center}
+.tr-day .tr-dow{font-size:10px;font-weight:700;letter-spacing:.04em;color:var(--ink-dim);text-transform:uppercase}
+.tr-day .tr-num{font-family:var(--disp);font-weight:800;font-size:20px;line-height:1.1;color:var(--amber-deep)}
+.tr-day .tr-dom{font-size:10px;color:var(--ink-dim)}
+.tr-day.tr-none .tr-num{color:var(--ink-dim);opacity:.45}
+.tr-day.tr-future{opacity:.45}
+.tr-day.today{border-color:var(--amber);box-shadow:inset 0 0 0 1px var(--amber)}
+.tr-day.on{background:var(--amber);border-color:var(--amber-deep)}
+.tr-day.on .tr-dow,.tr-day.on .tr-num,.tr-day.on .tr-dom{color:#fff;opacity:1}
+.tr-hint{font-size:12px;color:var(--ink-dim);margin:8px 2px 16px;text-align:center}
+.tr-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.tr-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);background:var(--panel-2);border-radius:11px;cursor:pointer}
+.tr-item:hover{border-color:var(--amber)}
+.tr-i-main{flex:1;min-width:0}
+.tr-i-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tr-i-id{font-size:13px;font-weight:700}
+.tr-i-store{font-size:12.5px;color:var(--ink-mid);margin-top:2px}
+.tr-i-desc{font-size:12.5px;color:var(--ink);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr-i-did{font-family:var(--mono);font-size:11px;color:var(--ink-dim);margin-top:4px}
+.tr-i-go{color:var(--ink-dim);font-size:19px}
+.rp-gps{border:0;background:transparent;font-size:15px;cursor:pointer;padding:2px 4px;align-self:center;opacity:.6}
+.rp-gps:hover{opacity:1}
 .tl-name{font-weight:700;font-size:15px;margin-bottom:9px}
 .tl-none{color:var(--ink-dim);font-size:13px}
 .tl-last{display:flex;align-items:center;justify-content:space-between;gap:10px;text-decoration:none;color:inherit;
@@ -455,6 +492,13 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .ow-tab{border:none;background:none;color:var(--ink-mid);font-size:13px;font-weight:600;padding:8px 16px;border-radius:7px;cursor:pointer;min-height:38px}
 .ow-tab:hover{color:var(--ink)}
 .ow-tab.on{background:var(--amber);color:#fff}
+.set-tabs{display:flex;gap:6px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:4px;margin-bottom:18px;position:sticky;top:0;z-index:1}
+.set-tab{flex:1;border:none;background:none;color:var(--ink-mid);font-size:13.5px;font-weight:700;padding:9px 10px;border-radius:7px;cursor:pointer;min-height:38px}
+.set-tab:hover{color:var(--ink)}
+.set-tab.on{background:var(--amber);color:#fff}
+.set-hint{color:var(--ink-dim);font-size:13px;margin-top:0}
+.set-kv{display:flex;justify-content:space-between;gap:12px;padding:8px 2px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.set-kv span:first-child{color:var(--ink-mid)}
 .ow-tip{position:absolute;z-index:5;pointer-events:none;opacity:0;transition:opacity .12s;
   background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 11px;
   box-shadow:0 6px 20px rgba(20,30,45,.16);max-width:230px}
@@ -951,7 +995,7 @@ body.simulating .wrap{padding-bottom:40px}
     </div>
     <button class="icon-btn" id="refreshBtn" title="Refresh now" onclick="manualRefresh()">⟳</button>
     <button class="icon-btn hidden" id="viewAsBtn" title="View as another person" onclick="openViewAs()">👁</button>
-    <button class="icon-btn hidden" id="techReportBtn" title="Tech day report" onclick="openTechReport()">📊</button>
+    <button class="icon-btn hidden" id="techReportBtn" title="Tech report" onclick="openTechReport()">📊</button>
     <button class="icon-btn hidden" id="closedRptBtn" title="Closed ticket report" onclick="openClosedReport()">📈</button>
     <button class="icon-btn hidden cost-btn" id="costBtn" title="Job costs — match PayMi invoices to jobs" onclick="openJobCosts()">$</button>
     <button class="icon-btn hidden" id="vendorTopBtn" title="Techs &amp; vendors" onclick="openVendors()">🏢</button>
@@ -992,7 +1036,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.4";
+const APP_VERSION = "9.6";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2779,6 +2823,7 @@ function modal(html){
   activeModal=o;
 }
 function closeModal(){
+  _modalReturn=null;
   clearTicketHash();
   if(DM_PROMPT_TID){const t=DM_PROMPT_TID;DM_PROMPT_TID=null;dmLog(t,"dismissed the reminder without confirming");}
   const o=$("modalOverlay");if(o){o.classList.remove("on");o._wipeTimer=setTimeout(()=>{if(o){o.innerHTML="";o._wipeTimer=null;}},220)}activeModal=null}
@@ -3431,7 +3476,9 @@ async function openTicketFromUrl(){
   openTicket(id);
   return true;
 }
-function openTicket(id){
+let _modalReturn=null;   // "techreport" when a ticket was opened from the report
+function openTicket(id,ret){
+  if(ret!==undefined)_modalReturn=ret;   // sticky: survives the re-renders after a comment
   cmtPhotos=[];               // fresh comment-photo draft per ticket sheet
   const t={_id:id,...TICKETS[id]};
   setTicketHash(id);
@@ -3451,6 +3498,7 @@ function openTicket(id){
       ${a.note?`<div class="tl-note">"${esc(a.note)}"</div>`:""}</div></div>`).join("");
   modal(`
     <div class="sheet-head">
+      ${_modalReturn==="techreport"?`<button class="x-btn" title="Back to the tech report" onclick="backToTechReport()">‹</button>`:""}
       <h2>#${esc(t.shortId||id.slice(0,6).toUpperCase())}</h2>
       <span class="sbadge" style="color:${st.color};background:${st.color}1a"><span class="dot"></span>${st.label}</span>
       <button type="button" id="lnkBtn" class="btn btn-ghost btn-sm" title="Copy a link to this ticket" onclick="copyTicketLink('${id}')">🔗 Link</button>
@@ -4093,7 +4141,7 @@ function openTechLocations(){
    plus an interactive map of where they were: job-site store locations and the
    day's location pings, connected in time order so you can see the route and the
    distances between stops. */
-let _reportTech="", _reportDate="";
+let _reportTech="", _reportWeek="", _reportDay="";   // _reportWeek = the Sunday; _reportDay = "" for the whole week
 function ymdLocal(ts){const d=new Date(ts);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
 function todayYmd(){return ymdLocal(now());}
 function dayBounds(ymd){
@@ -4103,31 +4151,53 @@ function dayBounds(ymd){
   return [start,end];
 }
 function fmtClock(ts){return new Date(ts).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});}
+/* ymd shifted by N days (negative = earlier), staying in local time. */
+function ymdShift(ymd,days){
+  const [y,m,d]=ymd.split("-").map(Number);
+  return ymdLocal(new Date(y,m-1,d+days,12,0,0,0).getTime());
+}
+function fmtDayLabel(ymd){
+  return new Date(dayBounds(ymd)[0]).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+}
+/* The Sunday that starts the week containing this date. */
+function weekStartYmd(ymd){
+  const [y,m,d]=ymd.split("-").map(Number);
+  const dt=new Date(y,m-1,d,12,0,0,0);
+  return ymdLocal(new Date(y,m-1,d-dt.getDay(),12,0,0,0).getTime());
+}
+function weekDays(sundayYmd){return [0,1,2,3,4,5,6].map(i=>ymdShift(sundayYmd,i));}
 
 function openTechReport(){
   const techs=Object.entries(MASTER.repairTechnicians||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
-  if(!_reportDate)_reportDate=todayYmd();
+  if(!_reportWeek)_reportWeek=weekStartYmd(todayYmd());   // this Sunday–Saturday
   const techOpts=`<option value="">— Choose a tech —</option>`+techs.map(([id,t])=>`<option value="${id}"${_reportTech===id?" selected":""}>${esc(t.name)}</option>`).join("");
-  modal(`<div class="sheet-head"><h2>Tech day report</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+  modal(`<div class="sheet-head"><h2>Tech report</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
     <div class="sheet-body">
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <div class="field" style="flex:2;min-width:150px"><label class="label">Technician</label>
-          <select class="input" id="rTech" onchange="_reportTech=this.value">${techOpts}</select></div>
-        <div class="field" style="flex:1;min-width:130px"><label class="label">Date</label>
-          <input class="input" id="rDate" type="date" value="${_reportDate}" max="${todayYmd()}" onchange="_reportDate=this.value"></div>
-      </div>
-      <button class="btn btn-primary btn-block" style="margin-top:6px" onclick="runTechReport()">Run report</button>
-      <div id="reportOut" style="margin-top:18px"></div>
+      <div class="field"><label class="label">Technician</label>
+        <select class="input" id="rTech" onchange="_reportTech=this.value;_reportDay='';runTechReport()">${techOpts}</select></div>
+      <div id="reportOut" style="margin-top:16px"></div>
     </div>`);
+  if(_reportTech)runTechReport();
 }
+/* Week navigation. Never past the week containing today. */
+function shiftReportWeek(n){
+  const next=ymdShift(_reportWeek,n*7);
+  if(next>weekStartYmd(todayYmd()))return;
+  _reportWeek=next;_reportDay="";runTechReport();
+}
+function thisReportWeek(){_reportWeek=weekStartYmd(todayYmd());_reportDay="";runTechReport();}
+/* Click a day to narrow the list to it; click it again for the whole week. */
+function pickReportDay(ymd){_reportDay=(_reportDay===ymd)?"":ymd;runTechReport();}
+/* Re-open the report after drilling into a ticket from its list. */
+function backToTechReport(){_modalReturn=null;clearTicketHash();openTechReport();}
 
-// Gather a tech's actions for a day. Actions are matched by name+tech role,
-// since ticket logs stamp the actor name and role (not an id).
-function gatherTechDay(techId,ymd){
+// Gather a tech's actions across a date range. Actions are matched by
+// name+tech role, since ticket logs stamp the actor name and role (not an id).
+function gatherTechRange(techId,fromYmd,toYmd){
   const tech=(MASTER.repairTechnicians||{})[techId];
   if(!tech)return null;
   const name=tech.name;
-  const [start,end]=dayBounds(ymd);
+  const start=dayBounds(fromYmd)[0], end=dayBounds(toYmd)[1];
   const events=[];
   Object.keys(TICKETS).forEach(tid=>{
     const t=TICKETS[tid];
@@ -4153,64 +4223,148 @@ function actionLabel(e){
   return map[e.action]||e.action||"Action";
 }
 
-function runTechReport(){
-  const techId=$("rTech").value, ymd=$("rDate").value;
+async function runTechReport(){
+  const techId=($("rTech")||{}).value||_reportTech;
   const out=$("reportOut");
+  if(!out)return;
   if(!techId){out.innerHTML=`<div class="rp-empty">Choose a technician above.</div>`;return}
-  _reportTech=techId;_reportDate=ymd;
-  const data=gatherTechDay(techId,ymd);
+  _reportTech=techId;
+  if(!_reportWeek)_reportWeek=weekStartYmd(todayYmd());
+  const days=weekDays(_reportWeek), from=days[0], to=days[6];
+
+  // Finished work usually ends up closed, and closed tickets aren't in the
+  // default payload — pull them in or the week would under-report.
+  out.innerHTML=`<div class="rp-empty"><span class="inline-spin"></span> Loading…</div>`;
+  await ensureClosedLoaded();
+  const data=gatherTechRange(techId,from,to);
   if(!data){out.innerHTML=`<div class="rp-empty">Tech not found.</div>`;return}
   const {name,events,pings}=data;
-  const dateLabel=new Date(dayBounds(ymd)[0]).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
 
-  // Build map stops: unique job-site stores touched (in first-touch time order)
-  // plus location pings. Distance is summed along the store route in time order.
-  const storeSeq=[];const seen={};
-  events.forEach(e=>{const c=storeCoords(e.storeId);if(c&&!seen[e.storeId]){seen[e.storeId]=true;storeSeq.push({storeId:e.storeId,...c,firstTs:e.ts});}});
-  let drove=0;
-  for(let i=1;i<storeSeq.length;i++)drove+=distanceMiles(storeSeq[i-1],storeSeq[i])||0;
+  /* Per day: which TICKETS were progressed (a ticket counts once however many
+     times it was touched), the stores visited in time order, and the miles
+     between them. Mileage is per-day on purpose — summing one route across the
+     week would join Saturday's last stop to Sunday's first. */
+  const byDay={};
+  days.forEach(d=>byDay[d]={events:[],tickets:new Map(),seq:[],seen:{},miles:0});
+  events.forEach(e=>{
+    const d=byDay[ymdLocal(e.ts)];
+    if(!d)return;
+    d.events.push(e);
+    if(!d.tickets.has(e.ticketId))d.tickets.set(e.ticketId,[]);
+    d.tickets.get(e.ticketId).push(e);
+    const c=storeCoords(e.storeId);
+    if(c&&!d.seen[e.storeId]){d.seen[e.storeId]=true;d.seq.push({storeId:e.storeId,...c,firstTs:e.ts});}
+  });
+  days.forEach(d=>{const o=byDay[d];for(let i=1;i<o.seq.length;i++)o.miles+=distanceMiles(o.seq[i-1],o.seq[i])||0;});
 
-  const finishedN=events.filter(e=>e.action==="clockout").length;
-  const startedN=events.filter(e=>e.action==="clockin").length;
-  const commentN=events.filter(e=>e.kind==="comment").length;
+  const today=todayYmd(), thisWeek=_reportWeek===weekStartYmd(today);
+  const weekLabel=`${fmtDayLabel(from)} – ${fmtDayLabel(to)}, ${to.slice(0,4)}`;
+  const nav=`<div class="tr-week">
+      <button type="button" class="tr-nav" onclick="shiftReportWeek(-1)" title="Previous week">‹</button>
+      <div class="tr-week-l"><div class="tr-week-t">${esc(weekLabel)}</div><div class="tr-week-s">${thisWeek?"This week":"Week of "+esc(fmtDayLabel(from))}</div></div>
+      <button type="button" class="tr-nav${thisWeek?" off":""}" ${thisWeek?"disabled":`onclick="shiftReportWeek(1)"`} title="Next week">›</button>
+      ${thisWeek?"":`<button type="button" class="tr-today" onclick="thisReportWeek()">This week</button>`}
+    </div>`;
 
+  // Sunday → Saturday strip. The number is TICKETS progressed that day.
+  const strip=`<div class="tr-days">${days.map(d=>{
+      const o=byDay[d], n=o.tickets.size;
+      const cls=["tr-day"];
+      if(_reportDay===d)cls.push("on");
+      if(d===today)cls.push("today");
+      if(!n)cls.push("tr-none");
+      if(d>today)cls.push("tr-future");
+      return `<button type="button" class="${cls.join(" ")}" onclick="pickReportDay('${d}')" title="${esc(fmtDayLabel(d))} — ${n} ticket${n===1?"":"s"} progressed">
+        <span class="tr-dow">${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][days.indexOf(d)]}</span>
+        <span class="tr-num">${n}</span>
+        <span class="tr-dom">${Number(d.slice(8,10))}</span>
+      </button>`;}).join("")}</div>
+    <div class="tr-hint">${_reportDay
+      ? `Showing <b>${esc(fmtDayLabel(_reportDay))}</b> — tap the day again for the whole week.`
+      : `Tickets progressed each day. Tap a day to see just that day.`}</div>`;
+
+  // Scope everything below the strip to the selected day, or the whole week.
+  const scope=_reportDay?[_reportDay]:days;
+  const scopeEvents=scope.flatMap(d=>byDay[d].events);
+  const ticketIds=[...new Set(scopeEvents.map(e=>e.ticketId))];
+  const stops=[];const seenAll={};
+  scope.forEach(d=>byDay[d].seq.forEach(st=>{if(!seenAll[st.storeId]){seenAll[st.storeId]=true;stops.push(st)}}));
+  const miles=scope.reduce((n,d)=>n+byDay[d].miles,0);
+  const finishedN=scopeEvents.filter(e=>e.action==="clockout").length;
+  const startedN=scopeEvents.filter(e=>e.action==="clockin").length;
+  const activeDays=days.filter(d=>byDay[d].tickets.size).length;
+
+  const stat=(n,l)=>`<div class="rp-stat"><div class="rp-n">${n}</div><div class="rp-l">${l}</div></div>`;
   const summary=`<div class="rp-summary">
-    <div class="rp-stat"><div class="rp-n">${events.length}</div><div class="rp-l">actions</div></div>
-    <div class="rp-stat"><div class="rp-n">${finishedN}</div><div class="rp-l">finished</div></div>
-    <div class="rp-stat"><div class="rp-n">${startedN}</div><div class="rp-l">started</div></div>
-    <div class="rp-stat"><div class="rp-n">${storeSeq.length}</div><div class="rp-l">stores</div></div>
-    <div class="rp-stat"><div class="rp-n">~${drove<10?drove.toFixed(1):Math.round(drove)}</div><div class="rp-l">mi between stops</div></div>
+    ${stat(ticketIds.length,"tickets")}
+    ${stat(finishedN,"finished")}
+    ${stat(startedN,"started")}
+    ${stat(stops.length,"stores")}
+    ${_reportDay?"":stat(activeDays,activeDays===1?"day active":"days active")}
+    ${stat("~"+(miles<10?miles.toFixed(1):Math.round(miles)),"mi between stops")}
   </div>`;
 
-  const map=reportMap(storeSeq,pings);
+  const map=reportMap(stops,pings.filter(pg=>scope.includes(ymdLocal(pg.ts))),!!_reportDay);
 
-  const timeline = events.length
-    ? `<div class="rp-timeline">`+events.map(e=>{
-        const gps=storeGeoUrl(e.storeId);
-        return `<div class="rp-row" ${gps?`onclick="window.open('${escA(gps)}','_blank')" style="cursor:pointer"`:""}>
-          <div class="rp-time mono">${fmtClock(e.ts)}</div>
-          <div class="rp-body">
-            <div class="rp-act">${actionLabel(e)}</div>
-            <div class="rp-store">${esc(storeName(e.storeId))}</div>
-            ${e.kind==="comment"?`<div class="rp-note">"${esc(e.text)}"</div>`:(e.note?`<div class="rp-note">${esc(e.note)}</div>`:"")}
-          </div>
-        </div>`;}).join("")+`</div>`
-    : `<div class="rp-empty">No tracked actions by ${esc(name)} on this day.</div>`;
+  /* One row per TICKET (not per action) — what the tech did to it, in that
+     scope, summarised. Tap it to open the ticket itself. */
+  const ticketRows=(ids,dayKey)=>ids.map(tid=>{
+    const t=TICKETS[tid]||{};
+    const es=(dayKey?byDay[dayKey].tickets.get(tid):scopeEvents.filter(e=>e.ticketId===tid)).slice().sort((a,b)=>a.ts-b.ts);
+    const st=STATUSES[t.status]||{};
+    const did=es.map(e=>`${fmtClock(e.ts)} ${actionLabel(e)}`).join(" · ");
+    const note=es.filter(e=>e.kind==="comment"&&e.text).pop();
+    const gps=storeGeoUrl(t.storeId);
+    return `<div class="tr-item" onclick="openTicket('${tid}','techreport')" title="Open this ticket">
+      <div class="tr-i-main">
+        <div class="tr-i-top"><span class="mono tr-i-id">${esc(t.shortId||tid.slice(0,6).toUpperCase())}</span>
+          ${st.label?`<span class="sbadge" style="color:${st.color};background:${st.color}1a"><span class="dot"></span>${st.label}</span>`:""}</div>
+        <div class="tr-i-store">${esc(storeName(t.storeId))}</div>
+        <div class="tr-i-desc">${esc(t.description||"")}</div>
+        <div class="tr-i-did">${esc(did)}</div>
+        ${note?`<div class="rp-note">"${esc(note.text)}"</div>`:""}
+      </div>
+      ${gps?`<button type="button" class="rp-gps" title="Open this store in maps" onclick="event.stopPropagation();window.open('${escA(gps)}','_blank')">📍</button>`:""}
+      <span class="tr-i-go">›</span>
+    </div>`;}).join("");
+
+  let list;
+  if(!scopeEvents.length){
+    list=`<div class="rp-empty">${_reportDay
+      ? `Nothing logged by ${esc(name)} on ${esc(fmtDayLabel(_reportDay))}.`
+      : `No tracked work by ${esc(name)} this week.`}</div>`;
+  }else if(_reportDay){
+    list=`<div class="tr-list">${ticketRows(ticketIds,_reportDay)}</div>`;
+  }else{
+    // Whole week: still grouped by day, newest first, so the shape matches the strip.
+    list=days.slice().reverse().filter(d=>byDay[d].tickets.size).map(d=>{
+      const o=byDay[d], ids=[...o.tickets.keys()];
+      const bits=[`${ids.length} ticket${ids.length===1?"":"s"}`];
+      const fin=o.events.filter(e=>e.action==="clockout").length;
+      if(fin)bits.push(`${fin} finished`);
+      if(o.miles>=0.1)bits.push(`~${o.miles<10?o.miles.toFixed(1):Math.round(o.miles)} mi`);
+      return `<div class="rp-day">
+        <div class="rp-day-h"><span>${esc(fmtDayLabel(d))}</span><span class="rp-day-m">${esc(bits.join(" · "))}</span></div>
+        <div class="tr-list">${ticketRows(ids,d)}</div>
+      </div>`;}).join("");
+  }
 
   out.innerHTML=`
-    <div class="rp-head">${esc(name)} · ${esc(dateLabel)}</div>
+    <div class="rp-head">${esc(name)}</div>
+    ${nav}
+    ${strip}
     ${summary}
     ${map}
-    <div class="section-label" style="margin-top:20px">Timeline<span class="ln"></span></div>
-    ${timeline}`;
+    <div class="section-label" style="margin-top:20px">${_reportDay?esc(fmtDayLabel(_reportDay)):"Tickets this week"}<span class="ln"></span></div>
+    ${list}`;
 }
 
 // Interactive SVG map: normalizes lat/lng of all points into the viewbox, draws
 // the store route in time order (so you can see the path driven), plots pings as
 // small dots, and makes each store stop clickable to open in Google Maps.
-function reportMap(storeSeq,pings){
+function reportMap(storeSeq,pings,withRoute=true){
   const pts=[...storeSeq.map(s=>({...s,type:"store"})),...pings.map(p=>({...p,type:"ping"}))];
-  if(!pts.length)return `<div class="rp-empty">No mapped locations for this day (stores may be missing coordinates, and no location pings were recorded).</div>`;
+  if(!pts.length)return `<div class="rp-empty">No mapped locations in this range (stores may be missing coordinates, and no location pings were recorded).</div>`;
   const lats=pts.map(p=>p.lat),lngs=pts.map(p=>p.lng);
   let minLat=Math.min(...lats),maxLat=Math.max(...lats),minLng=Math.min(...lngs),maxLng=Math.max(...lngs);
   // pad so single-point or tight clusters aren't on the edge
@@ -4222,7 +4376,7 @@ function reportMap(storeSeq,pings){
   // route line through stores in order
   let path="";
   storeSeq.forEach((s,i)=>{path+=(i?" L":"M")+X(s.lng).toFixed(1)+" "+Y(s.lat).toFixed(1);});
-  const routeLine=storeSeq.length>1?`<path d="${path}" fill="none" stroke="var(--amber)" stroke-width="2.5" stroke-dasharray="5 5" opacity="0.8"/>`:"";
+  const routeLine=(withRoute&&storeSeq.length>1)?`<path d="${path}" fill="none" stroke="var(--amber)" stroke-width="2.5" stroke-dasharray="5 5" opacity="0.8"/>`:"";
   const pingDots=pings.map(p=>`<circle cx="${X(p.lng).toFixed(1)}" cy="${Y(p.lat).toFixed(1)}" r="4" fill="var(--blue)" opacity="0.55"/>`).join("");
   const storeDots=storeSeq.map((s,i)=>{
     const gps=storeGeoUrl(s.storeId);
@@ -4231,7 +4385,7 @@ function reportMap(storeSeq,pings){
       <text x="${X(s.lng).toFixed(1)}" y="${(Y(s.lat)+4).toFixed(1)}" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">${i+1}</text>
       <title>${esc(storeName(s.storeId))} — tap to open in maps</title>
     </g>`;}).join("");
-  const legend=`<div class="rp-legend"><span><i class="lg-store"></i> Job stop (numbered by order)</span><span><i class="lg-ping"></i> Location ping</span>${storeSeq.length>1?'<span><i class="lg-route"></i> Route</span>':""}</div>`;
+  const legend=`<div class="rp-legend"><span><i class="lg-store"></i> Job stop (numbered by order)</span><span><i class="lg-ping"></i> Location ping</span>${(withRoute&&storeSeq.length>1)?'<span><i class="lg-route"></i> Route</span>':""}</div>`;
   return `<div class="rp-map-wrap">
     <svg viewBox="0 0 ${W} ${H}" class="rp-map" preserveAspectRatio="xMidYMid meet">
       <rect x="0" y="0" width="${W}" height="${H}" fill="var(--panel-2)"/>
@@ -6416,6 +6570,16 @@ function openInventoryReport(){
 }
 
 /* ============================================================ VENDORS */
+let _setTab="people";
+function setSettingsTab(k){
+  _setTab=k;
+  document.querySelectorAll(".set-pane").forEach(el=>el.classList.toggle("hidden",el.getAttribute("data-pane")!==k));
+  document.querySelectorAll(".set-tab").forEach(b=>b.classList.toggle("on",b.getAttribute("data-tab")===k));
+  const body=document.querySelector("#modalOverlay .sheet-body");if(body)body.scrollTop=0;
+}
+/* Settings is three tabs rather than one long scroll. Every pane stays in the
+   DOM (just hidden), so switching tabs never loses a half-typed reply number —
+   and saveSettings() can keep reading .reply-in / #vdRows document-wide. */
 function openSettings(){
   const adminEmails=[...new Set([...ADMIN_EMAILS,...Object.values(MASTER.admins||{}).map(a=>(a.email||"").toLowerCase()).filter(Boolean)])];
   const rows=adminEmails.map(em=>`
@@ -6423,51 +6587,64 @@ function openSettings(){
       <label class="label">${esc(em)}</label>
       <input class="input reply-in" data-email="${escA(em)}" value="${escA(REPLY_NUMBERS[em]||"")}" placeholder="Reply number, e.g. +18170001234" inputmode="tel">
     </div>`).join("");
-  modal(`
-    <div class="sheet-head"><h2>Settings</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
-    <div class="sheet-body">
+  const dirOpts=Object.entries(MASTER.directors||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""))
+    .map(([id,d])=>`<option value="${id}">${esc(d.name||id)}</option>`).join("");
+  const dmOpts=Object.entries(MASTER.areaCoaches||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""))
+    .map(([id,c])=>`<option value="${id}">${esc(c.name||id)}</option>`).join("");
+  const tab=(k,label)=>`<button type="button" class="set-tab${_setTab===k?" on":""}" data-tab="${k}" onclick="setSettingsTab('${k}')">${label}</button>`;
+  const pane=(k,inner)=>`<div class="set-pane${_setTab===k?"":" hidden"}" data-pane="${k}">${inner}</div>`;
+
+  const people=`
       <div class="section-label">Overwatch reply numbers<span class="ln"></span></div>
-      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Saved as contact info on each Overwatch account. When you text or email a tech, replies route back to whoever sent it.</p>
+      <p class="set-hint">Saved as contact info on each Overwatch account. When you text or email a tech, replies route back to whoever sent it.</p>
       ${rows}
       <div class="contact-note">Used as the reply-to / callback when SMS (Twilio) and email (SendGrid) are wired up.</div>
-      <div class="section-label" style="margin-top:22px">Ticket categories<span class="ln"></span></div>
-      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Each division has its own list. Burger King uses two levels; the others are flat until you build them out.</p>
-      <button class="btn btn-ghost btn-block" onclick="openCatEditor()">🗂 Edit categories by division</button>
-      <div class="section-label" style="margin-top:22px">Default home view<span class="ln"></span></div>
-      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">What each role lands on. Everyone can still switch between Map, List and Tiles.</p>
-      <div id="vdRows">${["admin","director","coach","tech","manager"].map(rk=>`
-        <div class="vd-row" data-role="${rk}">
-          <span class="vd-name">${esc({admin:"Overwatch",director:"Director (DO)",coach:"District Manager",tech:"Technician",manager:"Manager"}[rk])}</span>
-          <select class="input">${["map","list","tiles"].map(v=>`<option value="${v}"${defaultViewFor(rk)===v?" selected":""}>${v[0].toUpperCase()+v.slice(1)}</option>`).join("")}</select>
-        </div>`).join("")}</div>
       <div class="section-label" style="margin-top:22px">Manager logins<span class="ln"></span></div>
-      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Every store's login, computed live from FindMi and grouped by District Manager — ready to paste into an email or send as a sheet.</p>
+      <p class="set-hint">Every store's login, computed live from FindMi and grouped by District Manager — ready to paste into an email or send as a sheet.</p>
       <button class="btn btn-ghost btn-block" onclick="downloadManagerLogins()">⬇ Download Manager logins (CSV)</button>
-      <div class="field" style="margin-top:12px"><label class="label">Inventory follow-up for a Director</label>
+      <div class="field" style="margin-top:14px"><label class="label">Onboarding email for a District Manager</label>
         <div style="display:flex;gap:8px">
-          <select class="input" id="ivDo" style="flex:1">
-            <option value="">— choose a Director —</option>
-            ${Object.entries(MASTER.directors||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""))
-              .map(([id,d])=>`<option value="${id}">${esc(d.name||id)}</option>`).join("")}
-          </select>
-          <button class="btn btn-primary" onclick="openInventoryReport()">Generate</button>
-        </div>
-        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Which DMs still owe equipment photos, grouped and ready to send.</div>
-      </div>
-      <div class="field" style="margin-top:12px"><label class="label">Onboarding email for a District Manager</label>
-        <div style="display:flex;gap:8px">
-          <select class="input" id="obDm" style="flex:1">
-            <option value="">— choose a District Manager —</option>
-            ${Object.entries(MASTER.areaCoaches||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""))
-              .map(([id,c])=>`<option value="${id}">${esc(c.name||id)}</option>`).join("")}
-          </select>
+          <select class="input" id="obDm" style="flex:1"><option value="">— choose a District Manager —</option>${dmOpts}</select>
           <button class="btn btn-primary" onclick="openOnboardingEmail()">Generate</button>
         </div>
         <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Lists every Manager login in their district, ready to copy into an email.</div>
       </div>
+      <div class="field" style="margin-top:14px"><label class="label">Inventory follow-up for a Director</label>
+        <div style="display:flex;gap:8px">
+          <select class="input" id="ivDo" style="flex:1"><option value="">— choose a Director —</option>${dirOpts}</select>
+          <button class="btn btn-primary" onclick="openInventoryReport()">Generate</button>
+        </div>
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Which DMs still owe equipment photos, grouped and ready to send.</div>
+      </div>`;
+
+  const tickets=`
+      <div class="section-label">Ticket categories<span class="ln"></span></div>
+      <p class="set-hint">Each division has its own list. Burger King uses two levels; the others are flat until you build them out.</p>
+      <button class="btn btn-ghost btn-block" onclick="openCatEditor()">🗂 Edit categories by division</button>
       <div class="section-label" style="margin-top:22px">Import<span class="ln"></span></div>
-      <p style="color:var(--ink-dim);font-size:13px;margin-top:0">Bring in open tickets from an OwlOps export. Nothing is written until you approve the preview.</p>
-      <button class="btn btn-ghost btn-block" onclick="openImport()">📥 Import tickets from OwlOps</button>
+      <p class="set-hint">Bring in open tickets from an OwlOps export. Nothing is written until you approve the preview.</p>
+      <button class="btn btn-ghost btn-block" onclick="openImport()">📥 Import tickets from OwlOps</button>`;
+
+  const app=`
+      <div class="section-label">Default home view<span class="ln"></span></div>
+      <p class="set-hint">What each role lands on. Everyone can still switch between Map, List and Tiles.</p>
+      <div id="vdRows">${["admin","director","coach","support","tech","manager"].map(rk=>`
+        <div class="vd-row" data-role="${rk}">
+          <span class="vd-name">${esc({admin:"Overwatch",director:"Director (DO)",coach:"District Manager",support:"Support",tech:"Technician",manager:"Manager"}[rk])}</span>
+          <select class="input">${["map","list","tiles"].map(v=>`<option value="${v}"${defaultViewFor(rk)===v?" selected":""}>${v[0].toUpperCase()+v.slice(1)}</option>`).join("")}</select>
+        </div>`).join("")}</div>
+      <div class="section-label" style="margin-top:22px">This build<span class="ln"></span></div>
+      <div class="set-kv"><span>App version</span><span class="mono">v${esc(APP_VERSION)}</span></div>
+      <div class="set-kv"><span>Published version</span><span class="mono">v${esc(((MASTER.admins||{}).appMeta||{}).version||"—")}</span></div>
+      <div class="set-kv"><span>Signed in as</span><span class="mono">${esc(SESSION.email||"")}</span></div>`;
+
+  modal(`
+    <div class="sheet-head"><h2>Settings</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body">
+      <div class="set-tabs">${tab("people","People")}${tab("tickets","Tickets")}${tab("app","App")}</div>
+      ${pane("people",people)}
+      ${pane("tickets",tickets)}
+      ${pane("app",app)}
     </div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
