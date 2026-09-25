@@ -1064,7 +1064,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.16";
+const APP_VERSION = "9.17";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1480,8 +1480,56 @@ function paymiBanner(){
 let REPLY_NUMBERS={}; // email(lowercased) -> reply phone number, stored in master
 let TICKETS={}, VENDORS={}, RESTAURANTS={};
 let curFilter="active", curSearch="", curStore="all", tilesExpanded=false, curAssignee="all", curCategory="all";
-/* List sort. Priority is the default everywhere so emergencies surface first. */
+/* List sort. Priority is the default, so emergencies surface first — but each
+   person can pick their own and it sticks. Kept in this browser AND, once they
+   are signed in, against their email in the master, so the choice follows them
+   to their phone. Nobody's choice affects anyone else's. */
 let curSort="priority";
+const SORT_OPTS=[
+  ["priority","Priority (emergencies first)"],
+  ["newest",  "Newest first"],
+  ["oldest",  "Oldest first"],
+  ["updated", "Recently updated"],
+  ["store",   "Store"],
+  ["category","Category"],
+];
+const SORT_KEYS=SORT_OPTS.map(o=>o[0]);
+const SORT_DEFAULT="priority";
+/* Blank while an admin is viewing as somebody else: their order is theirs, and
+   nothing an admin does in that mode should be written against their name. */
+function sortWho(){
+  if(!SESSION||SESSION._sim||REAL_SESSION)return "";
+  return (SESSION.email||"").toLowerCase();
+}
+function sortLsKey(){return "fixmi.sort."+(sortWho()||"guest")}
+function prefKeyFor(email){return String(email||"").toLowerCase().replace(/[.#$\[\]\/]/g,"_")}
+/* Read the saved choice. This device wins over the master copy: if you just
+   changed it here, that is the most recent intent even if the write is still
+   in flight or the CDN copy is a minute behind. */
+function loadSortPref(){
+  let v="";
+  try{v=localStorage.getItem(sortLsKey())||""}catch(e){}
+  if(!SORT_KEYS.includes(v)){
+    const who=sortWho();
+    const rec=who?(((MASTER&&MASTER.admins)||{}).userPrefs||{})[prefKeyFor(who)]:null;
+    v=(rec&&rec.sort)||"";
+  }
+  curSort=SORT_KEYS.includes(v)?v:SORT_DEFAULT;
+}
+function setSort(v){
+  if(!SORT_KEYS.includes(v))return;
+  curSort=v;
+  try{localStorage.setItem(sortLsKey(),v)}catch(e){}
+  const who=sortWho();
+  if(who){
+    // Best effort, and never in the way: the list re-sorts instantly whether or
+    // not this reaches the server.
+    const k=prefKeyFor(who);
+    if(MASTER&&MASTER.admins){MASTER.admins.userPrefs=MASTER.admins.userPrefs||{};MASTER.admins.userPrefs[k]={sort:v,at:now()}}
+    apiWrite("admins/userPrefs/"+k,{sort:v,at:now()}).catch(()=>{});
+  }
+  render();
+}
 const PRI_RANK={emergency:0,urgent:1,normal:2};
 function priRankOf(t){const r=PRI_RANK[t.priority];return r===undefined?2:r}
 function sortRows(rows){
@@ -1496,16 +1544,16 @@ function sortRows(rows){
     out.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   }else if(curSort==="oldest"){
     out.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+  }else if(curSort==="updated"){
+    out.sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
   }else{ // priority — emergencies on top, then oldest first within a band
     out.sort((a,b)=>priRankOf(a)-priRankOf(b) || (a.createdAt||0)-(b.createdAt||0));
   }
   return out;
 }
 function sortSelect(){
-  const opts=[["priority","Priority (emergencies first)"],["store","Store"],["category","Category"],
-              ["newest","Newest first"],["oldest","Oldest first"]];
-  return `<select class="input sort-select" onchange="curSort=this.value;render()" title="Sort">
-    ${opts.map(([k,l])=>`<option value="${k}"${curSort===k?" selected":""}>↕ ${l}</option>`).join("")}</select>`;
+  return `<select class="input sort-select" onchange="setSort(this.value)" title="Sort — your choice is remembered">
+    ${SORT_OPTS.map(([k,l])=>`<option value="${k}"${curSort===k?" selected":""}>↕ ${l}</option>`).join("")}</select>`;
 }
 /* bulk select removed */
 let openGroups={};          // storeId -> bool (expanded)
@@ -2033,6 +2081,7 @@ async function refresh(){
   loadCategories();
   loadViewDefaults();
   loadNotifyPrefs();
+  loadSortPref();
   checkAppVersion();
 }
 /* ---- single source of truth for the APP CODE itself ----
@@ -2414,6 +2463,7 @@ function startViewAs(kind,id){
   if(!sim){toast("Couldn't load that view","err");return}
   if(!REAL_SESSION)REAL_SESSION=SESSION;       // remember the real admin session once
   SESSION=sim;
+  curSort=SORT_DEFAULT;                        // their list, not yours — and nothing is saved against them
   managerScreen="hub"; coachScreen="hub"; owView=null;
   openGroups={}; myStoreIds().forEach(s=>openGroups[s]=true);
   document.body.classList.add("simulating");
@@ -2424,6 +2474,7 @@ function startViewAs(kind,id){
 function returnToMyAccount(){
   if(!REAL_SESSION)return;
   SESSION=REAL_SESSION; REAL_SESSION=null;
+  loadSortPref();
   document.body.classList.remove("simulating");
   const b=$("simBanner"); if(b)b.remove();
   managerScreen="hub"; coachScreen="hub"; owView=null;
@@ -2606,6 +2657,7 @@ function enterAppChrome(){
 }
 function enterApp(){
   enterAppChrome();
+  loadSortPref();          // now that we know who this is
   if(SESSION.role==="tech" && (curFilter==="active"||curFilter==="all")) curFilter="dispatched";
   if(SESSION.role==="tech") requestTechLocation();
   managerScreen="hub"; coachScreen="hub"; owView=null;
