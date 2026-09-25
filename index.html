@@ -1064,7 +1064,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.17";
+const APP_VERSION = "9.18";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1763,7 +1763,8 @@ async function runConnectionCheck(){
       if(!c.writePassPresent) cbad="FIXMI_WRITE_PASSWORD is not set in Vercel — a reply could never be saved.";
       else if(c.writeOk===false) cbad="The write password was refused by the alignment API"+(c.writeErr?" ("+esc(String(c.writeErr).slice(0,90))+")":"")+".";
       else if(c.writeOk) cb.push("Wrote to the master successfully");
-      if(!c.parser) cwarn="The email-reply-parser library didn't load"+(c.parserError?" ("+esc(c.parserError)+")":"")+" — replies would arrive with the quoted thread still attached.";
+      if(c.parser) cb.push("Quote + signature stripping verified");
+      else cwarn="The quote and signature stripping failed its self-test"+(c.parserError?" ("+esc(c.parserError)+")":"")+" — replies would arrive with the whole email chain and signature attached. Upload the newest api/inbound.js.";
       if(!c.masterOk) cbad="It can't read the alignment master"+(c.masterErr?" ("+esc(c.masterErr)+")":"")+".";
       else cb.push("Sees "+c.ticketsSeen+" ticket"+(c.ticketsSeen===1?"":"s"));
       if(c.replyDomain){replyDomain=replyDomain||c.replyDomain;cb.push("Reply domain: "+esc(c.replyDomain));}
