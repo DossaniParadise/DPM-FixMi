@@ -465,6 +465,7 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .cmt-who{font-weight:700;font-size:13px}
 .cmt-role{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--amber);background:rgba(29,118,187,.12);padding:2px 6px;border-radius:4px}
 .cmt-mail{font-family:var(--mono);font-size:10px;color:var(--ink-dim);word-break:break-all}
+.cmt-via{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--green);background:rgba(5,150,105,.12);padding:2px 6px;border-radius:4px}
 .cmt-time{font-size:10px;color:var(--ink-dim);margin-left:auto}
 .cmt-body{font-size:13.5px;color:var(--ink-mid);line-height:1.5;white-space:pre-wrap;word-break:break-word}
 .comment-add{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
@@ -499,6 +500,27 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .set-hint{color:var(--ink-dim);font-size:13px;margin-top:0}
 .set-kv{display:flex;justify-content:space-between;gap:12px;padding:8px 2px;border-bottom:1px solid var(--line-soft);font-size:13px}
 .set-kv span:first-child{color:var(--ink-mid)}
+.nt-table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13.5px}
+.nt-table th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-dim);font-weight:700;padding:0 6px 8px;text-align:left}
+.nt-table th.nt-c,.nt-table td.nt-c{text-align:center;width:72px}
+.nt-table td{padding:10px 6px;border-top:1px solid var(--line-soft);vertical-align:middle}
+.nt-table input[type=checkbox]{width:19px;height:19px;accent-color:var(--amber)}
+.nt-who{font-weight:700}
+.nt-note{font-size:11.5px;color:var(--ink-dim);margin-top:1px}
+.chk-list{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+.chk-row{display:flex;gap:10px;align-items:flex-start;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2)}
+.chk-row.ok{border-color:rgba(5,150,105,.45)}
+.chk-row.bad{border-color:rgba(232,9,27,.45)}
+.chk-row.warn{border-color:rgba(234,88,12,.5)}
+.chk-ico{font-weight:800;width:16px;text-align:center;color:var(--ink-dim);flex:0 0 auto;line-height:1.5}
+.chk-row.ok .chk-ico{color:var(--green)}
+.chk-row.bad .chk-ico{color:#e8091b}
+.chk-row.warn .chk-ico{color:#ea580c}
+.chk-body{min-width:0;flex:1}
+.chk-l{font-size:13px;font-weight:700}
+.chk-m{font-size:12px;color:var(--ink-mid);margin-top:2px;word-break:break-word}
+.chk-fix{font-size:12px;color:#b45309;margin-top:4px}
+.chk-role{font-family:var(--mono);font-size:10px;color:var(--ink-dim)}
 .ow-tip{position:absolute;z-index:5;pointer-events:none;opacity:0;transition:opacity .12s;
   background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 11px;
   box-shadow:0 6px 20px rgba(20,30,45,.16);max-width:230px}
@@ -1036,7 +1058,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.6";
+const APP_VERSION = "9.15";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1089,6 +1111,60 @@ function supportRecord(lc){
   return null;
 }
 const TICKETS_NODE = "maintenanceTickets";
+/* ---- EMAIL NOTIFICATIONS (v9.7) --------------------------------------------
+   The Director, District Manager(s) and General Manager of a store are emailed
+   when one of its tickets is created or changes status.
+
+   The sending happens in a small Vercel function, NOT here. The Postmark token
+   can send mail as dossaniparadise.com to anyone, and this file is public — GMs,
+   techs and outside vendors on share links all load it. So the app only says
+   "ticket X just did Y"; the function looks the store up in the master and mails
+   that store's own people. Leave NOTIFY_URL empty to switch notifications off. */
+const NOTIFY_URL = "https://fixmi-notify.vercel.app/api/notify";
+const NOTIFY_SECRET = "fixmi-9f3kd82ncv-2026";   // must match FIXMI_SHARED_SECRET on the Vercel function
+/* Never blocks the UI and never shows an error: a notification that fails must
+   not make a saved ticket look unsaved. Failures land in the console. */
+/* "🔧 Gino Rossi (in-house)" — the notifier can't work this out on its own for
+   vendors, and an email saying who it went to is the whole point. */
+function threadForEmail(t){
+  return (Array.isArray(t&&t.comments)?t.comments:[]).slice(-25).map(c=>({
+    by:c.by, role:c.role, email:c.email, text:c.text, ts:c.ts,
+    ...(Array.isArray(c.photos)&&c.photos.length?{photos:c.photos.slice(0,4)}:{})
+  }));
+}
+function assigneeLabelFor(t){
+  if(!t)return "";
+  if(t.assignedTechId){const n=techName(t.assignedTechId);return n?("🔧 "+n+" (in-house)"):"Tech (removed)"}
+  if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];return v?("🏢 "+v.name+" (third-party)"):"Vendor (removed)"}
+  return "";
+}
+function notifyTicket(event,id,ticket,extra){
+  if(!NOTIFY_URL||!NOTIFY_SECRET)return;
+  try{
+    fetchWithTimeout(NOTIFY_URL,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        secret:NOTIFY_SECRET,event,ticketId:id,
+        ticket:{
+          shortId:ticket.shortId, shareToken:ticket.shareToken, storeId:ticket.storeId,
+          status:ticket.status, priority:ticket.priority,
+          category:ticket.category, subcategory:ticket.subcategory, categoryLabel:catPath(ticket),
+          description:ticket.description, photos:ticket.photos,
+          createdAt:ticket.createdAt, createdBy:ticket.createdBy, createdByName:ticket.createdByName,
+          assignedTechId:ticket.assignedTechId, assignedVendorId:ticket.assignedVendorId,
+          assigneeLabel:assigneeLabelFor(ticket),
+          closeNote:ticket.closeNote, waitingReason:ticket.waitingReason,
+        },
+        actorName:(SESSION&&SESSION.name)||"",actorEmail:(SESSION&&SESSION.email)||"",
+        ...(extra||{})
+      })
+    },12000).then(r=>r.json().catch(()=>({}))).then(r=>{
+      if(r&&r.error)console.warn("[notify] "+r.error);
+      else console.log("[notify] "+event+" → "+((r&&r.to)||[]).join(", "));
+    }).catch(e=>console.warn("[notify] could not reach the notifier:",e.message));
+  }catch(e){console.warn("[notify]",e)}
+}
 const VENDORS_NODE = "maintenanceVendors";
 
 const STATUSES = {
@@ -1437,6 +1513,187 @@ let coachScreen="hub";   // "hub" (store tiles) or a storeId (drilled into one s
 const DEFAULT_VIEW_BY_ROLE={admin:"map",tech:"list",director:"tiles",coach:"tiles",manager:"tiles",support:"tiles"};
 let VIEW_DEFAULTS={...DEFAULT_VIEW_BY_ROLE};
 let owView=null;                 // resolved on entry from the role default
+/* ---- connection checker (v9.12) --------------------------------------------
+   Walks the chain one hop at a time and says which hop is broken, instead of
+   leaving "no email arrived" to be guessed at. Nothing here sends mail except
+   the last step, which you press separately. */
+const CHK=[
+  {key:"config", label:"This build has the notifier address"},
+  {key:"reach",  label:"The notifier answers"},
+  {key:"secret", label:"The shared secret matches"},
+  {key:"server", label:"The notifier's own settings"},
+  {key:"who",    label:"Who a real ticket would reach"},
+];
+let _chk={};
+function chkRow(k){
+  const st=_chk[k]||{};
+  const ico=st.state==="ok"?"✓":st.state==="bad"?"✕":st.state==="warn"?"!":st.state==="run"?"…":"·";
+  return `<div class="chk-row ${st.state||""}">
+    <span class="chk-ico">${ico}</span>
+    <div class="chk-body"><div class="chk-l">${esc((CHK.find(c=>c.key===k)||{}).label||k)}</div>
+      ${st.msg?`<div class="chk-m">${st.msg}</div>`:""}
+      ${st.fix?`<div class="chk-fix">${st.fix}</div>`:""}</div></div>`;
+}
+function renderCheck(){
+  const el=$("chkOut"); if(!el)return;
+  el.innerHTML=CHK.map(c=>chkRow(c.key)).join("");
+}
+function chkSet(k,state,msg,fix){_chk[k]={state,msg,fix};renderCheck();}
+/* POST to the notifier and always come back with something readable, whatever
+   went wrong — a thrown fetch here usually means CORS or a dead URL. */
+async function chkPost(payload,ms){
+  try{
+    const r=await fetchWithTimeout(NOTIFY_URL,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({secret:NOTIFY_SECRET,...payload})},ms||15000);
+    let j=null;try{j=await r.json()}catch(e){}
+    return {status:r.status,body:j};
+  }catch(e){return {status:0,error:e.message||String(e)}}
+}
+async function runConnectionCheck(){
+  const btn=$("chkRun"); if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Checking…';}
+  _chk={}; CHK.forEach(c=>_chk[c.key]={state:""}); renderCheck();
+  const done=()=>{if(btn){btn.disabled=false;btn.textContent="Run the check again"}};
+
+  // 1 — is this build even configured?
+  chkSet("config","run");
+  if(!NOTIFY_URL||!NOTIFY_SECRET){
+    chkSet("config","bad","NOTIFY_URL or NOTIFY_SECRET is empty in this build of index.html.",
+      "You're running a build with the lines blank. Upload the version that has them filled in, then hard-refresh (Ctrl+Shift+R).");
+    ["reach","secret","server","who"].forEach(k=>chkSet(k,"","Skipped — nothing to connect to."));
+    return done();
+  }
+  chkSet("config","ok",esc(NOTIFY_URL));
+
+  // 2 — does anything answer there? (GET is refused by design: that's a good sign)
+  chkSet("reach","run");
+  let reachable=false;
+  try{
+    const r=await fetchWithTimeout(NOTIFY_URL,{method:"GET"},12000);
+    if(r.status===405){chkSet("reach","ok","The notifier is live (it refused a plain browser visit, which is correct).");reachable=true;}
+    else if(r.status===404)chkSet("reach","bad","That address returns 404 — nothing is deployed at this path.",
+      "Check the URL ends in /api/notify, and that notify.js sits at api/notify.js in the repo.");
+    else {chkSet("reach","warn","Unexpected reply: HTTP "+r.status+".");reachable=true;}
+  }catch(e){
+    chkSet("reach","bad","Could not reach it at all ("+esc(e.message||e)+").",
+      "Usually a wrong domain, a deleted Vercel project, or FIXMI_ALLOW_ORIGIN blocking this site. Try opening the URL in a new tab — you should see {\"error\":\"POST only\"}.");
+  }
+  if(!reachable){["secret","server","who"].forEach(k=>chkSet(k,"","Skipped."));return done()}
+
+  // 3 — secret + CORS, without sending anything: a deliberately invalid event
+  chkSet("secret","run");
+  const probe=await chkPost({event:"__probe__"});
+  if(probe.status===0){
+    chkSet("secret","bad","The browser couldn't complete the request ("+esc(probe.error)+").",
+      "This is nearly always CORS. In Vercel set FIXMI_ALLOW_ORIGIN to "+esc(location.origin)+" (or * while testing) and redeploy.");
+    ["server","who"].forEach(k=>chkSet(k,"","Skipped."));return done();
+  }
+  if(probe.status===401){
+    chkSet("secret","bad","The notifier rejected the secret.",
+      "NOTIFY_SECRET in this build doesn't match FIXMI_SHARED_SECRET in Vercel. Make them identical (watch for stray spaces) and redeploy.");
+    ["server","who"].forEach(k=>chkSet(k,"","Skipped."));return done();
+  }
+  if(probe.status===400) chkSet("secret","ok","Accepted, and the browser is allowed to call it.");
+  else if(probe.status===500) chkSet("secret","bad",esc((probe.body&&probe.body.error)||"Server error."),"Set the missing variable in Vercel, then redeploy.");
+  else chkSet("secret","warn","Unexpected HTTP "+probe.status+".");
+
+  // 4 — how the notifier itself is configured
+  chkSet("server","run");
+  const ids=Object.keys(TICKETS).sort((a,b)=>(TICKETS[b].createdAt||0)-(TICKETS[a].createdAt||0));
+  const probeId=ids[0]||"";
+  const st=await chkPost({event:"selftest",ticketId:probeId,ticket:probeId?{storeId:TICKETS[probeId].storeId,shortId:TICKETS[probeId].shortId}:undefined});
+  if(st.status!==200||!st.body){
+    chkSet("server","bad","selftest failed"+(st.body&&st.body.error?": "+esc(st.body.error):" (HTTP "+st.status+")."),
+      st.status===400?"Your deployed notify.js is an older copy that doesn't know this check. Paste the newest notify.js into api/notify.js and let Vercel redeploy.":"");
+    chkSet("who","","Skipped.");return done();
+  }
+  const b=st.body, bits=[];
+  bits.push("From: "+esc(b.from));
+  bits.push("Stream: "+esc(b.stream));
+  bits.push("Tickets visible to it: "+b.ticketsSeen);
+  let bad=null,warn=null;
+  if(!b.tokenPresent) bad="POSTMARK_TOKEN is not set in Vercel — nothing can ever be sent.";
+  else if(b.notifyOff) bad="FIXMI_NOTIFY_OFF is set to 1 in Vercel, which blocks every email.";
+  else if(b.dryRun) warn="FIXMI_DRY_RUN is still set to 1 — it logs instead of sending. Delete that variable in Vercel and redeploy.";
+  else if(!b.prefs.on) warn="\"Send notification emails\" is unticked above.";
+  if(b.prefs.testMode) bits.push("Test mode ON → "+(b.prefs.testTo.length?esc(b.prefs.testTo.join(", ")):"<b>no test addresses set</b>"));
+  if(!b.prefsFound) bits.push("No saved settings yet — using the built-in defaults.");
+  chkSet("server",bad?"bad":(warn?"warn":"ok"),bits.join(" · "),bad||warn||"");
+
+  // 5 — who a real ticket resolves to
+  chkSet("who","run");
+  if(!b.ticket){chkSet("who","warn","No ticket to test with — file one, then run this again.");return done()}
+  const t=b.ticket;
+  if(!t.recipients.length){
+    chkSet("who","bad","Ticket "+esc(t.shortId||t.id)+" ("+esc(t.store)+") resolves to nobody.",
+      b.prefs.testMode?"Test mode is on but the test address list is empty — fill it in above and save."
+        :"Either every box is unticked above, or those people have no email address on their FindMi records.");
+  }else{
+    chkSet("who","ok","Ticket "+esc(t.shortId||t.id)+" → "+t.recipients.map(r=>esc(r.email)+" <span class=\"chk-role\">"+esc(r.role)+"</span>").join(", ")+
+      "<br>Subject would be: "+esc(t.subject||""));
+  }
+  done();
+}
+async function sendConnectionTest(){
+  const btn=$("chkSend"); if(!btn)return;
+  const to=(SESSION&&SESSION.email)||"";
+  if(!to)return toast("No email on your session","err");
+  btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Sending…';
+  const r=await chkPost({event:"sendtest",to:[to]},20000);
+  btn.disabled=false;btn.textContent="Send me a real test email";
+  const out=$("chkSendOut");
+  if(r.status===200&&r.body&&r.body.ok){
+    out.innerHTML=`<div class="chk-row ok"><span class="chk-ico">✓</span><div class="chk-body"><div class="chk-l">Postmark accepted it for ${esc(to)}</div><div class="chk-m">Check that inbox, then Postmark → Activity. If it never lands, the answer is in Activity.</div></div></div>`;
+  }else{
+    const d=(r.body&&(r.body.detail||r.body.error))||r.error||("HTTP "+r.status);
+    const txt=typeof d==="string"?d:JSON.stringify(d);
+    let fix="";
+    if(/signature|not confirmed|400/i.test(txt))fix="Postmark → Sender Signatures → dossaniparadise.com needs DKIM verified before it will send.";
+    else if(/inactive/i.test(txt))fix="Postmark suppressed that address after an earlier bounce. Postmark → Suppressions → reactivate it.";
+    else if(/domains you don/i.test(txt))fix="Your Postmark account isn't approved yet, so it can only email your own verified domains.";
+    out.innerHTML=`<div class="chk-row bad"><span class="chk-ico">✕</span><div class="chk-body"><div class="chk-l">Postmark refused it</div><div class="chk-m">${esc(txt)}</div>${fix?`<div class="chk-fix">${esc(fix)}</div>`:""}</div></div>`;
+  }
+}
+
+/* ---- who gets notification emails (v9.8) ------------------------------------
+   Lives in the master at admins/notifyPrefs so it is shared by everyone AND
+   readable by the notifier, which is what actually enforces it. Editing this
+   in Settings changes behaviour instantly — no redeploy, no app rebuild. */
+const NOTIFY_ROLES=[
+  {key:"director",label:"Director",           note:"the store's Director"},
+  {key:"dm",      label:"District Manager",   note:"every DM on the store"},
+  {key:"gm",      label:"General Manager",    note:"the store's own login"},
+  {key:"tech",    label:"Assigned technician",note:"only once someone is assigned"},
+  {key:"reporter",label:"Reported by",        note:"whoever filed the ticket"},
+];
+const NOTIFY_EVENTS=[{key:"created",label:"New ticket"},{key:"status",label:"Status change"},{key:"comment",label:"Comment"}];
+const NOTIFY_DEFAULTS={
+  on:true,
+  roles:{director:{created:true,status:true,comment:true}, dm:{created:true,status:true,comment:true},
+         gm:{created:true,status:true,comment:true},
+         tech:{created:false,status:false,comment:false}, reporter:{created:false,status:false,comment:false}},
+  testMode:false, testTo:[], alwaysTo:[],
+};
+let NOTIFY_PREFS={...NOTIFY_DEFAULTS};
+function loadNotifyPrefs(){
+  const st=(MASTER.admins||{}).notifyPrefs;
+  const out=JSON.parse(JSON.stringify(NOTIFY_DEFAULTS));
+  if(st&&typeof st==="object"){
+    if(typeof st.on==="boolean")out.on=st.on;
+    if(typeof st.testMode==="boolean")out.testMode=st.testMode;
+    if(st.roles&&typeof st.roles==="object")
+      NOTIFY_ROLES.forEach(r=>{
+        const v=st.roles[r.key]; if(!v||typeof v!=="object")return;
+        // A record saved before comments existed has no `comment` key — keep this
+        // role's default rather than reading undefined as "off".
+        NOTIFY_EVENTS.forEach(e=>{if(v[e.key]!==undefined)out.roles[r.key][e.key]=!!v[e.key]});
+      });
+    ["testTo","alwaysTo"].forEach(k=>{
+      const v=st[k];
+      out[k]=Array.isArray(v)?v.filter(Boolean):(typeof v==="string"?v.split(/[,;\s]+/).filter(Boolean):[]);
+    });
+  }
+  NOTIFY_PREFS=out;
+}
 function loadViewDefaults(){
   const st=(MASTER.admins||{}).viewDefaults;
   VIEW_DEFAULTS={...DEFAULT_VIEW_BY_ROLE};
@@ -1559,6 +1816,7 @@ async function refresh(){
   });
   loadCategories();
   loadViewDefaults();
+  loadNotifyPrefs();
   checkAppVersion();
 }
 /* ---- single source of truth for the APP CODE itself ----
@@ -3010,6 +3268,7 @@ async function submitTicket(){
             ...(mine?[{ts:now(),by:SESSION.name,role:SESSION.role,action:"assign",toStatus:"dispatched",note:"🔧 "+SESSION.name+" (self)"}]:[])],comments:[]};
         await apiWrite(`${TICKETS_NODE}/${id}`,ticket);
         TICKETS[id]=ticket; LOCAL_ECHO[id]=ticket; done++;
+        notifyTicket("created",id,ticket);
       }
       refreshInBackground(); closeModal(); render();
       toast(`Created ${done} ticket${done===1?"":"s"}`);
@@ -3045,6 +3304,7 @@ async function submitTicket(){
     await apiWrite(`${TICKETS_NODE}/${id}`,ticket);
     // Echo locally: the new ticket must appear NOW, not after the CDN copy catches up.
     TICKETS[id]=ticket; LOCAL_ECHO[id]=ticket;
+    notifyTicket("created",id,ticket);
     refreshInBackground();
     closeModal();toast("Ticket created · "+shortId);
     if(SESSION.role==="manager")managerScreen="list";
@@ -3400,6 +3660,7 @@ async function guestAddComment(){
   try{
     await apiWrite(`${TICKETS_NODE}/${id}`,updated);
     TICKETS[id]=updated;LOCAL_ECHO[id]=updated;
+    notifyTicket("comment",id,updated,{comment:{by,text,photos,ts:now()},thread:threadForEmail(updated),actorName:by,actorEmail:email});
     showLoader(false);cmtPhotos=[];toast("Comment posted");renderGuest();
   }catch(e){showLoader(false);toast(e.message||"Couldn't post — try again","err");btn.disabled=false;btn.textContent="Post comment"}
 }
@@ -3559,7 +3820,8 @@ function renderComments(t){
     <div class="cmt">
       <div class="cmt-head"><span class="cmt-who">${esc(c.by)}</span>
         <span class="cmt-role">${esc(ROLE_LABEL[c.role]||c.role||"")}</span>
-        ${(c.guest&&c.email)?`<span class="cmt-mail" title="Email address given when commenting">${esc(c.email)}</span>`:""}
+        ${c.viaEmail?`<span class="cmt-via" title="Arrived as an email reply">✉ by email</span>`:""}
+        ${((c.guest||c.viaEmail)&&c.email)?`<span class="cmt-mail" title="${c.viaEmail?"Replied from this address":"Email address given when commenting"}">${esc(c.email)}</span>`:""}
         <span class="cmt-time mono">${fmtDate(c.ts)}</span></div>
       ${c.text?`<div class="cmt-body">${esc(c.text)}</div>`:""}
       ${Array.isArray(c.photos)&&c.photos.length?`<div class="cmt-photos">${c.photos.map(u=>
@@ -3614,7 +3876,10 @@ async function addComment(id){
   comments.push({id:uid(),by:SESSION.name,role:SESSION.role,email:SESSION.email,text,ts:now(),
     ...(photos.length?{photos}:{})});
   const ok=await patchTicket(id,{comments},null); // comment is its own log; no activity entry needed
-  if(ok){cmtPhotos=[];toast("Comment posted");openTicket(id)}
+  if(ok){
+    notifyTicket("comment",id,TICKETS[id],{comment:{by:SESSION.name,text,photos,ts:now()},thread:threadForEmail(TICKETS[id])});
+    cmtPhotos=[];toast("Comment posted");openTicket(id)
+  }
   else{btn.disabled=false;btn.textContent="Post comment"}
 }
 /* ---- who can do what (new lifecycle) ----
@@ -3760,6 +4025,8 @@ function refreshInBackground(){
 }
 async function patchTicket(id,patch,activityEntry){
   const t=TICKETS[id];if(!t){toast("Ticket not found","err");return}
+  const prevStatus=t.status;
+  const prevAssignee=(t.assignedTechId||"")+"|"+(t.assignedVendorId||"");
   const activity=Array.isArray(t.activity)?t.activity.slice():[];
   if(activityEntry)activity.push({ts:now(),by:SESSION.name,role:SESSION.role,...activityEntry});
   const updated={...t,...patch,activity,updatedAt:now()};
@@ -3773,6 +4040,14 @@ async function patchTicket(id,patch,activityEntry){
     // Echo the write locally so the UI reflects it IMMEDIATELY — the CDN copy
     // of the master can lag ~60s, and waiting on it made every click feel dead.
     TICKETS[id]=updated; LOCAL_ECHO[id]=updated;
+    /* News is a real status move OR a change of who the ticket is on. Handing a
+       job from one tech to another keeps the status at "dispatched", so on the
+       status test alone that reassignment went out silently. */
+    const nowAssignee=(updated.assignedTechId||"")+"|"+(updated.assignedVendorId||"");
+    const assigneeChanged=nowAssignee!==prevAssignee;
+    const statusMoved=!!(patch&&patch.status&&patch.status!==prevStatus);
+    if(statusMoved||assigneeChanged)
+      notifyTicket("status",id,updated,{prevStatus,assigneeChanged,assignee:assigneeLabelFor(updated)});
     showLoader(false); render(); refreshInBackground(); return true
   }
   catch(e){showLoader(false);toast(e.message||"Update failed","err");return false}
@@ -6591,6 +6866,41 @@ function openSettings(){
     .map(([id,d])=>`<option value="${id}">${esc(d.name||id)}</option>`).join("");
   const dmOpts=Object.entries(MASTER.areaCoaches||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""))
     .map(([id,c])=>`<option value="${id}">${esc(c.name||id)}</option>`).join("");
+  const np=NOTIFY_PREFS;
+  const chk=(id,on)=>`<input type="checkbox" id="${id}"${on?" checked":""}>`;
+  const notifyRows=NOTIFY_ROLES.map(r=>`
+        <tr data-nrole="${r.key}">
+          <td><div class="nt-who">${esc(r.label)}</div><div class="nt-note">${esc(r.note)}</div></td>
+          ${NOTIFY_EVENTS.map(e=>`<td class="nt-c">${chk("nt_"+r.key+"_"+e.key,np.roles[r.key][e.key])}</td>`).join("")}
+        </tr>`).join("");
+  const email=`
+      <div class="section-label">Connection check<span class="ln"></span></div>
+      <p class="set-hint">Tests the chain one hop at a time — this app, the notifier, its settings, and who a real ticket would reach. Nothing is emailed until you press the second button.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn btn-primary btn-sm" id="chkRun" onclick="runConnectionCheck()">Run the check</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="chkSend" onclick="sendConnectionTest()">Send me a real test email</button>
+      </div>
+      <div id="chkOut" class="chk-list"></div>
+      <div id="chkSendOut"></div>
+      <div class="section-label" style="margin-top:24px">Email notifications<span class="ln"></span></div>
+      <p class="set-hint">Who gets an email when a ticket is filed, its status moves, or someone comments. Saved centrally \u2014 it takes effect immediately for everyone, with nothing to redeploy. Whoever performed the action is never emailed about their own change.</p>
+      <label class="cat-chk"><input type="checkbox" id="ntOn"${np.on?" checked":""}>
+        <span><b>Send notification emails</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Untick to silence everything at once without changing anything else.</span></span></label>
+      <table class="nt-table">
+        <thead><tr><th>Who</th>${NOTIFY_EVENTS.map(e=>`<th class="nt-c">${esc(e.label)}</th>`).join("")}</tr></thead>
+        <tbody>${notifyRows}</tbody>
+      </table>
+      <div class="section-label" style="margin-top:22px">Testing<span class="ln"></span></div>
+      <label class="cat-chk"><input type="checkbox" id="ntTest"${np.testMode?" checked":""}>
+        <span><b>Test mode \u2014 send everything to me instead</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Nobody above receives anything. Every email goes to the addresses below and the subject is prefixed [TEST].</span></span></label>
+      <div class="field" style="margin-top:10px"><label class="label">Test addresses</label>
+        <input class="input" id="ntTestTo" value="${escA((np.testTo||[]).join(", "))}" placeholder="you@dossaniparadise.com, someone@else.com" autocapitalize="off" spellcheck="false">
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Separate several with commas. Only used while test mode is on.</div>
+      </div>
+      <div class="field" style="margin-top:14px"><label class="label">Always copy (optional)</label>
+        <input class="input" id="ntAlwaysTo" value="${escA((np.alwaysTo||[]).join(", "))}" placeholder="itsupport@dossaniparadise.com" autocapitalize="off" spellcheck="false">
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">These people get every notification on top of the table above. Ignored in test mode.</div>
+      </div>`;
   const tab=(k,label)=>`<button type="button" class="set-tab${_setTab===k?" on":""}" data-tab="${k}" onclick="setSettingsTab('${k}')">${label}</button>`;
   const pane=(k,inner)=>`<div class="set-pane${_setTab===k?"":" hidden"}" data-pane="${k}">${inner}</div>`;
 
@@ -6641,8 +6951,9 @@ function openSettings(){
   modal(`
     <div class="sheet-head"><h2>Settings</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
     <div class="sheet-body">
-      <div class="set-tabs">${tab("people","People")}${tab("tickets","Tickets")}${tab("app","App")}</div>
+      <div class="set-tabs">${tab("people","People")}${tab("email","Email")}${tab("tickets","Tickets")}${tab("app","App")}</div>
       ${pane("people",people)}
+      ${pane("email",email)}
       ${pane("tickets",tickets)}
       ${pane("app",app)}
     </div>
@@ -6688,6 +6999,22 @@ async function saveSettings(){
     document.querySelectorAll("#vdRows .vd-row").forEach(r=>{vd[r.getAttribute("data-role")]=r.querySelector("select").value});
     await apiWrite("admins/viewDefaults",vd);
     MASTER.admins=MASTER.admins||{};MASTER.admins.viewDefaults=vd;loadViewDefaults();
+    // Who gets notification emails. The notifier reads this same record, so a
+    // change here is live everywhere the moment it saves.
+    if($("ntOn")){
+      const emails=v=>String(v||"").split(/[,;\s]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.includes("@"));
+      const prefs={on:$("ntOn").checked,testMode:$("ntTest").checked,
+        testTo:emails($("ntTestTo").value),alwaysTo:emails($("ntAlwaysTo").value),
+        roles:{},updatedAt:now(),updatedBy:SESSION.email};
+      NOTIFY_ROLES.forEach(r=>{prefs.roles[r.key]={};NOTIFY_EVENTS.forEach(e=>{prefs.roles[r.key][e.key]=$("nt_"+r.key+"_"+e.key).checked})});
+      if(prefs.testMode&&!prefs.testTo.length){
+        showLoader(false);btn.disabled=false;btn.textContent="Save";
+        setSettingsTab("email");
+        return toast("Test mode needs at least one test address","err");
+      }
+      await apiWrite("admins/notifyPrefs",prefs);
+      MASTER.admins.notifyPrefs=prefs;loadNotifyPrefs();
+    }
     // Apply locally right away; the CDN copy of admins/* can lag ~60s.
     for(const i of inputs){const em=i.getAttribute("data-email").toLowerCase();const n=i.value.trim();if(n)REPLY_NUMBERS[em]=n;else delete REPLY_NUMBERS[em];}
     refreshInBackground();
