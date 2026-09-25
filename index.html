@@ -525,6 +525,10 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .chk-grp:first-child{margin-top:2px}
 .sim-quote{margin-top:5px;padding:8px 10px;border-left:3px solid var(--green);background:var(--panel-2);border-radius:0 7px 7px 0;
   font-size:13px;line-height:1.5;color:var(--ink);white-space:pre-wrap}
+.sim-cut{margin-top:8px}
+.sim-cut summary{cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none}
+.sim-dropped{margin-top:6px;padding:8px 10px;border-left:3px solid var(--line);background:var(--panel-2);border-radius:0 7px 7px 0;
+  font-size:12px;line-height:1.45;color:var(--ink-dim);white-space:pre-wrap;max-height:220px;overflow:auto;text-decoration:line-through;text-decoration-color:rgba(232,9,27,.35)}
 .sim-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:10px}
 @media(max-width:620px){.sim-grid{grid-template-columns:minmax(0,1fr)}}
 .ow-tip{position:absolute;z-index:5;pointer-events:none;opacity:0;transition:opacity .12s;
@@ -1064,7 +1068,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.18";
+const APP_VERSION = "9.19";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1872,7 +1876,12 @@ async function runReplySim(){
   btn.disabled=false;btn.textContent="Run the simulation";
   if(r.status!==200||!r.body||!r.body.ok){
     const d=(r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status);
-    out.innerHTML=`<div class="chk-row bad"><span class="chk-ico">✕</span><div class="chk-body"><div class="chk-l">The simulation couldn't run</div><div class="chk-m">${esc(String(d))}</div></div></div>`;
+    let fix="";
+    if(r.status===404)fix="api/inbound.js isn't deployed. Upload it and let Vercel redeploy.";
+    else if(r.status===401)fix="The shared secret doesn't match FIXMI_SHARED_SECRET in Vercel.";
+    else if(r.status===400)fix="The deployed api/inbound.js is an older copy that doesn't know how to simulate. Upload the newest one.";
+    else if(r.status===0)fix="The browser couldn't reach it at all — usually CORS. Set FIXMI_ALLOW_ORIGIN to "+esc(location.origin)+" in Vercel, or delete it to allow any origin.";
+    out.innerHTML=`<div class="chk-row bad"><span class="chk-ico">✕</span><div class="chk-body"><div class="chk-l">The simulation couldn't run</div><div class="chk-m">${esc(String(d))} <span class="chk-role">HTTP ${r.status}</span></div>${fix?`<div class="chk-fix">${fix}</div>`:""}</div></div>`;
     return;
   }
   const s=r.body,rows=[];
@@ -1887,7 +1896,8 @@ async function runReplySim(){
     rows.push(row(s.author.known?"ok":"warn","Credited to "+esc(s.author.by),
       s.author.known?"Recognised as "+esc(ROLEWORD[s.author.role]||s.author.role)+" in FindMi.":"Not anyone in FindMi, so the comment is marked as a guest and the address is shown beside it. They'd also be added as a watcher on this ticket."));
     if(!s.text) rows.push(row("bad","Nothing would be posted","After the quoted history and signature were removed there was no text left, so the reply would be dropped."));
-    else rows.push(row("ok","The comment would read:","<div class=\"sim-quote\">"+esc(s.text)+"</div><div style=\"margin-top:5px\">"+s.rawChars+" characters in, "+s.keptChars+" kept — "+(s.rawChars-s.keptChars)+" trimmed as quote or signature.</div>"));
+    else rows.push(row("ok","The comment would read:","<div class=\"sim-quote\">"+esc(s.text)+"</div><div style=\"margin-top:5px\">"+s.rawChars+" characters in, "+s.keptChars+" kept — "+(s.rawChars-s.keptChars)+" trimmed as quote or signature.</div>"+
+      (s.removed?"<details class=\"sim-cut\"><summary>Show the "+(s.rawChars-s.keptChars)+" characters it removed</summary><div class=\"sim-dropped\">"+esc(s.removed)+"</div></details>":"")));
     if(s.duplicate) rows.push(row("warn","This exact comment is already on the ticket","Harmless — the real handler also refuses to post the same email twice."));
     if(s.text&&!s.automated){
       if(s.wouldEmail&&s.wouldEmail.length) rows.push(row("ok","Then it would email "+s.wouldEmail.length+" "+(s.wouldEmail.length===1?"person":"people"),esc(s.wouldEmail.join(", "))+"<br>"+esc(from)+" is deliberately left out — nobody is emailed their own reply."));
@@ -1936,7 +1946,7 @@ const NOTIFY_DEFAULTS={
   roles:{director:{created:true,status:true,comment:true}, dm:{created:true,status:true,comment:true},
          gm:{created:true,status:true,comment:true},
          tech:{created:false,status:false,comment:false}, reporter:{created:false,status:false,comment:false}},
-  testMode:false, testTo:[], alwaysTo:[],
+  testMode:false, testTo:[], alwaysTo:[], cutLines:[],
 };
 let NOTIFY_PREFS={...NOTIFY_DEFAULTS};
 function loadNotifyPrefs(){
@@ -1945,6 +1955,9 @@ function loadNotifyPrefs(){
   if(st&&typeof st==="object"){
     if(typeof st.on==="boolean")out.on=st.on;
     if(typeof st.testMode==="boolean")out.testMode=st.testMode;
+    if(st.cutLines!==undefined)
+      out.cutLines=(Array.isArray(st.cutLines)?st.cutLines:String(st.cutLines||"").split("\n"))
+        .map(x=>String(x||"").trim()).filter(Boolean);
     if(st.roles&&typeof st.roles==="object")
       NOTIFY_ROLES.forEach(r=>{
         const v=st.roles[r.key]; if(!v||typeof v!=="object")return;
@@ -7192,6 +7205,11 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
       </div>
       <button type="button" class="btn btn-primary btn-sm" id="simRun" onclick="runReplySim()" style="margin-top:8px">Run the simulation</button>
       <div id="simOut" class="chk-list"></div>
+
+      <div class="field" style="margin-top:16px"><label class="label">Also cut replies at these lines</label>
+        <textarea class="input" id="ntCut" rows="3" spellcheck="false" placeholder="In His Service&#10;Sent from Outlook Mobile" autocapitalize="off" style="font-family:var(--mono);font-size:12px">${esc((np.cutLines||[]).join("\n"))}</textarea>
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">One per line. Anything from a matching line downwards is dropped from the comment. \u201cThank you\u201d, \u201cThanks\u201d, \u201cRegards\u201d, \u201cBest\u201d, \u201cSincerely\u201d and the usual others are already handled \u2014 this is for house styles that aren\u2019t.</div>
+      </div>
       <div class="section-label" style="margin-top:24px">Email notifications<span class="ln"></span></div>
       <p class="set-hint">Who gets an email when a ticket is filed, its status moves, or someone comments. Saved centrally \u2014 it takes effect immediately for everyone, with nothing to redeploy. Whoever performed the action is never emailed about their own change.</p>
       <label class="cat-chk"><input type="checkbox" id="ntOn"${np.on?" checked":""}>
@@ -7315,6 +7333,7 @@ async function saveSettings(){
       const emails=v=>String(v||"").split(/[,;\s]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.includes("@"));
       const prefs={on:$("ntOn").checked,testMode:$("ntTest").checked,
         testTo:emails($("ntTestTo").value),alwaysTo:emails($("ntAlwaysTo").value),
+        cutLines:String(($("ntCut")||{}).value||"").split("\n").map(x=>x.trim()).filter(Boolean),
         roles:{},updatedAt:now(),updatedBy:SESSION.email};
       NOTIFY_ROLES.forEach(r=>{prefs.roles[r.key]={};NOTIFY_EVENTS.forEach(e=>{prefs.roles[r.key][e.key]=$("nt_"+r.key+"_"+e.key).checked})});
       if(prefs.testMode&&!prefs.testTo.length){
