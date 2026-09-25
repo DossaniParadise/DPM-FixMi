@@ -521,6 +521,12 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .chk-m{font-size:12px;color:var(--ink-mid);margin-top:2px;word-break:break-word}
 .chk-fix{font-size:12px;color:#b45309;margin-top:4px}
 .chk-role{font-family:var(--mono);font-size:10px;color:var(--ink-dim)}
+.chk-grp{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-dim);margin:12px 0 2px}
+.chk-grp:first-child{margin-top:2px}
+.sim-quote{margin-top:5px;padding:8px 10px;border-left:3px solid var(--green);background:var(--panel-2);border-radius:0 7px 7px 0;
+  font-size:13px;line-height:1.5;color:var(--ink);white-space:pre-wrap}
+.sim-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:10px}
+@media(max-width:620px){.sim-grid{grid-template-columns:minmax(0,1fr)}}
 .ow-tip{position:absolute;z-index:5;pointer-events:none;opacity:0;transition:opacity .12s;
   background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 11px;
   box-shadow:0 6px 20px rgba(20,30,45,.16);max-width:230px}
@@ -1058,7 +1064,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.15";
+const APP_VERSION = "9.16";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1518,12 +1524,20 @@ let owView=null;                 // resolved on entry from the role default
    leaving "no email arrived" to be guessed at. Nothing here sends mail except
    the last step, which you press separately. */
 const CHK=[
-  {key:"config", label:"This build has the notifier address"},
-  {key:"reach",  label:"The notifier answers"},
-  {key:"secret", label:"The shared secret matches"},
-  {key:"server", label:"The notifier's own settings"},
-  {key:"who",    label:"Who a real ticket would reach"},
+  {g:"Outbound — FixMi sends the email", key:"config", label:"This build has the notifier address"},
+  {key:"reach",   label:"The notifier answers"},
+  {key:"secret",  label:"The shared secret matches"},
+  {key:"server",  label:"The notifier's own settings"},
+  {key:"postmark",label:"Postmark accepts the token"},
+  {key:"who",     label:"Who a real ticket would reach"},
+  {g:"Inbound — replies come back as comments", key:"inreach", label:"The inbound endpoint answers"},
+  {key:"inconf",  label:"The inbound function can write to FixMi"},
+  {key:"mx",      label:"DNS sends reply mail to Postmark"},
+  {key:"pmin",    label:"Postmark's inbound stream points back here"},
+  {key:"replyto", label:"The reply address on a real ticket"},
+  {key:"pmrecv",  label:"Mail Postmark has actually received"},
 ];
+const INBOUND_URL=NOTIFY_URL?NOTIFY_URL.replace(/\/api\/notify\/?$/,"/api/inbound"):"";
 let _chk={};
 function chkRow(k){
   const st=_chk[k]||{};
@@ -1536,30 +1550,52 @@ function chkRow(k){
 }
 function renderCheck(){
   const el=$("chkOut"); if(!el)return;
-  el.innerHTML=CHK.map(c=>chkRow(c.key)).join("");
+  el.innerHTML=CHK.map(c=>(c.g?`<div class="chk-grp">${esc(c.g)}</div>`:"")+chkRow(c.key)).join("");
 }
 function chkSet(k,state,msg,fix){_chk[k]={state,msg,fix};renderCheck();}
+function chkSkip(keys,why){keys.forEach(k=>{if(!_chk[k]||!_chk[k].state)chkSet(k,"",why||"Skipped.")})}
 /* POST to the notifier and always come back with something readable, whatever
    went wrong — a thrown fetch here usually means CORS or a dead URL. */
-async function chkPost(payload,ms){
+async function chkPost(payload,ms){return _chkPostTo(NOTIFY_URL,payload,ms)}
+async function inbPost(payload,ms){return _chkPostTo(INBOUND_URL,payload,ms)}
+async function _chkPostTo(url,payload,ms){
   try{
-    const r=await fetchWithTimeout(NOTIFY_URL,{method:"POST",headers:{"Content-Type":"application/json"},
+    const r=await fetchWithTimeout(url,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({secret:NOTIFY_SECRET,...payload})},ms||15000);
     let j=null;try{j=await r.json()}catch(e){}
     return {status:r.status,body:j};
   }catch(e){return {status:0,error:e.message||String(e)}}
 }
+/* Public DNS, asked from the browser. Google's resolver allows cross-origin
+   reads, so the app can confirm the MX record itself rather than taking
+   Bluehost's word for it. */
+async function dnsMX(name){
+  try{
+    const r=await fetchWithTimeout("https://dns.google/resolve?name="+encodeURIComponent(name)+"&type=MX",{},10000);
+    const j=await r.json();
+    return {ok:true,rows:(j.Answer||[]).filter(a=>a.type===15).map(a=>String(a.data||"").trim())};
+  }catch(e){return {ok:false,error:e.message||String(e)}}
+}
+function fmtAgo(iso){
+  const t=Date.parse(iso||"");if(!t)return "";
+  const m=Math.round((Date.now()-t)/60000);
+  if(m<1)return "just now"; if(m<60)return m+" min ago";
+  const h=Math.round(m/60); if(h<24)return h+"h ago";
+  return Math.round(h/24)+"d ago";
+}
+
 async function runConnectionCheck(){
   const btn=$("chkRun"); if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Checking…';}
   _chk={}; CHK.forEach(c=>_chk[c.key]={state:""}); renderCheck();
   const done=()=>{if(btn){btn.disabled=false;btn.textContent="Run the check again"}};
+  const ALL=CHK.map(c=>c.key);
 
   // 1 — is this build even configured?
   chkSet("config","run");
   if(!NOTIFY_URL||!NOTIFY_SECRET){
     chkSet("config","bad","NOTIFY_URL or NOTIFY_SECRET is empty in this build of index.html.",
       "You're running a build with the lines blank. Upload the version that has them filled in, then hard-refresh (Ctrl+Shift+R).");
-    ["reach","secret","server","who"].forEach(k=>chkSet(k,"","Skipped — nothing to connect to."));
+    chkSkip(ALL,"Skipped — nothing to connect to.");
     return done();
   }
   chkSet("config","ok",esc(NOTIFY_URL));
@@ -1577,7 +1613,7 @@ async function runConnectionCheck(){
     chkSet("reach","bad","Could not reach it at all ("+esc(e.message||e)+").",
       "Usually a wrong domain, a deleted Vercel project, or FIXMI_ALLOW_ORIGIN blocking this site. Try opening the URL in a new tab — you should see {\"error\":\"POST only\"}.");
   }
-  if(!reachable){["secret","server","who"].forEach(k=>chkSet(k,"","Skipped."));return done()}
+  if(!reachable){chkSkip(ALL,"Skipped.");return done()}
 
   // 3 — secret + CORS, without sending anything: a deliberately invalid event
   chkSet("secret","run");
@@ -1585,12 +1621,12 @@ async function runConnectionCheck(){
   if(probe.status===0){
     chkSet("secret","bad","The browser couldn't complete the request ("+esc(probe.error)+").",
       "This is nearly always CORS. In Vercel set FIXMI_ALLOW_ORIGIN to "+esc(location.origin)+" (or * while testing) and redeploy.");
-    ["server","who"].forEach(k=>chkSet(k,"","Skipped."));return done();
+    chkSkip(ALL,"Skipped.");return done();
   }
   if(probe.status===401){
     chkSet("secret","bad","The notifier rejected the secret.",
       "NOTIFY_SECRET in this build doesn't match FIXMI_SHARED_SECRET in Vercel. Make them identical (watch for stray spaces) and redeploy.");
-    ["server","who"].forEach(k=>chkSet(k,"","Skipped."));return done();
+    chkSkip(ALL,"Skipped.");return done();
   }
   if(probe.status===400) chkSet("secret","ok","Accepted, and the browser is allowed to call it.");
   else if(probe.status===500) chkSet("secret","bad",esc((probe.body&&probe.body.error)||"Server error."),"Set the missing variable in Vercel, then redeploy.");
@@ -1604,7 +1640,7 @@ async function runConnectionCheck(){
   if(st.status!==200||!st.body){
     chkSet("server","bad","selftest failed"+(st.body&&st.body.error?": "+esc(st.body.error):" (HTTP "+st.status+")."),
       st.status===400?"Your deployed notify.js is an older copy that doesn't know this check. Paste the newest notify.js into api/notify.js and let Vercel redeploy.":"");
-    chkSet("who","","Skipped.");return done();
+    chkSkip(ALL,"Skipped.");return done();
   }
   const b=st.body, bits=[];
   bits.push("From: "+esc(b.from));
@@ -1619,20 +1655,200 @@ async function runConnectionCheck(){
   if(!b.prefsFound) bits.push("No saved settings yet — using the built-in defaults.");
   chkSet("server",bad?"bad":(warn?"warn":"ok"),bits.join(" · "),bad||warn||"");
 
-  // 5 — who a real ticket resolves to
-  chkSet("who","run");
-  if(!b.ticket){chkSet("who","warn","No ticket to test with — file one, then run this again.");return done()}
-  const t=b.ticket;
-  if(!t.recipients.length){
-    chkSet("who","bad","Ticket "+esc(t.shortId||t.id)+" ("+esc(t.store)+") resolves to nobody.",
-      b.prefs.testMode?"Test mode is on but the test address list is empty — fill it in above and save."
-        :"Either every box is unticked above, or those people have no email address on their FindMi records.");
+  // 5 — ask Postmark itself, which is the only way to see its side
+  chkSet("postmark","run");
+  const pm=await chkPost({event:"postmark"},20000);
+  let pmb=null;
+  if(pm.status===400){
+    chkSet("postmark","bad","Your deployed notify.js is an older copy that can't ask Postmark.",
+      "Upload the newest api/notify.js and let Vercel redeploy, then run this again.");
+  }else if(pm.status!==200||!pm.body){
+    chkSet("postmark","bad","HTTP "+pm.status+(pm.error?" — "+esc(pm.error):""));
+  }else if(!pm.body.ok){
+    chkSet("postmark","bad",esc(pm.body.reason||"Postmark refused."),
+      /token/i.test(pm.body.reason||"")?"Postmark → Servers → Fixmi → API Tokens. Copy the Server token (not the Account token) into POSTMARK_TOKEN in Vercel and redeploy.":"");
   }else{
-    chkSet("who","ok","Ticket "+esc(t.shortId||t.id)+" → "+t.recipients.map(r=>esc(r.email)+" <span class=\"chk-role\">"+esc(r.role)+"</span>").join(", ")+
-      "<br>Subject would be: "+esc(t.subject||""));
+    pmb=pm.body;
+    chkSet("postmark","ok","Server: <b>"+esc(pmb.serverName||"(unnamed)")+"</b> · the token is valid.");
   }
+
+  // 6 — who a real ticket resolves to
+  chkSet("who","run");
+  if(!b.ticket){chkSet("who","warn","No ticket to test with — file one, then run this again.");}
+  else{
+    const t=b.ticket;
+    if(!t.recipients.length){
+      chkSet("who","bad","Ticket "+esc(t.shortId||t.id)+" ("+esc(t.store)+") resolves to nobody.",
+        b.prefs.testMode?"Test mode is on but the test address list is empty — fill it in above and save."
+          :"Either every box is unticked above, or those people have no email address on their FindMi records.");
+    }else{
+      chkSet("who","ok","Ticket "+esc(t.shortId||t.id)+" → "+t.recipients.map(r=>esc(r.email)+" <span class=\"chk-role\">"+esc(r.role)+"</span>").join(", ")+
+        "<br>Subject would be: "+esc(t.subject||""));
+    }
+  }
+
+  /* ── inbound ───────────────────────────────────────────────────────────── */
+
+  // 7 — is the inbound handler deployed at all? (the NOT_FOUND Postmark shows)
+  chkSet("inreach","run");
+  let inLive=false;
+  try{
+    const r=await fetchWithTimeout(INBOUND_URL,{method:"GET"},12000);
+    if(r.status===405){chkSet("inreach","ok",esc(INBOUND_URL)+" is live.");inLive=true;}
+    else if(r.status===404)chkSet("inreach","bad","404 — api/inbound.js isn't in the deployment.",
+      "Upload inbound.js into the api folder of the fixmi-notify repo (alongside notify.js) and let Vercel redeploy. This is the same NOT_FOUND Postmark reports when you press Check.");
+    else {chkSet("inreach","warn","Unexpected reply: HTTP "+r.status+".");inLive=true;}
+  }catch(e){
+    chkSet("inreach","bad","Could not reach it ("+esc(e.message||e)+").","If the notifier answered but this didn't, inbound.js is missing or misnamed.");
+  }
+
+  // 8 — can it actually write a comment, and is the library there?
+  let replyDomain=(b.reply&&b.reply.domain)||"";
+  chkSet("inconf","run");
+  if(!inLive){chkSet("inconf","","Skipped — the endpoint isn't there yet.");}
+  else{
+    const ic=await inbPost({event:"selftest"},25000);
+    if(ic.status===401) chkSet("inconf","bad","It rejected the shared secret.","FIXMI_SHARED_SECRET in Vercel must match NOTIFY_SECRET in this build.");
+    else if(ic.status!==200||!ic.body) chkSet("inconf","bad","HTTP "+ic.status+(ic.error?" — "+esc(ic.error):""),"An older inbound.js doesn't answer this check — upload the newest one.");
+    else{
+      const c=ic.body; const cb=[]; let cbad=null,cwarn=null;
+      if(!c.writePassPresent) cbad="FIXMI_WRITE_PASSWORD is not set in Vercel — a reply could never be saved.";
+      else if(c.writeOk===false) cbad="The write password was refused by the alignment API"+(c.writeErr?" ("+esc(String(c.writeErr).slice(0,90))+")":"")+".";
+      else if(c.writeOk) cb.push("Wrote to the master successfully");
+      if(!c.parser) cwarn="The email-reply-parser library didn't load"+(c.parserError?" ("+esc(c.parserError)+")":"")+" — replies would arrive with the quoted thread still attached.";
+      if(!c.masterOk) cbad="It can't read the alignment master"+(c.masterErr?" ("+esc(c.masterErr)+")":"")+".";
+      else cb.push("Sees "+c.ticketsSeen+" ticket"+(c.ticketsSeen===1?"":"s"));
+      if(c.replyDomain){replyDomain=replyDomain||c.replyDomain;cb.push("Reply domain: "+esc(c.replyDomain));}
+      chkSet("inconf",cbad?"bad":(cwarn?"warn":"ok"),cb.join(" · "),cbad||cwarn||"");
+    }
+  }
+
+  // 9 — DNS, checked against a public resolver rather than trusting the panel
+  chkSet("mx","run");
+  if(!replyDomain){
+    chkSet("mx","bad","FIXMI_REPLY_DOMAIN isn't set, so no reply address is put on outgoing email.",
+      "Add FIXMI_REPLY_DOMAIN = reply.dossaniparadise.com in Vercel and redeploy. Until then nobody can reply to a FixMi email.");
+    chkSkip(["replyto"],"Skipped — no reply domain.");
+  }else{
+    const mx=await dnsMX(replyDomain);
+    if(!mx.ok) chkSet("mx","warn","Couldn't look up DNS from this browser ("+esc(mx.error)+").");
+    else if(!mx.rows.length) chkSet("mx","bad","No MX record on "+esc(replyDomain)+" yet.",
+      "In Bluehost → DNS add an MX record: host "+esc(replyDomain.split(".")[0])+", points to inbound.postmarkapp.com, priority 10. New records usually work within minutes.");
+    else if(!mx.rows.some(x=>/inbound\.postmarkapp\.com/i.test(x)))
+      chkSet("mx","bad",esc(replyDomain)+" → "+esc(mx.rows.join(", "))+" — that isn't Postmark.","The MX for the reply subdomain must point at inbound.postmarkapp.com.");
+    else{
+      // A quick look at the parent domain too: putting this MX on the root by
+      // mistake would silently divert all company mail.
+      const root=replyDomain.split(".").slice(1).join(".");
+      const par=root.includes(".")?await dnsMX(root):{ok:false};
+      let note="",hijacked=false;
+      if(par.ok&&par.rows.length){
+        hijacked=par.rows.some(x=>/inbound\.postmarkapp\.com/i.test(x));
+        note=hijacked
+          ? "<br>"+esc(root)+" itself <b>also points at Postmark</b>."
+          : "<br>"+esc(root)+" still goes to "+esc(par.rows.join(", ").replace(/\d+\s+/g,""))+", so normal company mail is untouched.";
+      }
+      chkSet("mx",hijacked?"bad":"ok",esc(replyDomain)+" → "+esc(mx.rows.join(", "))+note,
+        hijacked?"Your whole company's email is being diverted to Postmark. Remove the MX record on "+esc(root)+" immediately — only the "+esc(replyDomain.split(".")[0])+" subdomain should have one.":"");
+    }
+  }
+
+  // 10 — Postmark's own inbound settings, read back from Postmark
+  chkSet("pmin","run");
+  if(!pmb) chkSet("pmin","","Skipped — couldn't ask Postmark.");
+  else{
+    const dom=(pmb.inboundDomain||"").toLowerCase(), hook=pmb.inboundHookUrl||"";
+    const want=(replyDomain||"").toLowerCase();
+    const hookFits=/\/api\/inbound/i.test(hook);
+    const hookKeyed=/[?&]key=/i.test(hook);
+    let s2="ok",m2=[],f2="";
+    m2.push("Inbound domain: "+(dom?esc(dom):"<b>not set</b>"));
+    m2.push("Webhook: "+(hook?esc(hook.replace(/key=[^&]+/,"key=•••")):"<b>not set</b>"));
+    const paste=esc(INBOUND_URL+"?key="+NOTIFY_SECRET);
+    if(!dom){s2="bad";f2="Postmark → Default Inbound Stream → Inbound domain forwarding: enter "+esc(want||"reply.dossaniparadise.com")+" and save.";}
+    else if(want&&dom!==want){s2="bad";f2="Postmark has "+esc(dom)+" but Vercel's FIXMI_REPLY_DOMAIN is "+esc(want)+". They have to be the same domain or replies land nowhere.";}
+    else if(!hook){s2="bad";f2="Postmark → Default Inbound Stream → Inbound webhook: paste "+paste;}
+    else if(!hookFits){s2="bad";f2="That webhook doesn't point at /api/inbound. It should be "+paste;}
+    else if(!hookKeyed){s2="warn";f2="The webhook has no ?key= on the end, so this function rejects everything Postmark sends. Use "+paste;}
+    chkSet("pmin",s2,m2.join("<br>"),f2);
+  }
+
+  // 11 — what a real reply address looks like
+  chkSet("replyto","run");
+  if(!replyDomain) chkSet("replyto","","Skipped — no reply domain.");
+  else if(b.reply&&b.reply.sample) chkSet("replyto","ok","Replies to the newest ticket go to <span class=\"mono\">"+esc(b.reply.sample)+"</span><br>Hit Reply on a FixMi email and check the To field looks like that. Emails sent before the reply domain was set don't carry it.");
+  else chkSet("replyto","warn","No ticket to build an example from — file one and run this again.");
+
+  // 12 — has any mail actually arrived?
+  chkSet("pmrecv","run");
+  if(!pmb) chkSet("pmrecv","","Skipped — couldn't ask Postmark.");
+  else if(!pmb.inbound) chkSet("pmrecv","warn","Postmark wouldn't list inbound messages — that usually means the server is still on a plan without inbound.");
+  else if(!pmb.inbound.total) chkSet("pmrecv","warn","Postmark has never received a reply.",
+    "Not a fault if you haven't tried yet. Make a new ticket, reply to its email, and run this again — anything that arrives shows up here even if the webhook then fails.");
+  else{
+    const rows=pmb.inbound.recent.map(m=>{
+      const okStatus=/processed/i.test(m.status||"");
+      return "<div>"+(okStatus?"✓":"✕")+" "+esc(m.from||"?")+" · "+esc(m.status||"")+" · "+esc(fmtAgo(m.at))+"</div>";
+    }).join("");
+    const anyBad=pmb.inbound.recent.some(m=>!/processed/i.test(m.status||""));
+    chkSet("pmrecv",anyBad?"warn":"ok",pmb.inbound.total+" received. Most recent:<br>"+rows,
+      anyBad?"Anything not \"Processed\" was blocked by spam filtering or failed at the webhook — open Postmark → Activity → Inbound and click it for the reason.":"");
+  }
+
   done();
 }
+
+/* Run a made-up reply through the real inbound code and show what it would do.
+   Writes nothing, emails nobody — it is the safe way to check the signature
+   stripping and the attribution before handing the address to anyone. */
+function simSubjFill(){
+  const el=$("simSubj"),sel=$("simTicket"); if(!el||!sel)return;
+  const t=TICKETS[sel.value]||{};
+  el.value="RE: ["+(t.shortId||sel.value||"")+"] "+(catPath(t)||"");
+}
+async function runReplySim(){
+  const btn=$("simRun"); if(!btn)return;
+  const out=$("simOut");
+  const id=($("simTicket")||{}).value||"";
+  const from=(($("simFrom")||{}).value||"").trim();
+  const text=(($("simText")||{}).value||"");
+  const noHash=!!(($("simNoHash")||{}).checked);
+  const subj=(($("simSubj")||{}).value||"").trim();
+  if(!id)return toast("Pick a ticket","err");
+  if(!from.includes("@"))return toast("Enter the address it would come from","err");
+  btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Running…';
+  const t=TICKETS[id]||{};
+  const r=await inbPost({event:"simulate",ticketId:noHash?"":id,from,
+    subject:subj||("RE: ["+(t.shortId||id)+"] "+(catPath(t)||"ticket")),text},25000);
+  btn.disabled=false;btn.textContent="Run the simulation";
+  if(r.status!==200||!r.body||!r.body.ok){
+    const d=(r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status);
+    out.innerHTML=`<div class="chk-row bad"><span class="chk-ico">✕</span><div class="chk-body"><div class="chk-l">The simulation couldn't run</div><div class="chk-m">${esc(String(d))}</div></div></div>`;
+    return;
+  }
+  const s=r.body,rows=[];
+  const row=(state,l,m)=>`<div class="chk-row ${state}"><span class="chk-ico">${state==="ok"?"✓":state==="bad"?"✕":"!"}</span><div class="chk-body"><div class="chk-l">${l}</div>${m?`<div class="chk-m">${m}</div>`:""}</div></div>`;
+  if(s.automated){
+    rows.push(row("bad","It would be ignored as an automated message","Reason: "+esc(s.automated)+". Out-of-office replies and bounces are dropped on purpose so they don't land on the ticket."));
+  }else if(!s.matched){
+    rows.push(row("bad","No ticket matched","Neither the +hash on the address nor a [ticket-id] in the subject pointed at a ticket FixMi knows."));
+  }else{
+    rows.push(row("ok","Matched "+esc(s.ticket.shortId)+" — "+esc(s.ticket.store),"Found by "+esc(s.matchedBy)+". It has "+s.ticket.comments+" comment(s) now."));
+    const ROLEWORD={admin:"an Overwatch admin",director:"a Director",coach:"a District Manager",tech:"a repair technician",manager:"a store login"};
+    rows.push(row(s.author.known?"ok":"warn","Credited to "+esc(s.author.by),
+      s.author.known?"Recognised as "+esc(ROLEWORD[s.author.role]||s.author.role)+" in FindMi.":"Not anyone in FindMi, so the comment is marked as a guest and the address is shown beside it. They'd also be added as a watcher on this ticket."));
+    if(!s.text) rows.push(row("bad","Nothing would be posted","After the quoted history and signature were removed there was no text left, so the reply would be dropped."));
+    else rows.push(row("ok","The comment would read:","<div class=\"sim-quote\">"+esc(s.text)+"</div><div style=\"margin-top:5px\">"+s.rawChars+" characters in, "+s.keptChars+" kept — "+(s.rawChars-s.keptChars)+" trimmed as quote or signature.</div>"));
+    if(s.duplicate) rows.push(row("warn","This exact comment is already on the ticket","Harmless — the real handler also refuses to post the same email twice."));
+    if(s.text&&!s.automated){
+      if(s.wouldEmail&&s.wouldEmail.length) rows.push(row("ok","Then it would email "+s.wouldEmail.length+" "+(s.wouldEmail.length===1?"person":"people"),esc(s.wouldEmail.join(", "))+"<br>"+esc(from)+" is deliberately left out — nobody is emailed their own reply."));
+      else if(s.wouldEmail) rows.push(row("warn","Nobody would be emailed about it","Check the notification table above, or test mode's address list."));
+      else if(s.notifyErr) rows.push(row("warn","Couldn't work out who'd be emailed",esc(s.notifyErr)));
+    }
+  }
+  out.innerHTML=rows.join("");
+}
+
 async function sendConnectionTest(){
   const btn=$("chkSend"); if(!btn)return;
   const to=(SESSION&&SESSION.email)||"";
@@ -6868,6 +7084,27 @@ function openSettings(){
     .map(([id,c])=>`<option value="${id}">${esc(c.name||id)}</option>`).join("");
   const np=NOTIFY_PREFS;
   const chk=(id,on)=>`<input type="checkbox" id="${id}"${on?" checked":""}>`;
+  // defaults for the reply simulator: newest tickets, your own address, and a
+  // reply that carries exactly the junk we want to see stripped off
+  const simTicketOpts=Object.keys(TICKETS)
+    .sort((a,b)=>(TICKETS[b].createdAt||0)-(TICKETS[a].createdAt||0)).slice(0,40)
+    .map(id=>{const t=TICKETS[id],st=(MASTER.restaurants||{})[t.storeId]||{};
+      return `<option value="${escA(id)}">${esc(t.shortId||id)} \u2014 ${esc(st.storeName||st.name||t.storeId||"")}</option>`}).join("")
+    ||`<option value="">No tickets yet</option>`;
+  const simFrom=(SESSION&&SESSION.email)||"";
+  const simFirst=Object.keys(TICKETS).sort((a,b)=>(TICKETS[b].createdAt||0)-(TICKETS[a].createdAt||0))[0]||"";
+  const simSubj=simFirst?("RE: ["+(TICKETS[simFirst].shortId||simFirst)+"] "+(catPath(TICKETS[simFirst])||"")):"";
+  const simText=`Called the vendor, they can be out Thursday morning. I'll meet them there.
+
+Thanks,
+${(SESSION&&SESSION.name)||"Your Name"}
+Dossani Paradise
+903-555-0100
+
+On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
+> A new ticket was opened.
+> Store: Burger King #13192
+> Please take a look.`;
   const notifyRows=NOTIFY_ROLES.map(r=>`
         <tr data-nrole="${r.key}">
           <td><div class="nt-who">${esc(r.label)}</div><div class="nt-note">${esc(r.note)}</div></td>
@@ -6875,13 +7112,33 @@ function openSettings(){
         </tr>`).join("");
   const email=`
       <div class="section-label">Connection check<span class="ln"></span></div>
-      <p class="set-hint">Tests the chain one hop at a time — this app, the notifier, its settings, and who a real ticket would reach. Nothing is emailed until you press the second button.</p>
+      <p class="set-hint">Tests the whole chain one hop at a time, in both directions — this app, the notifier, Postmark's own settings, the DNS record, and whether a reply could be written back onto a ticket. Nothing is emailed until you press the second button.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn btn-primary btn-sm" id="chkRun" onclick="runConnectionCheck()">Run the check</button>
         <button type="button" class="btn btn-ghost btn-sm" id="chkSend" onclick="sendConnectionTest()">Send me a real test email</button>
       </div>
       <div id="chkOut" class="chk-list"></div>
       <div id="chkSendOut"></div>
+
+      <div class="section-label" style="margin-top:24px">Simulate a reply<span class="ln"></span></div>
+      <p class="set-hint">Put a pretend email reply through the real inbound code and see exactly what it would do with it \u2014 which ticket it matches, who it credits, what survives once the quoted thread and signature are stripped, and who gets emailed. Nothing is saved and no email goes out.</p>
+      <div class="sim-grid">
+        <div class="field"><label class="label">Ticket</label>
+          <select class="input" id="simTicket" onchange="simSubjFill()">${simTicketOpts}</select></div>
+        <div class="field"><label class="label">Coming from</label>
+          <input class="input" id="simFrom" value="${escA(simFrom)}" placeholder="someone@example.com" autocapitalize="off" spellcheck="false"></div>
+      </div>
+      <div class="field" style="margin-top:4px"><label class="label">Subject</label>
+        <input class="input" id="simSubj" value="${escA(simSubj)}" placeholder="RE: ..." autocapitalize="off" spellcheck="false">
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Change it to \u201cAutomatic reply\u201d to check that out-of-office messages get dropped.</div></div>
+      <label class="cat-chk" style="margin-top:8px"><input type="checkbox" id="simNoHash">
+        <span><b>Pretend the ticket tag on the address was lost</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">What happens when somebody forwards the email on, or writes to the reply address from scratch \u2014 the ticket then has to be found from the subject alone.</span></span></label>
+      <div class="field" style="margin-top:4px"><label class="label">What they typed</label>
+        <textarea class="input" id="simText" rows="9" spellcheck="false" style="font-family:var(--mono);font-size:12px;line-height:1.5">${esc(simText)}</textarea>
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Leave the quoted block and the sign-off in \u2014 that is the part worth testing.</div>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm" id="simRun" onclick="runReplySim()" style="margin-top:8px">Run the simulation</button>
+      <div id="simOut" class="chk-list"></div>
       <div class="section-label" style="margin-top:24px">Email notifications<span class="ln"></span></div>
       <p class="set-hint">Who gets an email when a ticket is filed, its status moves, or someone comments. Saved centrally \u2014 it takes effect immediately for everyone, with nothing to redeploy. Whoever performed the action is never emailed about their own change.</p>
       <label class="cat-chk"><input type="checkbox" id="ntOn"${np.on?" checked":""}>
