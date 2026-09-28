@@ -525,6 +525,24 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .chk-grp:first-child{margin-top:2px}
 .sim-quote{margin-top:5px;padding:8px 10px;border-left:3px solid var(--green);background:var(--panel-2);border-radius:0 7px 7px 0;
   font-size:13px;line-height:1.5;color:var(--ink);white-space:pre-wrap}
+.nt-pri{display:flex;gap:3px;justify-content:center;margin-top:5px}
+.nt-pri.off{opacity:.3;pointer-events:none}
+.pri-pill{width:19px;height:19px;border-radius:5px;border:1px solid var(--line);background:var(--panel-2);
+  color:var(--ink-dim);font-size:10px;font-weight:800;line-height:1;cursor:pointer;padding:0;font-family:inherit}
+.pri-pill.on.p-emergency{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
+.pri-pill.on.p-urgent{background:#ffedd5;border-color:#fdba74;color:#9a3412}
+.pri-pill.on.p-normal{background:#e0f2fe;border-color:#7dd3fc;color:#075985}
+.nt-pri.none{outline:1px dashed rgba(232,9,27,.5);outline-offset:2px;border-radius:6px}
+.wk-table{width:100%;border-collapse:collapse;margin-top:10px}
+.wk-table td{padding:10px 0;border-bottom:1px solid var(--line);vertical-align:middle}
+.wk-table tr:last-child td{border-bottom:0}
+.wk-btns{text-align:right;white-space:nowrap;padding-left:10px}
+.wk-btns .btn{margin-left:6px}
+@media(max-width:560px){.wk-table td{display:block;border-bottom:0;padding:8px 0}
+  .wk-table tr{display:block;border-bottom:1px solid var(--line);padding:6px 0}
+  .wk-btns{text-align:left;padding-left:0}.wk-btns .btn{margin:0 6px 0 0}}
+.wk-frame{width:100%;height:440px;border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:10px}
+.cmt-ans{background:rgba(5,150,105,.12);color:var(--green);border-color:rgba(5,150,105,.35)}
 .sim-cut{margin-top:8px}
 .sim-cut summary{cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none}
 .sim-dropped{margin-top:6px;padding:8px 10px;border-left:3px solid var(--line);background:var(--panel-2);border-radius:0 7px 7px 0;
@@ -1068,7 +1086,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.19";
+const APP_VERSION = "9.20";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1908,6 +1926,80 @@ async function runReplySim(){
   out.innerHTML=rows.join("");
 }
 
+/* The priority pills. Kept as classes on the buttons and read back at save
+   time, so nothing is written until Save is pressed — same as every other
+   control on this pane. */
+function ntPri(btn){
+  btn.classList.toggle("on");
+  // Switching every priority off is the same as switching the cell off, and
+  // saying so out loud beats a tick that quietly does nothing.
+  const box=btn.parentElement, cell=box&&box.parentElement;
+  const none=box&&!box.querySelector(".pri-pill.on");
+  if(box)box.classList.toggle("none",!!none);
+  const cb=cell&&cell.querySelector("input[type=checkbox]");
+  if(cb&&none&&cb.checked)toast("No priorities ticked — that is the same as switching this off","err");
+}
+function ntCell(role,ev){
+  const cb=$("nt_"+role+"_"+ev), box=$("ntp_"+role+"_"+ev);
+  if(box)box.classList.toggle("off",!(cb&&cb.checked));
+}
+
+/* ---- weekly summaries ------------------------------------------------------
+   Preview builds the real email server-side and drops it into an iframe, so
+   what you see is exactly what would be sent, links and all. */
+function wkMsg(el,state,title,msg){
+  $(el).innerHTML=`<div class="chk-row ${state}" style="margin-top:10px"><span class="chk-ico">${state==="ok"?"✓":state==="bad"?"✕":"!"}</span>
+    <div class="chk-body"><div class="chk-l">${title}</div>${msg?`<div class="chk-m">${msg}</div>`:""}</div></div>`;
+}
+async function summaryPreview(kind){
+  const btn=$("wkp_"+kind); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Building…';
+  const r=await chkPost({event:"summary",mode:"preview",kind,to:(SESSION&&SESSION.email)||""},25000);
+  btn.disabled=false;btn.textContent="Preview";
+  const f=$("wkFrame");
+  if(r.status!==200||!r.body||!r.body.ok){
+    f.classList.add("hidden");
+    return wkMsg("wkOut","bad","Couldn't build that preview",
+      esc(String((r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status)))+
+      (r.status===400?" — your deployed notify.js is an older copy that doesn't know about summaries.":""));
+  }
+  f.srcdoc=r.body.html; f.classList.remove("hidden");
+  wkMsg("wkOut","ok","Preview — "+esc(r.body.subject),
+    (r.body.sample?"You aren't a "+esc(kind.toUpperCase())+" anywhere, so this is built from "+esc(r.body.forName)+" to show you a realistic one. ":"")+
+    "Nothing was sent.");
+  f.scrollIntoView({block:"nearest",behavior:"smooth"});
+}
+async function summarySendTest(kind){
+  const to=(SESSION&&SESSION.email)||"";
+  if(!to)return toast("No email on your session","err");
+  const btn=$("wks_"+kind); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Sending…';
+  const r=await chkPost({event:"summary",mode:"test",kind,to:[to]},25000);
+  btn.disabled=false;btn.textContent="Email it to me";
+  if(r.status===200&&r.body&&r.body.ok)
+    wkMsg("wkOut","ok","Sent to "+esc(to),"Subject: "+esc(r.body.subject)+". The Yes / No buttons in it are live — pressing one really does comment on that ticket.");
+  else{
+    const d=(r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status);
+    wkMsg("wkOut","bad","Postmark wouldn't take it",esc(typeof d==="string"?d:JSON.stringify(d)));
+  }
+}
+async function summaryRunNow(){
+  const kinds=SUMMARY_KINDS.map(k=>k.key).filter(k=>$("wk_"+k)&&$("wk_"+k).checked);
+  if(!kinds.length)return toast("Tick at least one group above","err");
+  const live=!NOTIFY_PREFS.testMode;
+  const who=kinds.map(k=>(SUMMARY_KINDS.find(x=>x.key===k)||{}).label).join(", ");
+  if(!confirm(live
+      ?`This sends this week's summary to every one of: ${who}.\n\nTest mode is OFF, so these go to the real people. Continue?`
+      :`This builds every summary for ${who} and sends them all to your test addresses. Nobody real is emailed. Continue?`))return;
+  const btn=$("wkNow"); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Sending…';
+  const r=await chkPost({event:"summary",mode:"run",kinds},60000);
+  btn.disabled=false;btn.textContent="Send this week\u2019s summaries now";
+  if(r.status===200&&r.body&&(r.body.ok||r.body.sent))
+    wkMsg("wkNowOut","ok","Sent "+r.body.sent+" email"+(r.body.sent===1?"":"s"),
+      (r.body.testMode?"Test mode was on, so they all went to your test addresses. ":"")+
+      "For: "+esc((r.body.people||[]).join(", ")||"nobody"));
+  else wkMsg("wkNowOut","bad","Nothing went out",
+    esc(String((r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status))));
+}
+
 async function sendConnectionTest(){
   const btn=$("chkSend"); if(!btn)return;
   const to=(SESSION&&SESSION.email)||"";
@@ -1947,7 +2039,24 @@ const NOTIFY_DEFAULTS={
          gm:{created:true,status:true,comment:true},
          tech:{created:false,status:false,comment:false}, reporter:{created:false,status:false,comment:false}},
   testMode:false, testTo:[], alwaysTo:[], cutLines:[],
+  /* Which priorities each role/event pair wants. Missing means all three, so
+     nothing changes for a record saved before this setting existed. */
+  pri:{},
+  weekly:{on:false, day:"monday", kinds:["gm","dm","do"]},
 };
+const NOTIFY_PRIS=[{key:"emergency",short:"E",label:"Emergency"},{key:"urgent",short:"U",label:"Urgent"},{key:"normal",short:"N",label:"Normal"}];
+const PRI_ALL=NOTIFY_PRIS.map(p=>p.key);
+const SUMMARY_KINDS=[
+  {key:"gm",label:"General Managers",note:"their store's open tickets in full, each with a Yes / No button"},
+  {key:"dm",label:"District Managers",note:"every store on their patch, ticket subject lines only"},
+  {key:"do",label:"Directors",note:"how many are open at each of their stores, most to least"},
+];
+const WEEK_DAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+/** Which priorities this role/event pair is set to receive. */
+function priOf(np,role,ev){
+  const v=((np.pri||{})[role]||{})[ev];
+  return Array.isArray(v)?v:PRI_ALL;
+}
 let NOTIFY_PREFS={...NOTIFY_DEFAULTS};
 function loadNotifyPrefs(){
   const st=(MASTER.admins||{}).notifyPrefs;
@@ -1955,6 +2064,22 @@ function loadNotifyPrefs(){
   if(st&&typeof st==="object"){
     if(typeof st.on==="boolean")out.on=st.on;
     if(typeof st.testMode==="boolean")out.testMode=st.testMode;
+    if(st.pri&&typeof st.pri==="object"){
+      out.pri={};
+      NOTIFY_ROLES.forEach(r=>{
+        const g=st.pri[r.key]; if(!g||typeof g!=="object")return;
+        out.pri[r.key]={};
+        NOTIFY_EVENTS.forEach(e=>{if(Array.isArray(g[e.key]))out.pri[r.key][e.key]=g[e.key].filter(x=>PRI_ALL.includes(x))});
+      });
+    }
+    if(st.weekly&&typeof st.weekly==="object"){
+      out.weekly={
+        on:!!st.weekly.on,
+        day:WEEK_DAYS.includes(st.weekly.day)?st.weekly.day:"monday",
+        kinds:Array.isArray(st.weekly.kinds)?st.weekly.kinds.filter(k=>["gm","dm","do"].includes(k)):["gm","dm","do"],
+        lastSentYmd:st.weekly.lastSentYmd||"", lastSentAt:st.weekly.lastSentAt||0,
+      };
+    }
     if(st.cutLines!==undefined)
       out.cutLines=(Array.isArray(st.cutLines)?st.cutLines:String(st.cutLines||"").split("\n"))
         .map(x=>String(x||"").trim()).filter(Boolean);
@@ -4102,7 +4227,8 @@ function renderComments(t){
     <div class="cmt">
       <div class="cmt-head"><span class="cmt-who">${esc(c.by)}</span>
         <span class="cmt-role">${esc(ROLE_LABEL[c.role]||c.role||"")}</span>
-        ${c.viaEmail?`<span class="cmt-via" title="Arrived as an email reply">✉ by email</span>`:""}
+        ${c.answer?`<span class="cmt-via cmt-ans" title="Answered from the weekly summary email">${c.answer==="no"?"✓ answered: fixed":"↻ answered: still open"}</span>`
+       :c.viaEmail?`<span class="cmt-via" title="Arrived as an email reply">✉ by email</span>`:""}
         ${((c.guest||c.viaEmail)&&c.email)?`<span class="cmt-mail" title="${c.viaEmail?"Replied from this address":"Email address given when commenting"}">${esc(c.email)}</span>`:""}
         <span class="cmt-time mono">${fmtDate(c.ts)}</span></div>
       ${c.text?`<div class="cmt-body">${esc(c.text)}</div>`:""}
@@ -7174,7 +7300,13 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
   const notifyRows=NOTIFY_ROLES.map(r=>`
         <tr data-nrole="${r.key}">
           <td><div class="nt-who">${esc(r.label)}</div><div class="nt-note">${esc(r.note)}</div></td>
-          ${NOTIFY_EVENTS.map(e=>`<td class="nt-c">${chk("nt_"+r.key+"_"+e.key,np.roles[r.key][e.key])}</td>`).join("")}
+          ${NOTIFY_EVENTS.map(e=>{
+            const on=np.roles[r.key][e.key], pr=priOf(np,r.key,e.key);
+            return `<td class="nt-c">
+              <input type="checkbox" id="nt_${r.key}_${e.key}"${on?" checked":""} onchange="ntCell('${r.key}','${e.key}')">
+              <div class="nt-pri${on?"":" off"}" id="ntp_${r.key}_${e.key}">${NOTIFY_PRIS.map(pp=>
+                `<button type="button" class="pri-pill p-${pp.key}${pr.includes(pp.key)?" on":""}" data-p="${pp.key}" title="${pp.label}" onclick="ntPri(this)">${pp.short}</button>`).join("")}</div>
+            </td>`}).join("")}
         </tr>`).join("");
   const email=`
       <div class="section-label">Connection check<span class="ln"></span></div>
@@ -7218,9 +7350,35 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
         <thead><tr><th>Who</th>${NOTIFY_EVENTS.map(e=>`<th class="nt-c">${esc(e.label)}</th>`).join("")}</tr></thead>
         <tbody>${notifyRows}</tbody>
       </table>
+      <p class="set-hint" style="margin-top:8px">The <b>E</b> / <b>U</b> / <b>N</b> buttons under each tick are Emergency, Urgent and Normal. Switch one off and that person stops getting that kind of email at that priority \u2014 so a Director can take emergencies only while the DM still sees everything. All three on is the default.</p>
+
+      <div class="section-label" style="margin-top:24px">Weekly summaries<span class="ln"></span></div>
+      <p class="set-hint">A Monday-morning digest, shaped differently for each role. Preview one to see it, or send yourself a real copy. While Test mode is on, everything below goes to your test addresses instead of the real people.</p>
+      <table class="wk-table">
+        <tbody>${SUMMARY_KINDS.map(k=>`
+          <tr>
+            <td><label class="cat-chk" style="margin:0;border:0;padding:0;background:none">
+              <input type="checkbox" id="wk_${k.key}"${(np.weekly.kinds||[]).includes(k.key)?" checked":""}>
+              <span><b>${esc(k.label)}</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">${esc(k.note)}</span></span></label></td>
+            <td class="wk-btns">
+              <button type="button" class="btn btn-ghost btn-sm" id="wkp_${k.key}" onclick="summaryPreview('${k.key}')">Preview</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="wks_${k.key}" onclick="summarySendTest('${k.key}')">Email it to me</button>
+            </td>
+          </tr>`).join("")}</tbody>
+      </table>
+      <div id="wkOut"></div>
+      <iframe id="wkFrame" class="wk-frame hidden" title="Summary preview"></iframe>
+      <label class="cat-chk" style="margin-top:14px"><input type="checkbox" id="wkOn"${np.weekly.on?" checked":""}>
+        <span><b>Send them automatically every week</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Leave this off until the previews look right. Nothing goes out on its own while it is unticked.</span></span></label>
+      <div class="field" style="margin-top:10px;max-width:260px"><label class="label">Day</label>
+        <select class="input" id="wkDay">${WEEK_DAYS.map(d=>`<option value="${d}"${np.weekly.day===d?" selected":""}>${d[0].toUpperCase()+d.slice(1)}</option>`).join("")}</select>
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Sent in the morning, Central time.${np.weekly.lastSentAt?" Last sent "+esc(new Date(np.weekly.lastSentAt).toLocaleString()) +".":""}</div>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" id="wkNow" onclick="summaryRunNow()" style="margin-top:12px">Send this week\u2019s summaries now</button>
+      <div id="wkNowOut"></div>
       <div class="section-label" style="margin-top:22px">Testing<span class="ln"></span></div>
       <label class="cat-chk"><input type="checkbox" id="ntTest"${np.testMode?" checked":""}>
-        <span><b>Test mode \u2014 send everything to me instead</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Nobody above receives anything. Every email goes to the addresses below and the subject is prefixed [TEST].</span></span></label>
+        <span><b>Test mode \u2014 send everything to me instead</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Nobody above receives anything \u2014 ticket emails and weekly summaries both. Everything goes to the addresses below, with a note inside saying who it would really have gone to.</span></span></label>
       <div class="field" style="margin-top:10px"><label class="label">Test addresses</label>
         <input class="input" id="ntTestTo" value="${escA((np.testTo||[]).join(", "))}" placeholder="you@dossaniparadise.com, someone@else.com" autocapitalize="off" spellcheck="false">
         <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Separate several with commas. Only used while test mode is on.</div>
@@ -7334,8 +7492,21 @@ async function saveSettings(){
       const prefs={on:$("ntOn").checked,testMode:$("ntTest").checked,
         testTo:emails($("ntTestTo").value),alwaysTo:emails($("ntAlwaysTo").value),
         cutLines:String(($("ntCut")||{}).value||"").split("\n").map(x=>x.trim()).filter(Boolean),
-        roles:{},updatedAt:now(),updatedBy:SESSION.email};
-      NOTIFY_ROLES.forEach(r=>{prefs.roles[r.key]={};NOTIFY_EVENTS.forEach(e=>{prefs.roles[r.key][e.key]=$("nt_"+r.key+"_"+e.key).checked})});
+        roles:{},pri:{},updatedAt:now(),updatedBy:SESSION.email};
+      NOTIFY_ROLES.forEach(r=>{
+        prefs.roles[r.key]={};prefs.pri[r.key]={};
+        NOTIFY_EVENTS.forEach(e=>{
+          prefs.roles[r.key][e.key]=$("nt_"+r.key+"_"+e.key).checked;
+          const box=$("ntp_"+r.key+"_"+e.key);
+          prefs.pri[r.key][e.key]=box?[...box.querySelectorAll(".pri-pill.on")].map(b=>b.dataset.p):PRI_ALL.slice();
+        });
+      });
+      // Keep the record of when the last weekly send happened — losing it here
+      // would let the cron send everybody a second copy the same morning.
+      const wkWas=NOTIFY_PREFS.weekly||{};
+      prefs.weekly={on:$("wkOn").checked, day:$("wkDay").value,
+        kinds:SUMMARY_KINDS.map(k=>k.key).filter(k=>$("wk_"+k)&&$("wk_"+k).checked),
+        lastSentYmd:wkWas.lastSentYmd||"", lastSentAt:wkWas.lastSentAt||0};
       if(prefs.testMode&&!prefs.testTo.length){
         showLoader(false);btn.disabled=false;btn.textContent="Save";
         setSettingsTab("email");
