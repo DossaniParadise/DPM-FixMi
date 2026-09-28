@@ -1093,7 +1093,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.25";
+const APP_VERSION = "9.26";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2019,6 +2019,26 @@ function ovEffective(person,ev){
   const own=!!((r.roles&&typeof r.roles[ev]==="boolean")||(r.pri&&Array.isArray(r.pri[ev])));
   return {on,pri,own};
 }
+/* Everyone who could be sent a summary, grouped the way the emails are shaped.
+   The value carries both which summary and which person, since the same address
+   can sit in more than one group. */
+function oneSelect(){
+  const stores=MASTER.restaurants||{};
+  const g=[];
+  const add=(label,rows)=>{if(rows.length)g.push({label,rows})};
+  add("VP list",(NOTIFY_PREFS.vpTo||[]).map(e=>({v:"vp|"+e,n:e})));
+  add("Overwatch",Object.values(MASTER.admins||{}).filter(a=>a&&a.email)
+    .map(a=>({v:"ow|"+a.email.toLowerCase(),n:a.name||a.email})).sort((a,b)=>a.n.localeCompare(b.n)));
+  add("Directors",Object.values(MASTER.directors||{}).filter(d=>d.email)
+    .map(d=>({v:"do|"+d.email.toLowerCase(),n:d.name||d.email})).sort((a,b)=>a.n.localeCompare(b.n)));
+  add("District Managers",Object.values(MASTER.areaCoaches||{}).filter(c=>c.email)
+    .map(c=>({v:"dm|"+c.email.toLowerCase(),n:c.name||c.email})).sort((a,b)=>a.n.localeCompare(b.n)));
+  add("General Managers",Object.entries(stores).filter(([,r])=>r.email)
+    .map(([id,r])=>({v:"gm|"+r.email.toLowerCase(),n:(r.storeManager?r.storeManager+" — ":"")+(r.storeName||id)})).sort((a,b)=>a.n.localeCompare(b.n)));
+  return `<select class="input" id="wkOne"><option value="">— choose someone —</option>
+    ${g.map(x=>`<optgroup label="${escA(x.label)}">${x.rows.map(r=>`<option value="${escA(r.v)}">${esc(r.n)}</option>`).join("")}</optgroup>`).join("")}</select>`;
+}
+
 function ovSelect(){
   const groups=ovPeople();
   if(!groups.length)return `<div class="set-hint">Nobody in FindMi has an email address yet.</div>`;
@@ -2168,6 +2188,25 @@ async function summaryRunNow(){
     esc(String((r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status))));
 }
 
+async function summarySendOne(){
+  const v=(($("wkOne")||{}).value||"");
+  if(!v)return toast("Pick somebody first","err");
+  const [kind,email]=v.split("|");
+  const label=($("wkOne").selectedOptions[0]||{}).textContent||email;
+  const live=!NOTIFY_PREFS.testMode;
+  if(!confirm(live?`Send ${label} their summary now?\n\nTest mode is OFF, so it goes straight to ${email}.`
+                  :`Build ${label}'s summary and send it to your test addresses? Nobody real is emailed.`))return;
+  const btn=$("wkOneBtn"); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Sending…';
+  const r=await chkPost({event:"summary",mode:"one",kind,to:email},40000);
+  btn.disabled=false;btn.textContent="Send it now";
+  if(r.status===200&&r.body&&r.body.ok)
+    wkMsg("wkOneOut","ok","Sent to "+esc((r.body.to||[]).join(", ")),
+      (r.body.testMode?"Test mode was on, so it went to your test addresses instead of "+esc(r.body.forEmail)+". ":"")+
+      "Subject: "+esc(r.body.subject));
+  else wkMsg("wkOneOut","bad","Nothing went out",
+    esc(String((r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status))));
+}
+
 async function sendConnectionTest(){
   const btn=$("chkSend"); if(!btn)return;
   const to=(SESSION&&SESSION.email)||"";
@@ -2212,7 +2251,7 @@ const NOTIFY_DEFAULTS={
   pri:{},
   /* One named person's own settings, beating their role's. Keyed by email. */
   people:{},
-  weekly:{on:false, day:"monday", kinds:["gm","dm","do","vp"]},
+  weekly:{on:false, day:"monday", kinds:["gm","dm","do","vp","ow"]},
 };
 const NOTIFY_PRIS=[{key:"emergency",short:"E",label:"Emergency"},{key:"urgent",short:"U",label:"Urgent"},{key:"normal",short:"N",label:"Normal"}];
 const PRI_ALL=NOTIFY_PRIS.map(p=>p.key);
@@ -2221,6 +2260,7 @@ const SUMMARY_KINDS=[
   {key:"dm",label:"District Managers",note:"every store on their patch, ticket subject lines only"},
   {key:"do",label:"Directors",note:"how many are open at each of their stores, most to least"},
   {key:"vp",label:"VP level",note:"every store as a tile, worst first, split by emergency / urgent / normal"},
+  {key:"ow",label:"Overwatch",note:"the same company-wide tile view, to everyone with an Overwatch login"},
 ];
 const WEEK_DAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
 /** Which priorities this role/event pair is set to receive. */
@@ -2265,7 +2305,7 @@ function loadNotifyPrefs(){
       out.weekly={
         on:!!st.weekly.on,
         day:WEEK_DAYS.includes(st.weekly.day)?st.weekly.day:"monday",
-        kinds:Array.isArray(st.weekly.kinds)?st.weekly.kinds.filter(k=>["gm","dm","do","vp"].includes(k)):["gm","dm","do","vp"],
+        kinds:Array.isArray(st.weekly.kinds)?st.weekly.kinds.filter(k=>["gm","dm","do","vp","ow"].includes(k)):["gm","dm","do","vp","ow"],
         lastSentYmd:st.weekly.lastSentYmd||"", lastSentAt:st.weekly.lastSentAt||0,
       };
     }
@@ -7625,6 +7665,15 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
       </div>
       <div id="wkOut"></div>
       <iframe id="wkFrame" class="wk-frame hidden" title="Summary preview"></iframe>
+
+      <div class="section-label" style="margin-top:22px">Send one person theirs now<span class="ln"></span></div>
+      <p class="set-hint">Off-schedule, for when somebody wants their summary on a Thursday. It builds that person\u2019s own summary \u2014 their store, their patch, or the whole company \u2014 and sends it to them. Test mode still diverts it to you.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field" style="flex:1;min-width:220px;margin:0"><label class="label">Who</label>
+          ${oneSelect()}</div>
+        <button type="button" class="btn btn-primary btn-sm" id="wkOneBtn" onclick="summarySendOne()">Send it now</button>
+      </div>
+      <div id="wkOneOut"></div>
       <label class="cat-chk" style="margin-top:14px"><input type="checkbox" id="wkOn"${np.weekly.on?" checked":""}>
         <span><b>Send them automatically every week</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Leave this off until the previews look right. Nothing goes out on its own while it is unticked.</span></span></label>
       <div class="field" style="margin-top:10px;max-width:260px"><label class="label">Day</label>
