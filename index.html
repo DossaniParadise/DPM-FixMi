@@ -1093,7 +1093,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.24";
+const APP_VERSION = "9.25";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2206,13 +2206,13 @@ const NOTIFY_DEFAULTS={
   roles:{director:{created:true,status:true,comment:true}, dm:{created:true,status:true,comment:true},
          gm:{created:true,status:true,comment:true},
          tech:{created:false,status:false,comment:false}, reporter:{created:false,status:false,comment:false}},
-  testMode:false, testTo:[], alwaysTo:[], cutLines:[],
+  testMode:false, testTo:[], alwaysTo:[], vpTo:["rahim@dossaniparadise.com"], cutLines:[],
   /* Which priorities each role/event pair wants. Missing means all three, so
      nothing changes for a record saved before this setting existed. */
   pri:{},
   /* One named person's own settings, beating their role's. Keyed by email. */
   people:{},
-  weekly:{on:false, day:"monday", kinds:["gm","dm","do"]},
+  weekly:{on:false, day:"monday", kinds:["gm","dm","do","vp"]},
 };
 const NOTIFY_PRIS=[{key:"emergency",short:"E",label:"Emergency"},{key:"urgent",short:"U",label:"Urgent"},{key:"normal",short:"N",label:"Normal"}];
 const PRI_ALL=NOTIFY_PRIS.map(p=>p.key);
@@ -2220,6 +2220,7 @@ const SUMMARY_KINDS=[
   {key:"gm",label:"General Managers",note:"their store's open tickets in full, each with a Yes / No button"},
   {key:"dm",label:"District Managers",note:"every store on their patch, ticket subject lines only"},
   {key:"do",label:"Directors",note:"how many are open at each of their stores, most to least"},
+  {key:"vp",label:"VP level",note:"every store as a tile, worst first, split by emergency / urgent / normal"},
 ];
 const WEEK_DAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
 /** Which priorities this role/event pair is set to receive. */
@@ -2264,7 +2265,7 @@ function loadNotifyPrefs(){
       out.weekly={
         on:!!st.weekly.on,
         day:WEEK_DAYS.includes(st.weekly.day)?st.weekly.day:"monday",
-        kinds:Array.isArray(st.weekly.kinds)?st.weekly.kinds.filter(k=>["gm","dm","do"].includes(k)):["gm","dm","do"],
+        kinds:Array.isArray(st.weekly.kinds)?st.weekly.kinds.filter(k=>["gm","dm","do","vp"].includes(k)):["gm","dm","do","vp"],
         lastSentYmd:st.weekly.lastSentYmd||"", lastSentAt:st.weekly.lastSentAt||0,
       };
     }
@@ -2278,8 +2279,10 @@ function loadNotifyPrefs(){
         // role's default rather than reading undefined as "off".
         NOTIFY_EVENTS.forEach(e=>{if(v[e.key]!==undefined)out.roles[r.key][e.key]=!!v[e.key]});
       });
-    ["testTo","alwaysTo"].forEach(k=>{
+    ["testTo","alwaysTo","vpTo"].forEach(k=>{
       const v=st[k];
+      if(v===undefined&&k==="vpTo")return;   // a record saved before this existed keeps the built-in default
+
       out[k]=Array.isArray(v)?v.filter(Boolean):(typeof v==="string"?v.split(/[,;\s]+/).filter(Boolean):[]);
     });
   }
@@ -7616,6 +7619,10 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
             </td>
           </tr>`).join("")}</tbody>
       </table>
+      <div class="field" style="margin-top:6px"><label class="label">VP summary goes to</label>
+        <input class="input" id="wkVpTo" value="${escA((np.vpTo||[]).join(", "))}" placeholder="sam@dossaniparadise.com, rahim@dossaniparadise.com" autocapitalize="off" spellcheck="false">
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Separate several with commas. The VP summary has no role behind it \u2014 it goes to exactly these people and covers every store in the company.</div>
+      </div>
       <div id="wkOut"></div>
       <iframe id="wkFrame" class="wk-frame hidden" title="Summary preview"></iframe>
       <label class="cat-chk" style="margin-top:14px"><input type="checkbox" id="wkOn"${np.weekly.on?" checked":""}>
@@ -7742,6 +7749,7 @@ async function saveSettings(){
       const emails=v=>String(v||"").split(/[,;\s]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.includes("@"));
       const prefs={on:$("ntOn").checked,testMode:$("ntTest").checked,
         testTo:emails($("ntTestTo").value),alwaysTo:emails($("ntAlwaysTo").value),
+        vpTo:emails(($("wkVpTo")||{}).value||""),
         cutLines:String(($("ntCut")||{}).value||"").split("\n").map(x=>x.trim()).filter(Boolean),
         roles:{},pri:{},updatedAt:now(),updatedBy:SESSION.email};
       NOTIFY_ROLES.forEach(r=>{
