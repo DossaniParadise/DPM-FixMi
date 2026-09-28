@@ -1086,7 +1086,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.20";
+const APP_VERSION = "9.21";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1606,6 +1606,9 @@ const CHK=[
   {key:"pmin",    label:"Postmark's inbound stream points back here"},
   {key:"replyto", label:"The reply address on a real ticket"},
   {key:"pmrecv",  label:"Mail Postmark has actually received"},
+  {g:"Weekly summaries and one-click answers", key:"ansreach", label:"The Yes / No answer links are deployed"},
+  {key:"wkreach", label:"The weekly clock is deployed"},
+  {key:"wkcfg",   label:"What the weekly schedule is set to"},
 ];
 const INBOUND_URL=NOTIFY_URL?NOTIFY_URL.replace(/\/api\/notify\/?$/,"/api/inbound"):"";
 let _chk={};
@@ -1864,6 +1867,49 @@ async function runConnectionCheck(){
     const anyBad=pmb.inbound.recent.some(m=>!/processed/i.test(m.status||""));
     chkSet("pmrecv",anyBad?"warn":"ok",pmb.inbound.total+" received. Most recent:<br>"+rows,
       anyBad?"Anything not \"Processed\" was blocked by spam filtering or failed at the webhook — open Postmark → Activity → Inbound and click it for the reason.":"");
+  }
+
+  /* ── weekly summaries and the answer buttons ───────────────────────────── */
+
+  // 13 — the endpoint behind every Yes / No button in a summary email
+  chkSet("ansreach","run");
+  const ep=(b.endpoints)||{};
+  const base=b.selfUrl||"";
+  if(!b.endpoints){
+    chkSet("ansreach","bad","Your deployed notify.js is an older copy that can't check this.",
+      "Upload the newest api/notify.js and let Vercel redeploy.");
+    chkSkip(["wkreach","wkcfg"],"Skipped.");
+  }else{
+    const a=ep.answer||{};
+    if(a.status===400) chkSet("ansreach","ok","Live at "+esc(base)+"/api/answer — it refused an unsigned visit, which is exactly right.<br>"+
+      (b.selfUrlSet?"Links are built from FIXMI_SELF_URL.":"Links are built from whatever host the request arrives on. That works; setting FIXMI_SELF_URL in Vercel to <span class=\"mono\">"+esc(base)+"</span> just pins them."));
+    else if(a.status===404) chkSet("ansreach","bad","404 — api/answer.js isn't in the deployment.",
+      "Upload answer.js into the api folder and let Vercel redeploy. Until then the Yes / No buttons in a summary go nowhere.");
+    else if(a.status===500) chkSet("ansreach","bad","It answered 500 — a required setting is missing.",
+      "Most likely FIXMI_WRITE_PASSWORD or FIXMI_SHARED_SECRET isn't set in Vercel.");
+    else if(!a.status) chkSet("ansreach","bad","Couldn't reach it ("+esc(a.error||"no answer")+").");
+    else chkSet("ansreach","warn","Unexpected reply: HTTP "+a.status+".");
+
+    // 14 — the thing Vercel's scheduler pokes once a day
+    chkSet("wkreach","run");
+    const w=ep.weekly||{};
+    if(w.status===401) chkSet("wkreach","ok","Live at "+esc(base)+"/api/weekly — it refused an unauthenticated poke, which is correct.");
+    else if(w.status===200) chkSet("wkreach","ok","Live at "+esc(base)+"/api/weekly.");
+    else if(w.status===404) chkSet("wkreach","bad","404 — api/weekly.js isn't in the deployment.",
+      "Upload weekly.js into the api folder and let Vercel redeploy. Without it nothing can send on a schedule, though the buttons here still work.");
+    else if(!w.status) chkSet("wkreach","bad","Couldn't reach it ("+esc(w.error||"no answer")+").");
+    else chkSet("wkreach","warn","Unexpected reply: HTTP "+w.status+".");
+
+    // 15 — and what it will actually do when Vercel pokes it
+    chkSet("wkcfg","run");
+    const k=b.weekly||{};
+    const names={gm:"General Managers",dm:"District Managers",do:"Directors"};
+    const who=(k.kinds||[]).map(x=>names[x]||x).join(", ")||"nobody";
+    const last=k.lastSentAt?("Last sent "+esc(new Date(k.lastSentAt).toLocaleString())):"Never sent yet";
+    if(!k.on) chkSet("wkcfg","warn","Switched off — nothing goes out on its own. "+last+".",
+      "That's the setting you asked for while testing. Tick \u201cSend them automatically every week\u201d below when you're ready; the buttons below work either way.");
+    else chkSet("wkcfg","ok","On, every <b>"+esc((k.day||"monday").replace(/^./,c=>c.toUpperCase()))+"</b> morning Central, to: "+esc(who)+".<br>"+last+
+      ".<br>Vercel pokes this daily and it only acts on the chosen day, so you can change the day here without redeploying. Confirm the schedule exists at Vercel \u2192 your project \u2192 Settings \u2192 Cron Jobs.");
   }
 
   done();
