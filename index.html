@@ -1093,7 +1093,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.23";
+const APP_VERSION = "9.24";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2236,7 +2236,11 @@ function loadNotifyPrefs(){
     if(typeof st.testMode==="boolean")out.testMode=st.testMode;
     if(st.people&&typeof st.people==="object"){
       out.people={};
-      Object.entries(st.people).forEach(([em,v])=>{
+      // Either shape: the list written now, or the old map keyed by email.
+      const entries=Array.isArray(st.people)
+        ? st.people.filter(Boolean).map(v=>[v.email,v])
+        : Object.entries(st.people).map(([k,v])=>[(v&&v.email)||k,v]);
+      entries.forEach(([em,v])=>{
         const e=String(em||"").toLowerCase();
         if(!e.includes("@")||!v||typeof v!=="object")return;
         const rec={};
@@ -2321,14 +2325,42 @@ async function apiGet(){
   if(!r.ok) throw new Error("Could not reach the alignment master");
   return await r.json();
 }
+/* The database behind the alignment API refuses object keys containing
+   . $ # [ ] or /. An email used as a key is the easy way to trip that, and all
+   it gives back is a 500 with no clue which field was at fault — so check here
+   and name the offender instead. */
+const BAD_KEY=/[.$#\[\]\/]/;
+function badKeyIn(v,trail){
+  trail=trail||"";
+  if(!v||typeof v!=="object")return null;
+  if(Array.isArray(v)){
+    for(let i=0;i<v.length;i++){const hit=badKeyIn(v[i],trail+"["+i+"]");if(hit)return hit}
+    return null;
+  }
+  for(const k of Object.keys(v)){
+    if(BAD_KEY.test(k))return (trail?trail+".":"")+k;
+    const hit=badKeyIn(v[k],(trail?trail+".":"")+k);
+    if(hit)return hit;
+  }
+  return null;
+}
+function assertWritable(updates){
+  for(const [path,payload] of Object.entries(updates)){
+    const bad=badKeyIn(payload);
+    if(bad)throw new Error(`Can't save ${path}: the name "${bad}" contains a . $ # [ ] or / , which the database won't accept as a key.`);
+  }
+}
+
 async function apiWrite(path,payload){
   const updates={}; updates[path]=payload;
+  assertWritable(updates);
   const r=await fetchWithTimeout(API_BASE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:APP_WRITE_PASSWORD,updates})},25000);
   if(!r.ok){let m="Write failed";try{m=(await r.json()).error||m}catch(e){}throw new Error(m)}
 }
 // Batched multi-path write — one request updates many ticket nodes at once.
 // `updates` is a map of "maintenanceTickets/<id>" -> full ticket object.
 async function apiWriteMulti(updates){
+  assertWritable(updates);
   const r=await fetchWithTimeout(API_BASE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:APP_WRITE_PASSWORD,updates})},25000);
   if(!r.ok){let m="Write failed";try{m=(await r.json()).error||m}catch(e){}throw new Error(m)}
 }
@@ -7720,8 +7752,13 @@ async function saveSettings(){
           prefs.pri[r.key][e.key]=box?[...box.querySelectorAll(".pri-pill.on")].map(b=>b.dataset.p):PRI_ALL.slice();
         });
       });
-      prefs.people={};
-      Object.entries(OV_DRAFT).forEach(([em,v])=>{if(v&&Object.keys(v).length)prefs.people[em]=v});
+      /* A list, not a map keyed by email. The database behind the alignment
+         API refuses keys containing a dot, so "dana@dossaniparadise.com" as a
+         key made the whole save fail with a 500. The address lives inside the
+         record instead. */
+      prefs.people=Object.entries(OV_DRAFT)
+        .filter(([,v])=>v&&Object.keys(v).length)
+        .map(([em,v])=>({email:em,...v}));
       // Keep the record of when the last weekly send happened — losing it here
       // would let the cron send everybody a second copy the same morning.
       const wkWas=NOTIFY_PREFS.weekly||{};
@@ -7733,7 +7770,11 @@ async function saveSettings(){
         setSettingsTab("email");
         return toast("Test mode needs at least one test address","err");
       }
-      await apiWrite("admins/notifyPrefs",prefs);
+      try{
+        await apiWrite("admins/notifyPrefs",prefs);
+      }catch(err){
+        throw new Error("Couldn't save the email settings — "+(err.message||err)+". Everything else on this pane was saved.");
+      }
       MASTER.admins.notifyPrefs=prefs;loadNotifyPrefs();
     }
     // Apply locally right away; the CDN copy of admins/* can lag ~60s.
