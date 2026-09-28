@@ -1093,7 +1093,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.26";
+const APP_VERSION = "9.28";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2159,6 +2159,7 @@ async function summaryPreview(kind){
 async function summarySendTest(kind){
   const to=(SESSION&&SESSION.email)||"";
   if(!to)return toast("No email on your session","err");
+  if(!sendGuard("wkOut"))return;
   const btn=$("wks_"+kind); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Sending…';
   const r=await chkPost({event:"summary",mode:"test",kind,to:[to]},25000);
   btn.disabled=false;btn.textContent="Email it to me";
@@ -2172,6 +2173,7 @@ async function summarySendTest(kind){
 async function summaryRunNow(){
   const kinds=SUMMARY_KINDS.map(k=>k.key).filter(k=>$("wk_"+k)&&$("wk_"+k).checked);
   if(!kinds.length)return toast("Tick at least one group above","err");
+  if(!sendGuard("wkNowOut"))return;
   const live=!NOTIFY_PREFS.testMode;
   const who=kinds.map(k=>(SUMMARY_KINDS.find(x=>x.key===k)||{}).label).join(", ");
   if(!confirm(live
@@ -2188,9 +2190,53 @@ async function summaryRunNow(){
     esc(String((r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status))));
 }
 
+/* Everything that actually governs a send lives in the saved record, because
+   the notifier reads it from there — not from this screen. So a box ticked but
+   not saved would send the opposite of what the pane shows. Rather than warn
+   about it in passing, the send buttons stop and say which control is out of
+   step. */
+function emails_(v){return String(v||"").split(/[,;\s]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.includes("@"))}
+function unsavedSendSettings(){
+  const out=[];
+  const t=$("ntTest");
+  if(t&&!!t.checked!==!!NOTIFY_PREFS.testMode)
+    out.push(t.checked?"Test mode is ticked here but still off in the saved settings"
+                      :"Test mode is unticked here but still ON in the saved settings");
+  const tt=$("ntTestTo");
+  if(tt&&emails_(tt.value).join(",")!==(NOTIFY_PREFS.testTo||[]).join(","))
+    out.push("The test addresses have changed");
+  const v=$("wkVpTo");
+  if(v&&emails_(v.value).join(",")!==(NOTIFY_PREFS.vpTo||[]).join(","))
+    out.push("The VP address list has changed");
+  return out;
+}
+/* Flag it the moment it happens, rather than waiting for somebody to press a
+   send button and be told no. Painted above the Test mode box and, because
+   that is a scroll away from the send buttons, beside them too. */
+function sendSettingsHint(){
+  const bad=unsavedSendSettings();
+  const html=bad.length
+    ? `<div class="chk-row warn" style="margin-bottom:10px"><span class="chk-ico">!</span><div class="chk-body">
+        <div class="chk-l">Not saved yet</div>
+        <div class="chk-m">${esc(bad.join(". "))}. Sending or previewing uses the saved settings, so press Save before you do either.</div></div></div>`
+    : "";
+  ["ntUnsaved","wkUnsaved"].forEach(id=>{const el=$(id);if(el)el.innerHTML=html});
+}
+
+/** True to carry on; false means the caller has already explained the hold-up. */
+function sendGuard(where){
+  const bad=unsavedSendSettings();
+  if(!bad.length)return true;
+  wkMsg(where,"bad","Press Save first",
+    esc(bad.join(". "))+". The notifier reads the saved settings, not this screen, so sending now would not do what you are looking at.");
+  toast("Save your changes first","err");
+  return false;
+}
+
 async function summarySendOne(){
   const v=(($("wkOne")||{}).value||"");
   if(!v)return toast("Pick somebody first","err");
+  if(!sendGuard("wkOneOut"))return;
   const [kind,email]=v.split("|");
   const label=($("wkOne").selectedOptions[0]||{}).textContent||email;
   const live=!NOTIFY_PREFS.testMode;
@@ -2356,6 +2402,12 @@ const CLOSED_TTL_MS=60000;  // matches the API's CDN s-maxage
    newest-updatedAt-wins, and evicts each entry once the server copy catches
    up. UI feedback is instant; the CDN lag becomes invisible to the writer. */
 let LOCAL_ECHO={};          // ticketId -> full ticket we just wrote
+/* The email settings need the same protection the tickets have. admins/* is
+   served through the same CDN, so for up to a minute after a save the master
+   still hands back the OLD record — and loadNotifyPrefs() would faithfully
+   apply it, putting Test mode (or anything else just changed) straight back.
+   Our copy wins until the server's updatedAt catches up. */
+let NOTIFY_ECHO=null;
 let VENDOR_ECHO={};         // vendorId -> rec we just wrote, or {__deleted,updatedAt}
 let INV_ECHO={};            // "storeId/itemKey" -> equipInv rec we just wrote.
                             // Same CDN-lag shield as above: without it, the next
@@ -2430,6 +2482,12 @@ async function refresh(){
     if(!s || (t.updatedAt||0)>(s.updatedAt||0)) TICKETS[id]=t;
     else delete LOCAL_ECHO[id];
   }
+  if(NOTIFY_ECHO){
+    MASTER.admins=MASTER.admins||{};
+    const srv=MASTER.admins.notifyPrefs;
+    if(!srv || (NOTIFY_ECHO.updatedAt||0)>(srv.updatedAt||0)) MASTER.admins.notifyPrefs=NOTIFY_ECHO;
+    else NOTIFY_ECHO=null;                       // the server has caught up
+  }
   if(typeof MASTER.closedTicketCount==="number") CLOSED_COUNT=MASTER.closedTicketCount;
   // Vendors get the same treatment (their list is in the same cached payload).
   const serverVendors=MASTER[VENDORS_NODE]||{};
@@ -2480,6 +2538,7 @@ async function refresh(){
   loadViewDefaults();
   loadNotifyPrefs();
   loadSortPref();
+  if(_pendingStore&&SESSION&&Object.keys(RESTAURANTS).length)openStoreFromUrl();
   checkAppVersion();
 }
 /* ---- single source of truth for the APP CODE itself ----
@@ -4402,12 +4461,45 @@ function showStore(sid){
   try{window.scrollTo({top:0})}catch(e){}
 }
 function storePath(sid){return appBaseUrl()+"#s/"+encodeURIComponent(sid)}
+/* Match what's in the link against the stores this person can see. The email
+   carries the store's id, but a link can be retyped, shortened by a mail
+   client, or simply be older than a change in FindMi — so the number and the
+   name are accepted as well. */
+function resolveStoreRef(ref){
+  const want=String(ref||"").trim();
+  if(!want)return "";
+  const mine=myStoreIds();
+  if(RESTAURANTS[want])return want;
+  const norm=v=>String(v||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+  const w=norm(want);
+  if(!w)return "";
+  let hit=mine.find(id=>norm(id)===w);
+  if(!hit)hit=mine.find(id=>norm((RESTAURANTS[id]||{}).storeNumber)===w);
+  if(!hit)hit=mine.find(id=>norm(storeName(id))===w);
+  if(!hit)hit=mine.find(id=>norm(storeName(id)).includes(w)&&w.length>=3);
+  return hit||"";
+}
+let _pendingStore=null;    // a link that arrived before the data did
 function openStoreFromUrl(){
   const m=location.hash.match(/^#s\/([^\/?]+)/);
   if(!m||!SESSION)return false;
-  const sid=decodeURIComponent(m[1]).trim();
-  if(!RESTAURANTS[sid]){toast("That store wasn't found","err");clearStoreHash();return false}
-  if(!myStoreIds().includes(sid)){toast("You don't have access to "+storeName(sid),"err");clearStoreHash();return false}
+  const ref=decodeURIComponent(m[1]).trim();
+  /* The store list can still be empty on a cold start if the master is slow.
+     Losing the link at that point would drop somebody on the default view with
+     no idea why, so hold onto it and try again after the next refresh. */
+  if(!Object.keys(RESTAURANTS).length){_pendingStore=ref;return false}
+  const sid=resolveStoreRef(ref);
+  if(!sid){
+    _pendingStore=null;clearStoreHash();
+    toast(RESTAURANTS[ref]?("You don't have access to "+storeName(ref)):("Couldn't find the store in that link ("+ref+")"),"err");
+    return false;
+  }
+  if(!myStoreIds().includes(sid)){
+    _pendingStore=null;clearStoreHash();
+    toast("You don't have access to "+storeName(sid),"err");
+    return false;
+  }
+  _pendingStore=null;
   showStore(sid);
   return true;
 }
@@ -7539,7 +7631,10 @@ function openInventoryReport(){
 
 /* ============================================================ VENDORS */
 let _setTab="people";
-function ovMount(){try{if($("ovChips"))ovRender()}catch(e){}}
+function ovMount(){
+  try{if($("ovChips"))ovRender()}catch(e){}
+  try{sendSettingsHint()}catch(e){}
+}
 function setSettingsTab(k){
   _setTab=k;
   document.querySelectorAll(".set-pane").forEach(el=>el.classList.toggle("hidden",el.getAttribute("data-pane")!==k));
@@ -7660,12 +7755,13 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
           </tr>`).join("")}</tbody>
       </table>
       <div class="field" style="margin-top:6px"><label class="label">VP summary goes to</label>
-        <input class="input" id="wkVpTo" value="${escA((np.vpTo||[]).join(", "))}" placeholder="sam@dossaniparadise.com, rahim@dossaniparadise.com" autocapitalize="off" spellcheck="false">
+        <input class="input" id="wkVpTo" value="${escA((np.vpTo||[]).join(", "))}" placeholder="sam@dossaniparadise.com, rahim@dossaniparadise.com" autocapitalize="off" spellcheck="false" oninput="sendSettingsHint()">
         <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Separate several with commas. The VP summary has no role behind it \u2014 it goes to exactly these people and covers every store in the company.</div>
       </div>
       <div id="wkOut"></div>
       <iframe id="wkFrame" class="wk-frame hidden" title="Summary preview"></iframe>
 
+      <div id="wkUnsaved"></div>
       <div class="section-label" style="margin-top:22px">Send one person theirs now<span class="ln"></span></div>
       <p class="set-hint">Off-schedule, for when somebody wants their summary on a Thursday. It builds that person\u2019s own summary \u2014 their store, their patch, or the whole company \u2014 and sends it to them. Test mode still diverts it to you.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
@@ -7683,10 +7779,11 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
       <button type="button" class="btn btn-ghost btn-sm" id="wkNow" onclick="summaryRunNow()" style="margin-top:12px">Send this week\u2019s summaries now</button>
       <div id="wkNowOut"></div>
       <div class="section-label" style="margin-top:22px">Testing<span class="ln"></span></div>
-      <label class="cat-chk"><input type="checkbox" id="ntTest"${np.testMode?" checked":""}>
+      <div id="ntUnsaved"></div>
+      <label class="cat-chk"><input type="checkbox" id="ntTest"${np.testMode?" checked":""} onchange="sendSettingsHint()">
         <span><b>Test mode \u2014 send everything to me instead</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Nobody above receives anything \u2014 ticket emails and weekly summaries both. Everything goes to the addresses below, with a note inside saying who it would really have gone to.</span></span></label>
       <div class="field" style="margin-top:10px"><label class="label">Test addresses</label>
-        <input class="input" id="ntTestTo" value="${escA((np.testTo||[]).join(", "))}" placeholder="you@dossaniparadise.com, someone@else.com" autocapitalize="off" spellcheck="false">
+        <input class="input" id="ntTestTo" value="${escA((np.testTo||[]).join(", "))}" placeholder="you@dossaniparadise.com, someone@else.com" autocapitalize="off" spellcheck="false" oninput="sendSettingsHint()">
         <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Separate several with commas. Only used while test mode is on.</div>
       </div>
       <div class="field" style="margin-top:14px"><label class="label">Always copy (optional)</label>
@@ -7832,7 +7929,9 @@ async function saveSettings(){
       }catch(err){
         throw new Error("Couldn't save the email settings — "+(err.message||err)+". Everything else on this pane was saved.");
       }
+      NOTIFY_ECHO=prefs;                          // hold it until the CDN catches up
       MASTER.admins.notifyPrefs=prefs;loadNotifyPrefs();
+      try{sendSettingsHint()}catch(e){}
     }
     // Apply locally right away; the CDN copy of admins/* can lag ~60s.
     for(const i of inputs){const em=i.getAttribute("data-email").toLowerCase();const n=i.value.trim();if(n)REPLY_NUMBERS[em]=n;else delete REPLY_NUMBERS[em];}
