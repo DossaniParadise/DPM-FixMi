@@ -525,6 +525,13 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .chk-grp:first-child{margin-top:2px}
 .sim-quote{margin-top:5px;padding:8px 10px;border-left:3px solid var(--green);background:var(--panel-2);border-radius:0 7px 7px 0;
   font-size:13px;line-height:1.5;color:var(--ink);white-space:pre-wrap}
+.ov-panel{margin-top:12px;border:1px solid var(--line);border-radius:11px;padding:13px 14px;background:var(--panel-2)}
+.ov-head{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.ov-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.ov-chip{display:inline-flex;flex-direction:column;align-items:flex-start;gap:1px;cursor:pointer;
+  border:1px solid rgba(29,118,187,.35);background:rgba(29,118,187,.08);color:var(--ink);
+  border-radius:8px;padding:5px 10px;font-size:12.5px;font-weight:700;font-family:inherit;text-align:left}
+.ov-chip span{font-weight:400;font-size:10.5px;color:var(--ink-dim)}
 .nt-pri{display:flex;gap:3px;justify-content:center;margin-top:5px}
 .nt-pri.off{opacity:.3;pointer-events:none}
 .pri-pill{width:19px;height:19px;border-radius:5px;border:1px solid var(--line);background:var(--panel-2);
@@ -1086,7 +1093,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.21";
+const APP_VERSION = "9.23";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1975,6 +1982,121 @@ async function runReplySim(){
 /* The priority pills. Kept as classes on the buttons and read back at save
    time, so nothing is written until Save is pressed — same as every other
    control on this pane. */
+/* ---- per-person overrides --------------------------------------------------
+   The table above sets a whole role at once. This sets one named person, and
+   what they choose beats their role in both directions: it can quieten someone
+   whose role is noisy, or single one person out on a role that's switched off.
+   Edits live in OV_DRAFT until Save, so flicking between people loses nothing. */
+let OV_DRAFT={}, OV_WHO="";
+function ovPeople(){
+  const g=[];
+  const add=(label,rows)=>{if(rows.length)g.push({label,rows})};
+  add("Directors",Object.values(MASTER.directors||{}).filter(d=>d.email)
+    .map(d=>({email:d.email.toLowerCase(),name:d.name||d.email,role:"director",roleLabel:"Director"}))
+    .sort((a,b)=>a.name.localeCompare(b.name)));
+  add("District Managers",Object.values(MASTER.areaCoaches||{}).filter(c=>c.email)
+    .map(c=>({email:c.email.toLowerCase(),name:c.name||c.email,role:"dm",roleLabel:"District Manager"}))
+    .sort((a,b)=>a.name.localeCompare(b.name)));
+  add("General Managers",Object.entries(MASTER.restaurants||{}).filter(([,r])=>r.email)
+    .map(([id,r])=>({email:r.email.toLowerCase(),name:(r.storeManager?r.storeManager+" — ":"")+(r.storeName||id),role:"gm",roleLabel:"General Manager"}))
+    .sort((a,b)=>a.name.localeCompare(b.name)));
+  add("Technicians",Object.values(MASTER.repairTechnicians||{}).filter(t=>t.email)
+    .map(t=>({email:t.email.toLowerCase(),name:t.name||t.email,role:"tech",roleLabel:"Technician"}))
+    .sort((a,b)=>a.name.localeCompare(b.name)));
+  return g;
+}
+function ovFind(email){
+  let hit=null;
+  ovPeople().forEach(g=>g.rows.forEach(r=>{if(r.email===email)hit=r}));
+  return hit;
+}
+function ovHasAny(email){const r=OV_DRAFT[email];return !!(r&&Object.keys(r).length)}
+/** What this person gets today — their own answer if they have one, else the role's. */
+function ovEffective(person,ev){
+  const r=OV_DRAFT[person.email]||{};
+  const on=(r.roles&&typeof r.roles[ev]==="boolean")?r.roles[ev]:NOTIFY_PREFS.roles[person.role][ev];
+  const pri=(r.pri&&Array.isArray(r.pri[ev]))?r.pri[ev]:priOf(NOTIFY_PREFS,person.role,ev);
+  const own=!!((r.roles&&typeof r.roles[ev]==="boolean")||(r.pri&&Array.isArray(r.pri[ev])));
+  return {on,pri,own};
+}
+function ovSelect(){
+  const groups=ovPeople();
+  if(!groups.length)return `<div class="set-hint">Nobody in FindMi has an email address yet.</div>`;
+  return `<select class="input" id="ovWho" onchange="ovPick(this.value)">
+    <option value="">— choose someone —</option>
+    ${groups.map(g=>`<optgroup label="${escA(g.label)}">${g.rows.map(r=>
+      `<option value="${escA(r.email)}"${OV_WHO===r.email?" selected":""}>${esc(r.name)}${ovHasAny(r.email)?"  ●":""}</option>`).join("")}</optgroup>`).join("")}
+  </select>`;
+}
+function ovSummaryLine(){
+  const who=Object.keys(OV_DRAFT).filter(ovHasAny);
+  if(!who.length)return `<div class="set-hint" style="margin-top:8px">Nobody has their own settings yet — everyone follows their role.</div>`;
+  return `<div class="ov-list">${who.map(e=>{const p=ovFind(e);
+    return `<button type="button" class="ov-chip" onclick="ovPick('${escA(e)}')">${esc(p?p.name:e)}<span>${esc(p?p.roleLabel:"")}</span></button>`}).join("")}</div>`;
+}
+function ovPick(email){
+  OV_WHO=String(email||"").toLowerCase();
+  const sel=$("ovWho"); if(sel&&sel.value!==OV_WHO)sel.value=OV_WHO;
+  ovRender();
+}
+function ovRender(){
+  const box=$("ovPanel"); if(!box)return;
+  $("ovChips").innerHTML=ovSummaryLine();
+  const p=OV_WHO?ovFind(OV_WHO):null;
+  if(!p){box.innerHTML="";box.classList.add("hidden");return}
+  box.classList.remove("hidden");
+  const r=OV_DRAFT[p.email]||{};
+  const weekly=(typeof r.weekly==="boolean")?r.weekly:true;
+  box.innerHTML=`
+    <div class="ov-head"><div><b>${esc(p.name)}</b><div class="nt-note">${esc(p.email)} · follows the ${esc(p.roleLabel)} settings unless told otherwise</div></div>
+      ${ovHasAny(p.email)?`<button type="button" class="btn btn-ghost btn-sm" onclick="ovClear()">Back to the ${esc(p.roleLabel)} default</button>`:""}</div>
+    <table class="nt-table" style="margin-top:10px">
+      <thead><tr><th>Gets an email when…</th><th class="nt-c">Yes</th><th class="nt-c">At these priorities</th></tr></thead>
+      <tbody>${NOTIFY_EVENTS.map(e=>{const eff=ovEffective(p,e.key);
+        return `<tr>
+          <td><div class="nt-who">${esc(e.label)}</div><div class="nt-note" id="ovn_${e.key}">${eff.own?"their own setting":"following the "+esc(p.roleLabel)}</div></td>
+          <td class="nt-c"><input type="checkbox" id="ov_on_${e.key}"${eff.on?" checked":""} onchange="ovSet()"></td>
+          <td class="nt-c"><div class="nt-pri${eff.on?"":" off"}" id="ovp_${e.key}">${NOTIFY_PRIS.map(pp=>
+            `<button type="button" class="pri-pill p-${pp.key}${eff.pri.includes(pp.key)?" on":""}" data-p="${pp.key}" title="${pp.label}" onclick="this.classList.toggle('on');ovSet()">${pp.short}</button>`).join("")}</div></td>
+        </tr>`}).join("")}</tbody>
+    </table>
+    <label class="cat-chk" style="margin-top:10px"><input type="checkbox" id="ov_weekly"${weekly?" checked":""} onchange="ovSet()">
+      <span><b>Send them the weekly summary</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Untick to leave this one person out of the Monday digest.</span></span></label>`;
+}
+/** Read the panel back into the draft. Anything matching their role is dropped,
+    so a person only carries an override for what genuinely differs. */
+function ovSet(){
+  const p=OV_WHO?ovFind(OV_WHO):null; if(!p)return;
+  const rec={roles:{},pri:{}};
+  NOTIFY_EVENTS.forEach(e=>{
+    const on=$("ov_on_"+e.key).checked;
+    const box=$("ovp_"+e.key);
+    if(box)box.classList.toggle("off",!on);
+    const pri=box?[...box.querySelectorAll(".pri-pill.on")].map(b=>b.dataset.p):PRI_ALL.slice();
+    if(on!==NOTIFY_PREFS.roles[p.role][e.key])rec.roles[e.key]=on;
+    const rolePri=priOf(NOTIFY_PREFS,p.role,e.key);
+    if(pri.slice().sort().join()!==rolePri.slice().sort().join())rec.pri[e.key]=pri;
+  });
+  if(!Object.keys(rec.roles).length)delete rec.roles;
+  if(!Object.keys(rec.pri).length)delete rec.pri;
+  if(!$("ov_weekly").checked)rec.weekly=false;
+  if(Object.keys(rec).length)OV_DRAFT[p.email]=rec; else delete OV_DRAFT[p.email];
+  // Relabel the rows in place rather than redrawing — redrawing mid-click
+  // would throw away the button the mouse is still on.
+  NOTIFY_EVENTS.forEach(e=>{
+    const n=$("ovn_"+e.key); if(!n)return;
+    const own=!!((rec.roles&&rec.roles[e.key]!==undefined)||(rec.pri&&rec.pri[e.key]));
+    n.textContent=own?"their own setting":"following the "+p.roleLabel;
+  });
+  $("ovChips").innerHTML=ovSummaryLine();
+  const sel=$("ovWho"); if(sel){const v=sel.value;sel.outerHTML=ovSelect();$("ovWho").value=v;}
+}
+function ovClear(){
+  if(OV_WHO)delete OV_DRAFT[OV_WHO];
+  ovRender();
+  const sel=$("ovWho"); if(sel){sel.outerHTML=ovSelect();$("ovWho").value=OV_WHO;}
+}
+
 function ntPri(btn){
   btn.classList.toggle("on");
   // Switching every priority off is the same as switching the cell off, and
@@ -2088,6 +2210,8 @@ const NOTIFY_DEFAULTS={
   /* Which priorities each role/event pair wants. Missing means all three, so
      nothing changes for a record saved before this setting existed. */
   pri:{},
+  /* One named person's own settings, beating their role's. Keyed by email. */
+  people:{},
   weekly:{on:false, day:"monday", kinds:["gm","dm","do"]},
 };
 const NOTIFY_PRIS=[{key:"emergency",short:"E",label:"Emergency"},{key:"urgent",short:"U",label:"Urgent"},{key:"normal",short:"N",label:"Normal"}];
@@ -2110,6 +2234,20 @@ function loadNotifyPrefs(){
   if(st&&typeof st==="object"){
     if(typeof st.on==="boolean")out.on=st.on;
     if(typeof st.testMode==="boolean")out.testMode=st.testMode;
+    if(st.people&&typeof st.people==="object"){
+      out.people={};
+      Object.entries(st.people).forEach(([em,v])=>{
+        const e=String(em||"").toLowerCase();
+        if(!e.includes("@")||!v||typeof v!=="object")return;
+        const rec={};
+        if(v.roles&&typeof v.roles==="object"){rec.roles={};
+          NOTIFY_EVENTS.forEach(ev=>{if(typeof v.roles[ev.key]==="boolean")rec.roles[ev.key]=v.roles[ev.key]})}
+        if(v.pri&&typeof v.pri==="object"){rec.pri={};
+          NOTIFY_EVENTS.forEach(ev=>{if(Array.isArray(v.pri[ev.key]))rec.pri[ev.key]=v.pri[ev.key].filter(x=>PRI_ALL.includes(x))})}
+        if(typeof v.weekly==="boolean")rec.weekly=v.weekly;
+        if(Object.keys(rec).length)out.people[e]=rec;
+      });
+    }
     if(st.pri&&typeof st.pri==="object"){
       out.pri={};
       NOTIFY_ROLES.forEach(r=>{
@@ -2850,6 +2988,7 @@ function enterApp(){
   render();
   startPoll();
   openTicketFromUrl(); // #t/<shortId> from an email link or copied URL
+  openStoreFromUrl();  // #s/<storeId> from a weekly summary
   refreshPaymiCount();
   if(!window.__paymiTimer)window.__paymiTimer=setInterval(refreshPaymiCount,5*60*1000);
 }
@@ -4176,6 +4315,31 @@ async function copyTicketLink(id){
 /* Resolve a #t/<shortId or id> hash to a ticket the signed-in person is allowed
    to see, then open it. Closed tickets aren't in the first payload for
    admins/directors, so fall back to the closed fetch before giving up. */
+/* ---- #s/<storeId> — one store, all of its tickets ---------------------------
+   The per-store view already existed behind Tiles; this just gives it an
+   address, so the store name in a weekly summary email can lead straight to
+   it. Unlike a ticket link there is no share token: a store's whole list is
+   for staff, so this needs a login. Arriving logged out lands on the sign-in
+   screen and continues here afterwards, because enterApp() runs this too. */
+function showStore(sid){
+  if(SESSION.role==="manager"){managerScreen="hub";render();return}   // they only have the one
+  owView="tiles"; coachScreen=sid; render();
+  try{window.scrollTo({top:0})}catch(e){}
+}
+function storePath(sid){return appBaseUrl()+"#s/"+encodeURIComponent(sid)}
+function openStoreFromUrl(){
+  const m=location.hash.match(/^#s\/([^\/?]+)/);
+  if(!m||!SESSION)return false;
+  const sid=decodeURIComponent(m[1]).trim();
+  if(!RESTAURANTS[sid]){toast("That store wasn't found","err");clearStoreHash();return false}
+  if(!myStoreIds().includes(sid)){toast("You don't have access to "+storeName(sid),"err");clearStoreHash();return false}
+  showStore(sid);
+  return true;
+}
+function clearStoreHash(){
+  if(/^#s\//.test(location.hash)){try{history.replaceState(null,"",location.pathname+location.search)}catch(e){}}
+}
+
 async function openTicketFromUrl(){
   const m=location.hash.match(/^#t\/([^\/]+)(?:\/[^\/]*)?$/); // token after the number is ignored when signed in
   if(!m||!SESSION)return false;
@@ -7300,6 +7464,7 @@ function openInventoryReport(){
 
 /* ============================================================ VENDORS */
 let _setTab="people";
+function ovMount(){try{if($("ovChips"))ovRender()}catch(e){}}
 function setSettingsTab(k){
   _setTab=k;
   document.querySelectorAll(".set-pane").forEach(el=>el.classList.toggle("hidden",el.getAttribute("data-pane")!==k));
@@ -7321,6 +7486,7 @@ function openSettings(){
   const dmOpts=Object.entries(MASTER.areaCoaches||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""))
     .map(([id,c])=>`<option value="${id}">${esc(c.name||id)}</option>`).join("");
   const np=NOTIFY_PREFS;
+  OV_DRAFT=JSON.parse(JSON.stringify(np.people||{})); OV_WHO="";
   const chk=(id,on)=>`<input type="checkbox" id="${id}"${on?" checked":""}>`;
   // defaults for the reply simulator: newest tickets, your own address, and a
   // reply that carries exactly the junk we want to see stripped off
@@ -7397,6 +7563,12 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
         <tbody>${notifyRows}</tbody>
       </table>
       <p class="set-hint" style="margin-top:8px">The <b>E</b> / <b>U</b> / <b>N</b> buttons under each tick are Emergency, Urgent and Normal. Switch one off and that person stops getting that kind of email at that priority \u2014 so a Director can take emergencies only while the DM still sees everything. All three on is the default.</p>
+
+      <div class="section-label" style="margin-top:24px">One person at a time<span class="ln"></span></div>
+      <p class="set-hint">The table above moves a whole role at once. Pick somebody here to give them their own answer instead \u2014 one Director on emergencies only, while the others carry on as they are. A person\u2019s own setting beats their role in both directions, so it can also single someone out on an event the role has switched off.</p>
+      ${ovSelect()}
+      <div id="ovChips"></div>
+      <div id="ovPanel" class="ov-panel hidden"></div>
 
       <div class="section-label" style="margin-top:24px">Weekly summaries<span class="ln"></span></div>
       <p class="set-hint">A Monday-morning digest, shaped differently for each role. Preview one to see it, or send yourself a real copy. While Test mode is on, everything below goes to your test addresses instead of the real people.</p>
@@ -7493,6 +7665,7 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
       <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
       <button class="btn btn-primary" style="flex:1" id="setSave" onclick="saveSettings()">Save</button>
     </div>`);
+  ovMount();          // the per-person panel paints once the pane is in the DOM
 }
 // find an admin record id by email, or null
 function adminIdByEmail(email){
@@ -7547,6 +7720,8 @@ async function saveSettings(){
           prefs.pri[r.key][e.key]=box?[...box.querySelectorAll(".pri-pill.on")].map(b=>b.dataset.p):PRI_ALL.slice();
         });
       });
+      prefs.people={};
+      Object.entries(OV_DRAFT).forEach(([em,v])=>{if(v&&Object.keys(v).length)prefs.people[em]=v});
       // Keep the record of when the last weekly send happened — losing it here
       // would let the cron send everybody a second copy the same morning.
       const wkWas=NOTIFY_PREFS.weekly||{};
@@ -7851,7 +8026,11 @@ function toggleTags(){SHOW_REF_TAGS=!SHOW_REF_TAGS;applyTags();toast(SHOW_REF_TA
   document.getElementById("appVersion").textContent="v"+APP_VERSION;
   ["emailIn","pwIn"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()}));
   window.addEventListener("resize",()=>{if(SESSION)applyTags()});
-  window.addEventListener("hashchange",()=>{if(SESSION&&/^#t\//.test(location.hash))openTicketFromUrl()});
+  window.addEventListener("hashchange",()=>{
+    if(!SESSION)return;
+    if(/^#t\//.test(location.hash))openTicketFromUrl();
+    else if(/^#s\//.test(location.hash))openStoreFromUrl();
+  });
   // Saved staff session wins (the ticket in the URL opens inside the app);
   // otherwise a tokened link opens the view-only guest page; otherwise sign in.
   tryRestoreSession().then(ok=>{if(!ok&&guestToken())tryGuestView()});
