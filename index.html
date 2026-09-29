@@ -1118,7 +1118,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.34";
+const APP_VERSION = "9.35";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2158,6 +2158,8 @@ function oneSelect(){
     .map(c=>({v:"dm|"+c.email.toLowerCase(),n:c.name||c.email})).sort((a,b)=>a.n.localeCompare(b.n)));
   add("General Managers",Object.entries(stores).filter(([,r])=>r.email)
     .map(([id,r])=>({v:"gm|"+r.email.toLowerCase(),n:(r.storeManager?r.storeManager+" — ":"")+(r.storeName||id)})).sort((a,b)=>a.n.localeCompare(b.n)));
+  add("Repair technicians",Object.values(MASTER.repairTechnicians||{}).filter(t=>t&&t.email)
+    .map(t=>({v:"tech|"+t.email.toLowerCase(),n:t.name||t.email})).sort((a,b)=>a.n.localeCompare(b.n)));
   return `<select class="input" id="wkOne"><option value="">— choose someone —</option>
     ${g.map(x=>`<optgroup label="${escA(x.label)}">${x.rows.map(r=>`<option value="${escA(r.v)}">${esc(r.n)}</option>`).join("")}</optgroup>`).join("")}</select>`;
 }
@@ -2335,6 +2337,27 @@ async function summaryPreview(kind){
     "Nothing was sent.");
   f.scrollIntoView({block:"nearest",behavior:"smooth"});
 }
+/* The receipt, as it would look for the run that is configured right now. It
+   asks the server to build one from the people who WOULD be emailed, so the
+   preview matches Monday rather than being a mock-up. Nothing is sent. */
+async function digestPreview(){
+  const btn=$("wkDigestBtn"); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Building…';
+  const kinds=SUMMARY_KINDS.map(k=>k.key).filter(k=>($("wk_"+k)||{}).checked);
+  const r=await chkPost({event:"digest",mode:"preview",dryKinds:kinds},25000);
+  btn.disabled=false;btn.textContent="Preview the receipt";
+  const f=$("wkFrame");
+  if(r.status!==200||!r.body||!r.body.ok){
+    f.classList.add("hidden");
+    return wkMsg("wkOut","bad","Couldn't build the receipt",
+      esc(String((r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status)))+
+      (r.status===400?" — your deployed notify.js is an older copy that doesn't know about the receipt.":""));
+  }
+  f.srcdoc=r.body.html; f.classList.remove("hidden");
+  wkMsg("wkOut","ok","Receipt preview — "+esc(r.body.subject),
+    "Built from the people who would be emailed on the next run. It would go to: "+
+    esc((r.body.to||[]).join(", ")||"nobody — no receipt address is set and no Overwatch login has an email")+". Nothing was sent.");
+  f.scrollIntoView({block:"nearest",behavior:"smooth"});
+}
 async function summarySendTest(kind){
   const to=(SESSION&&SESSION.email)||"";
   if(!to)return toast("No email on your session","err");
@@ -2385,6 +2408,8 @@ function unsavedSendSettings(){
   if(tt&&emails_(tt.value).join(",")!==(NOTIFY_PREFS.testTo||[]).join(","))
     out.push("The test addresses have changed");
   const v=$("wkVpTo");
+  const g=$("wkDigestTo");
+  if(g&&emails_(g.value).join(",")!==(NOTIFY_PREFS.digestTo||[]).join(","))return true;
   if(v&&emails_(v.value).join(",")!==(NOTIFY_PREFS.vpTo||[]).join(","))
     out.push("The VP address list has changed");
   return out;
@@ -2472,13 +2497,13 @@ const NOTIFY_DEFAULTS={
          gm:{created:true,status:true,comment:true},
          tech:{created:false,status:false,comment:false}, reporter:{created:false,status:false,comment:false},
          watcher:{created:false,status:false,comment:true}},
-  testMode:false, testTo:[], alwaysTo:[], vpTo:["rahim@dossaniparadise.com"], cutLines:[],
+  testMode:false, testTo:[], alwaysTo:[], vpTo:["rahim@dossaniparadise.com"], digestTo:[], cutLines:[],
   /* Which priorities each role/event pair wants. Missing means all three, so
      nothing changes for a record saved before this setting existed. */
   pri:{},
   /* One named person's own settings, beating their role's. Keyed by email. */
   people:{},
-  weekly:{on:false, day:"monday", kinds:["gm","dm","do","vp","ow"]},
+  weekly:{on:false, day:"monday", kinds:["gm","dm","do","vp","ow","tech"]},
   /* Nudges for tickets that are waiting on the store, not on a technician.
      The headset one is here because it is the case that prompted this; every
      field on it is editable and more can be added. */
@@ -2496,9 +2521,10 @@ const PRI_ALL=NOTIFY_PRIS.map(p=>p.key);
 const SUMMARY_KINDS=[
   {key:"gm",label:"General Managers",note:"their store's open tickets in full, each with a Yes / No button"},
   {key:"dm",label:"District Managers",note:"every store on their patch, ticket subject lines only"},
-  {key:"do",label:"Directors",note:"how many are open at each of their stores, most to least"},
-  {key:"vp",label:"VP level",note:"every store as a tile, worst first, split by emergency / urgent / normal"},
+  {key:"do",label:"Directors",note:"their stores split by District Manager, with the urgency breakdown"},
+  {key:"vp",label:"VP level",note:"every store as a tile, grouped by Director then District Manager"},
   {key:"ow",label:"Overwatch",note:"the same company-wide tile view, to everyone with an Overwatch login"},
+  {key:"tech",label:"Repair technicians",note:"the tickets dispatched to them by name, grouped by store"},
 ];
 const WEEK_DAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
 /** Which priorities this role/event pair is set to receive. */
@@ -2553,7 +2579,7 @@ function loadNotifyPrefs(){
       out.weekly={
         on:!!st.weekly.on,
         day:WEEK_DAYS.includes(st.weekly.day)?st.weekly.day:"monday",
-        kinds:Array.isArray(st.weekly.kinds)?st.weekly.kinds.filter(k=>["gm","dm","do","vp","ow"].includes(k)):["gm","dm","do","vp","ow"],
+        kinds:Array.isArray(st.weekly.kinds)?st.weekly.kinds.filter(k=>SUMMARY_KINDS.some(x=>x.key===k)):SUMMARY_KINDS.map(k=>k.key),
         lastSentYmd:st.weekly.lastSentYmd||"", lastSentAt:st.weekly.lastSentAt||0,
       };
     }
@@ -2567,7 +2593,7 @@ function loadNotifyPrefs(){
         // role's default rather than reading undefined as "off".
         NOTIFY_EVENTS.forEach(e=>{if(v[e.key]!==undefined)out.roles[r.key][e.key]=!!v[e.key]});
       });
-    ["testTo","alwaysTo","vpTo"].forEach(k=>{
+    ["testTo","alwaysTo","vpTo","digestTo"].forEach(k=>{
       const v=st[k];
       if(v===undefined&&k==="vpTo")return;   // a record saved before this existed keeps the built-in default
 
@@ -7946,6 +7972,11 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
         <input class="input" id="wkVpTo" value="${escA((np.vpTo||[]).join(", "))}" placeholder="sam@dossaniparadise.com, rahim@dossaniparadise.com" autocapitalize="off" spellcheck="false" oninput="sendSettingsHint()">
         <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Separate several with commas. The VP summary has no role behind it \u2014 it goes to exactly these people and covers every store in the company.</div>
       </div>
+      <div class="field" style="margin-top:10px"><label class="label">Send me a receipt</label>
+        <input class="input" id="wkDigestTo" value="${escA((np.digestTo||[]).join(", "))}" placeholder="itsupport@dossaniparadise.com" autocapitalize="off" spellcheck="false" oninput="sendSettingsHint()">
+        <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">When the weekly run finishes, these people get one email listing every summary and reminder that went out, who it went to, and any that failed. Leave it blank and it goes to everyone with an Overwatch login. It is sent in test mode too.</div>
+        <button type="button" class="btn btn-ghost btn-sm" id="wkDigestBtn" onclick="digestPreview()" style="margin-top:8px">Preview the receipt</button>
+      </div>
       <div id="wkOut"></div>
       <iframe id="wkFrame" class="wk-frame hidden" title="Summary preview"></iframe>
       <div class="section-label" style="margin-top:22px">Send one person theirs now<span class="ln"></span></div>
@@ -8129,6 +8160,7 @@ async function saveSettings(){
       const prefs={on:$("ntOn").checked,testMode:$("ntTest").checked,
         testTo:emails($("ntTestTo").value),alwaysTo:emails($("ntAlwaysTo").value),
         vpTo:emails(($("wkVpTo")||{}).value||""),
+        digestTo:emails(($("wkDigestTo")||{}).value||""),
         reminders:readReminders(),
         cutLines:String(($("ntCut")||{}).value||"").split("\n").map(x=>x.trim()).filter(Boolean),
         roles:{},pri:{},updatedAt:now(),updatedBy:SESSION.email};
