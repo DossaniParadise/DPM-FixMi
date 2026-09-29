@@ -525,6 +525,17 @@ button.inv-success:hover{background:rgba(5,150,105,.14)}
 .chk-grp:first-child{margin-top:2px}
 .sim-quote{margin-top:5px;padding:8px 10px;border-left:3px solid var(--green);background:var(--panel-2);border-radius:0 7px 7px 0;
   font-size:13px;line-height:1.5;color:var(--ink);white-space:pre-wrap}
+.rem-card{border:1px solid var(--line);border-radius:11px;padding:12px 13px;background:var(--panel-2);margin-bottom:10px}
+.rem-head{display:flex;gap:8px;align-items:center}
+.rem-head .rem-name{flex:1;min-width:0;font-weight:700}
+.rem-on{display:flex;gap:5px;align-items:center;font-size:12px;color:var(--ink-dim);white-space:nowrap}
+.rem-nums{display:flex;gap:12px;flex-wrap:wrap;margin-top:9px}
+.rem-nums .field{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.rem-nums .label{margin:0;white-space:nowrap}
+.rem-nums input{width:76px}
+.rem-unit{font-size:12px;color:var(--ink-dim)}
+.rem-roles{display:flex;gap:12px;flex-wrap:wrap;margin-top:4px}
+.rem-role{display:flex;gap:5px;align-items:center;font-size:13px;cursor:pointer}
 .ov-panel{margin-top:12px;border:1px solid var(--line);border-radius:11px;padding:13px 14px;background:var(--panel-2)}
 .ov-head{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
 .ov-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
@@ -1093,7 +1104,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.28";
+const APP_VERSION = "9.30";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2019,6 +2030,86 @@ function ovEffective(person,ev){
   const own=!!((r.roles&&typeof r.roles[ev]==="boolean")||(r.pri&&Array.isArray(r.pri[ev])));
   return {on,pri,own};
 }
+/* ---- reminder rules --------------------------------------------------------
+   Edited as a list of cards and read back off the DOM at save time, the same
+   way the rest of this pane works. */
+function remCard(r){
+  return `<div class="rem-card" data-rem="${escA(r.id)}">
+    <div class="rem-head">
+      <label class="rem-on"><input type="checkbox" class="rem-onbox"${r.on!==false?" checked":""}> <span>On</span></label>
+      <input class="input rem-name" value="${escA(r.name||"")}" placeholder="What this reminder is for">
+      <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.rem-card').remove()">✕</button>
+    </div>
+    <div class="field" style="margin-top:9px"><label class="label">When the ticket mentions any of</label>
+      <input class="input rem-match" value="${escA((r.match||[]).join(", "))}" placeholder="headset exchange, headsets to be replaced" autocapitalize="off" spellcheck="false">
+      <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">Separate with commas. Matched against the ticket text, its category and every comment on it, ignoring case.</div>
+    </div>
+    <div class="rem-nums">
+      <div class="field" style="margin:0"><label class="label">After</label>
+        <input class="input rem-days" type="number" min="0" step="1" value="${escA(String(r.days==null?7:r.days))}"><span class="rem-unit">days open</span></div>
+      <div class="field" style="margin:0"><label class="label">Then again every</label>
+        <input class="input rem-rep" type="number" min="0" step="1" value="${escA(String(r.repeatDays||0))}"><span class="rem-unit">days — 0 means once</span></div>
+    </div>
+    <div class="field" style="margin-top:9px"><label class="label">Send it to</label>
+      <div class="rem-roles">${REMINDER_ROLES.map(x=>`<label class="rem-role"><input type="checkbox" class="rem-to" value="${x.key}"${(r.to||[]).includes(x.key)?" checked":""}> ${esc(x.label)}</label>`).join("")}</div>
+    </div>
+    <div class="field" style="margin-top:9px"><label class="label">What it says</label>
+      <textarea class="input rem-msg" rows="3">${esc(r.message||"")}</textarea>
+    </div>
+  </div>`;
+}
+function addReminder(){
+  const host=$("remList"); if(!host)return;
+  const d=document.createElement("div");
+  d.innerHTML=remCard({id:"r"+uid(),on:true,name:"",match:[],days:7,repeatDays:0,to:["gm","dm"],message:""});
+  host.appendChild(d.firstElementChild);
+  host.lastElementChild.querySelector(".rem-name").focus();
+}
+function readReminders(){
+  return [...document.querySelectorAll(".rem-card")].map(c=>({
+    id:c.getAttribute("data-rem"),
+    on:c.querySelector(".rem-onbox").checked,
+    name:c.querySelector(".rem-name").value.trim()||"Reminder",
+    match:c.querySelector(".rem-match").value.split(/[,\n]/).map(x=>x.trim()).filter(Boolean),
+    days:Math.max(0,parseInt(c.querySelector(".rem-days").value,10)||0),
+    repeatDays:Math.max(0,parseInt(c.querySelector(".rem-rep").value,10)||0),
+    to:[...c.querySelectorAll(".rem-to:checked")].map(x=>x.value),
+    message:c.querySelector(".rem-msg").value.trim(),
+  })).filter(r=>r.match.length&&r.message&&r.to.length);
+}
+/** Show what is due right now without emailing anybody. */
+async function remCheck(){
+  const btn=$("remCheckBtn"); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Checking…';
+  const r=await chkPost({event:"reminders",mode:"due"},30000);
+  btn.disabled=false;btn.textContent="What's due right now?";
+  if(r.status!==200||!r.body||!r.body.ok)
+    return wkMsg("remOut","bad","Couldn't check",esc(String((r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status)))+
+      (r.status===400?" — your deployed notify.js is an older copy that doesn't know about reminders.":""));
+  const due=r.body.due||[];
+  if(!due.length)return wkMsg("remOut","ok","Nothing is due","No open ticket matches a rule and has been waiting long enough yet."+
+    (r.body.reason?" ("+esc(r.body.reason)+")":""));
+  wkMsg("remOut","warn",due.length+" reminder"+(due.length===1?"":"s")+" would go out now",
+    due.map(d=>esc(d.shortId)+" · "+esc(d.store)+" · open "+esc(d.openFor)+" → "+esc(d.to.join(", "))+" <span class=\"chk-role\">"+esc(d.rule)+"</span>").join("<br>"));
+}
+async function remSend(){
+  if(!sendGuard("remOut"))return;
+  const live=!NOTIFY_PREFS.testMode;
+  if(!confirm(live?"Send every reminder that is due now?\n\nTest mode is OFF, so these go to the real GMs and DMs."
+                  :"Send every reminder that is due now to your test addresses? Nobody real is emailed."))return;
+  const btn=$("remSendBtn"); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Sending…';
+  const r=await chkPost({event:"reminders"},45000);
+  btn.disabled=false;btn.textContent="Send the due ones now";
+  if(r.status===200&&r.body&&r.body.sent){
+    const st=r.body.stamped||0;
+    wkMsg("remOut",r.body.stampError?"warn":"ok","Sent "+r.body.sent+" email"+(r.body.sent===1?"":"s"),
+      (r.body.testMode?"Test mode was on, so they went to your test addresses. ":"")+
+      (r.body.stampError
+        ? "The tickets were NOT marked as reminded ("+esc(r.body.stampError)+"), so these will go out again on the next run."
+        : st+" ticket"+(st===1?"":"s")+" marked as reminded, so the nightly run won't send them again."));
+  }
+  else wkMsg("remOut","warn","Nothing went out",esc(String((r.body&&r.body.reason)||(r.body&&r.body.error)||r.error||("HTTP "+r.status))));
+}
+
 /* Everyone who could be sent a summary, grouped the way the emails are shaped.
    The value carries both which summary and which person, since the same address
    can sit in more than one group. */
@@ -2298,7 +2389,18 @@ const NOTIFY_DEFAULTS={
   /* One named person's own settings, beating their role's. Keyed by email. */
   people:{},
   weekly:{on:false, day:"monday", kinds:["gm","dm","do","vp","ow"]},
+  /* Nudges for tickets that are waiting on the store, not on a technician.
+     The headset one is here because it is the case that prompted this; every
+     field on it is editable and more can be added. */
+  reminders:[{
+    id:"headset-return", on:true, name:"Headset exchange return",
+    match:["headset exchange","headsets to be replaced","headset return","return has been shipped"],
+    days:7, repeatDays:7, to:["gm","dm"],
+    message:"Reminder to keep an eye out for your headset exchange, be sure to send the old ones back to avoid being charged.",
+  }],
 };
+const REMINDER_ROLES=[{key:"gm",label:"GM"},{key:"dm",label:"DM"},{key:"director",label:"Director"},
+  {key:"tech",label:"Tech"},{key:"reporter",label:"Reporter"}];
 const NOTIFY_PRIS=[{key:"emergency",short:"E",label:"Emergency"},{key:"urgent",short:"U",label:"Urgent"},{key:"normal",short:"N",label:"Normal"}];
 const PRI_ALL=NOTIFY_PRIS.map(p=>p.key);
 const SUMMARY_KINDS=[
@@ -2321,6 +2423,16 @@ function loadNotifyPrefs(){
   if(st&&typeof st==="object"){
     if(typeof st.on==="boolean")out.on=st.on;
     if(typeof st.testMode==="boolean")out.testMode=st.testMode;
+    if(st.reminders!==undefined){
+      out.reminders=(Array.isArray(st.reminders)?st.reminders:[]).filter(r=>r&&typeof r==="object").map(r=>({
+        id:String(r.id||"").trim()||("r"+Math.random().toString(36).slice(2,9)),
+        on:r.on!==false, name:String(r.name||"Reminder"),
+        match:(Array.isArray(r.match)?r.match:String(r.match||"").split(/[,\n]/)).map(x=>String(x).trim()).filter(Boolean),
+        days:Math.max(0,Number(r.days)||0), repeatDays:Math.max(0,Number(r.repeatDays)||0),
+        to:(Array.isArray(r.to)?r.to:[]).filter(k=>REMINDER_ROLES.some(x=>x.key===k)),
+        message:String(r.message||""),
+      }));
+    }
     if(st.people&&typeof st.people==="object"){
       out.people={};
       // Either shape: the list written now, or the old map keyed by email.
@@ -7761,6 +7873,16 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
       <div id="wkOut"></div>
       <iframe id="wkFrame" class="wk-frame hidden" title="Summary preview"></iframe>
 
+      <div class="section-label" style="margin-top:24px">Reminders<span class="ln"></span></div>
+      <p class="set-hint">For tickets that are waiting on the store rather than on a technician \u2014 an exchange where the old units have to go back, say. Nothing is broken, so nothing prompts anyone, and the first sign of trouble is an invoice. A rule watches for the wording, waits, then nudges whoever can act. Replies to a reminder land on the ticket as a comment, so a tracking number can just be replied back.</p>
+      <div id="remList">${(np.reminders||[]).map(remCard).join("")}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addReminder()">+ Add a reminder</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="remCheckBtn" onclick="remCheck()">What\u2019s due right now?</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="remSendBtn" onclick="remSend()">Send the due ones now</button>
+      </div>
+      <div id="remOut"></div>
+
       <div id="wkUnsaved"></div>
       <div class="section-label" style="margin-top:22px">Send one person theirs now<span class="ln"></span></div>
       <p class="set-hint">Off-schedule, for when somebody wants their summary on a Thursday. It builds that person\u2019s own summary \u2014 their store, their patch, or the whole company \u2014 and sends it to them. Test mode still diverts it to you.</p>
@@ -7896,6 +8018,7 @@ async function saveSettings(){
       const prefs={on:$("ntOn").checked,testMode:$("ntTest").checked,
         testTo:emails($("ntTestTo").value),alwaysTo:emails($("ntAlwaysTo").value),
         vpTo:emails(($("wkVpTo")||{}).value||""),
+        reminders:readReminders(),
         cutLines:String(($("ntCut")||{}).value||"").split("\n").map(x=>x.trim()).filter(Boolean),
         roles:{},pri:{},updatedAt:now(),updatedBy:SESSION.email};
       NOTIFY_ROLES.forEach(r=>{
