@@ -1118,7 +1118,7 @@ const API_BASE_URL = "https://alignment-api-khaki.vercel.app/api/dpm-alignment";
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.31";
+const APP_VERSION = "9.32";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1919,6 +1919,8 @@ async function runConnectionCheck(){
       "Upload answer.js into the api folder and let Vercel redeploy. Until then the Yes / No buttons in a summary go nowhere.");
     else if(a.status===500) chkSet("ansreach","bad","It answered 500 — a required setting is missing.",
       "Most likely FIXMI_WRITE_PASSWORD or FIXMI_SHARED_SECRET isn't set in Vercel.");
+    else if(a.status===405) chkSet("ansreach","bad","405 — the file at api/answer.js is not answer.js.",
+      "405 means whatever is there only accepts POST, and the Yes / No buttons are ordinary links. Almost always this is notify.js or inbound.js sitting under the wrong filename. Re-upload answer.js over it. Until then those buttons return an error page instead of recording the answer.");
     else if(!a.status) chkSet("ansreach","bad","Couldn't reach it ("+esc(a.error||"no answer")+").");
     else chkSet("ansreach","warn","Unexpected reply: HTTP "+a.status+".");
 
@@ -1935,7 +1937,7 @@ async function runConnectionCheck(){
     // 15 — and what it will actually do when Vercel pokes it
     chkSet("wkcfg","run");
     const k=b.weekly||{};
-    const names={gm:"General Managers",dm:"District Managers",do:"Directors"};
+    const names={gm:"General Managers",dm:"District Managers",do:"Directors",vp:"the VP list",ow:"Overwatch"};
     const who=(k.kinds||[]).map(x=>names[x]||x).join(", ")||"nobody";
     const last=k.lastSentAt?("Last sent "+esc(new Date(k.lastSentAt).toLocaleString())):"Never sent yet";
     if(!k.on) chkSet("wkcfg","warn","Switched off — nothing goes out on its own. "+last+".",
