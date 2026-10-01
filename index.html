@@ -252,12 +252,39 @@ body.no-reftags .reftag{display:none}
 .sp-opt:last-child{border-bottom:none}
 .sp-opt:hover{background:var(--panel-2)}
 .sp-opt.cur{background:rgba(29,118,187,.10);font-weight:700}
+/* ---- the map's ticket deck ---------------------------------------------- */
+.deck-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.deck-count{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-dim);margin-top:4px}
+.deck-chips{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.deck-id{font-size:11px;color:var(--ink-dim)}
+.deck-desc{font-size:17px;line-height:1.4;font-weight:600;margin:12px 0 14px}
+.deck-facts{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
+.deck-facts>div{display:flex;justify-content:space-between;gap:14px;font-size:13.5px;
+  border-bottom:1px solid var(--line-soft);padding-bottom:7px}
+.deck-facts .k{color:var(--ink-dim)}
+.deck-facts .v{text-align:right;font-weight:600}
+.deck-foot{display:flex;gap:10px;align-items:center}
+.deck-nav{flex:0 0 52px;font-size:22px;line-height:1;padding:11px 0;font-weight:700}
+/* A short slide tells the eye which way the deck moved. Anyone who has asked
+   their system not to animate gets the change with no movement at all. */
+@keyframes deckInNext{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:none}}
+@keyframes deckInPrev{from{opacity:0;transform:translateX(-26px)}to{opacity:1;transform:none}}
+.deck-body.deck-next{animation:deckInNext .16s ease-out}
+.deck-body.deck-prev{animation:deckInPrev .16s ease-out}
+@media(prefers-reduced-motion:reduce){.deck-body.deck-next,.deck-body.deck-prev{animation:none}}
 .cap-note{background:var(--tint);border:1px solid var(--tint-line);border-radius:9px;
   padding:9px 12px;margin-bottom:10px;font-size:12.5px;color:var(--ink-mid)}
 /* A tile whose number has gone out of date: the figure is still true of what
    is in the browser, so it stays readable, but the tile stops looking live. */
 .tile.stale .tile-n{opacity:.5}
 .tile.stale .tile-s{color:var(--amber);font-weight:700}
+/* type="search" brings WebKit's own round clear button, which collides with
+   the picker's caret and looks nothing like the rest of the app. */
+.input[type="search"]::-webkit-search-decoration,
+.input[type="search"]::-webkit-search-cancel-button,
+.input[type="search"]::-webkit-search-results-button{-webkit-appearance:none;appearance:none}
+.input[type="search"]{-webkit-appearance:none;appearance:none}
 .sp-why{display:block;font-size:11.5px;color:var(--ink-dim);margin-top:2px;font-weight:400;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sp-opt.cur .sp-why{color:var(--amber)}
@@ -1336,7 +1363,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.42";
+const APP_VERSION = "9.43";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -3883,7 +3910,9 @@ function renderBoard(){
         ${storeIds.length>1?storePicker({id:"boardStore",ids:storeIds,selected:curStore,
           allLabel:`All stores (${storeIds.length})`,onChange:"curStore=this.value;render()"}):""}
         ${sortSelect()}
-        <input class="input search" placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="onSearchInput(this)">
+        <input class="input search" type="search" inputmode="search" enterkeyhint="search"
+        autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"
+        placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="onSearchInput(this)">
       </div>
       ${(curFilter==="dispatched"&&curSort==="priority")?(TECH_LOC
         ? `<div class="loc-note ok">📍 Sorted nearest first from your location</div>`
@@ -3975,7 +4004,9 @@ function renderBoard(){
       ${(curFilter==="dispatched"||curFilter==="assigned")?assigneeFilterSelect(allTickets):""}
       ${SESSION.role==="admin"?categoryFilterSelect():""}
       ${sortSelect()}
-      <input class="input search" placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="onSearchInput(this)">
+      <input class="input search" type="search" inputmode="search" enterkeyhint="search"
+        autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"
+        placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="onSearchInput(this)">
     </div>`;
 
   if(!storeIds.length) return head+`<div class="empty"><div class="empty-mark">🏪</div><h3>No stores assigned to you</h3><p>Managed in the master.</p></div>`;
@@ -4476,6 +4507,7 @@ function modal(html){
   activeModal=o;
 }
 function closeModal(){
+  DECK={sid:null,ids:[],i:0};
   _modalReturn=null;
   clearTicketHash();
   if(DM_PROMPT_TID){const t=DM_PROMPT_TID;DM_PROMPT_TID=null;dmLog(t,"dismissed the reminder without confirming");}
@@ -6367,7 +6399,9 @@ async function initZoneMap(){
     const m=L.marker([p.lat,p.lng],{icon:L.divIcon({className:"zm-wrap",html:zoneMarkerHtml(p),
       iconSize:[size,size],iconAnchor:[size/2,size/2]}),riseOnHover:true}).addTo(ZONEMAP);
     m.bindTooltip(`${storeName(p.sid)} — ${p.open} open · ${p.techName}`,{direction:"top",offset:[0,-10]});
-    m.on("click",()=>owFocusStore(p.sid));
+    /* Stay on the map. A pin with work opens that store's deck; an empty one
+       still falls through to the list, where "nothing open" makes sense. */
+    m.on("click",()=>{ if(p.open>0) openStoreDeck(p.sid); else owFocusStore(p.sid) });
     bounds.push([p.lat,p.lng]);
   });
   if(bounds.length) ZONEMAP.fitBounds(bounds,{padding:[36,36],maxZoom:11});
@@ -6376,6 +6410,119 @@ async function initZoneMap(){
 
 // Tap a store on the map -> its ticket list, filtered to that store.
 function owFocusStore(sid){owView="list";curStore=sid;curFilter="active";render();}
+
+/* ============================================================ MAP TICKET DECK
+   Tapping a pin used to throw the user into List view, which loses the map and
+   their place on it. A technician planning a route wants the opposite: stay on
+   the map, glance at a job, flick to the next one at that store, dismiss.
+
+   So a pin opens a deck of that store's open tickets — one card at a time,
+   with arrows, arrow keys and a horizontal swipe. Read-only on purpose: the
+   full sheet is one tap away when they actually want to change something. */
+let DECK={sid:null,ids:[],i:0};
+
+function deckTickets(sid){
+  return Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}))
+    .filter(t=>t.storeId===sid&&ACTIVE_STATUSES.includes(t.status))
+    .filter(t=>SESSION.role!=="tech"||t.assignedTechId===SESSION.refId)
+    .sort((a,b)=>priRankOf(a)-priRankOf(b)||(a.createdAt||0)-(b.createdAt||0))
+    .map(t=>t._id);
+}
+function openStoreDeck(sid,start){
+  const ids=deckTickets(sid);
+  if(!ids.length){ toast("Nothing open at "+storeName(sid)); return }
+  DECK={sid,ids,i:Math.min(Math.max(0,start||0),ids.length-1)};
+  drawDeck();
+}
+function deckStep(d){
+  if(!DECK.ids.length)return;
+  const n=DECK.ids.length;
+  DECK.i=(DECK.i+d+n)%n;              // wraps, so a flick never dead-ends
+  drawDeck(d>0?"next":"prev");
+}
+function drawDeck(dir){
+  const id=DECK.ids[DECK.i], t=TICKETS[id];
+  if(!t){ closeModal(); return }
+  const st=STATUSES[t.status]||STATUSES.unassigned;
+  const who=ticketAssignee({...t,_id:id});
+  const n=DECK.ids.length;
+  const acts=(t.activity||[]).slice().reverse().slice(0,6).map(a=>`
+    <div class="tl-item"><div class="tl-dot" style="background:${(STATUSES[a.toStatus]||{}).color||'var(--amber)'}"></div>
+      <div class="tl-c"><div class="tl-act">${esc(actionText(a))}</div>
+      <div class="tl-meta">${esc(a.by||"")} · ${fmtDate(a.ts)}</div>
+      ${a.note?`<div class="tl-note">"${esc(a.note)}"</div>`:""}</div></div>`).join("");
+  modal(`
+    <div class="sheet-head deck-head">
+      <div style="min-width:0">
+        <h2 style="margin:0">${esc(storeName(DECK.sid))}</h2>
+        <div class="deck-count">${n>1?`Ticket ${DECK.i+1} of ${n}`:"1 open ticket"}</div>
+      </div>
+      <button class="x-btn" onclick="closeModal()" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-body deck-body ${dir?("deck-"+dir):""}" id="deckBody">
+      <div class="deck-chips">
+        <span class="r-st" style="--tc:${st.color};--tci:${st.ink||st.color}">${esc(st.label)}</span>
+        <span class="r-pri ${({normal:"n",urgent:"u",emergency:"e"})[t.priority||"normal"]||"n"}">${PRIORITIES[t.priority||"normal"]||"Normal"}</span>
+        <span class="deck-id mono">${esc(t.shortId||"")}</span>
+      </div>
+      <div class="deck-desc">${esc(t.description||"No description")}</div>
+      <div class="deck-facts">
+        <div><span class="k">Category</span><span class="v">${esc(catPath(t))}</span></div>
+        <div><span class="k">Opened</span><span class="v">${fmtDate(t.createdAt)} · ${esc(timeAgo(t.createdAt))}</span></div>
+        ${who?`<div><span class="k">Assigned</span><span class="v">${esc(who.name)}</span></div>`:""}
+        ${t.waitingReason?`<div><span class="k">Waiting on</span><span class="v">${esc(t.waitingReason)}</span></div>`:""}
+      </div>
+      ${(t.assignNote&&t.assignNote.text)?`<div class="close-note assign-note">
+        <b>Instructions${t.assignNote.to?" for "+esc(t.assignNote.to):""} — ${esc(t.assignNote.by||"")}</b>
+        ${esc(t.assignNote.text)}</div>`:""}
+      ${photoThumbs({...t,_id:id})}
+      <div class="section-label">Comments<span class="ln"></span></div>
+      <div class="comments">${renderComments(t)}</div>
+      <div class="section-label">History<span class="ln"></span></div>
+      <div class="timeline">${acts||'<div style="color:var(--ink-dim);font-size:13px">No activity yet.</div>'}</div>
+    </div>
+    <div class="sheet-foot deck-foot">
+      ${n>1?`<button class="btn btn-ghost deck-nav" onclick="deckStep(-1)" aria-label="Previous ticket">‹</button>`:""}
+      <button class="btn btn-primary" style="flex:1" onclick="deckOpenFull()">Open full ticket</button>
+      ${n>1?`<button class="btn btn-ghost deck-nav" onclick="deckStep(1)" aria-label="Next ticket">›</button>`:""}
+    </div>`);
+  bindDeckSwipe();
+}
+function deckOpenFull(){ const id=DECK.ids[DECK.i]; closeModal(); openTicket(id); }
+
+/* Horizontal flick moves between tickets; a mostly-vertical drag is a scroll
+   and is left alone, or the card would jump every time somebody reads down it. */
+function bindDeckSwipe(){
+  const el=$("deckBody"); if(!el||DECK.ids.length<2)return;
+  let x0=null,y0=null,locked=null;
+  el.addEventListener("touchstart",e=>{
+    if(e.touches.length!==1)return;
+    x0=e.touches[0].clientX; y0=e.touches[0].clientY; locked=null;
+  },{passive:true});
+  el.addEventListener("touchmove",e=>{
+    if(x0==null||e.touches.length!==1)return;
+    const dx=e.touches[0].clientX-x0, dy=e.touches[0].clientY-y0;
+    if(locked===null&&(Math.abs(dx)>10||Math.abs(dy)>10)) locked=Math.abs(dx)>Math.abs(dy)?"x":"y";
+  },{passive:true});
+  el.addEventListener("touchend",e=>{
+    if(x0==null)return;
+    const t=e.changedTouches[0], dx=t.clientX-x0, dy=t.clientY-y0;
+    x0=null;
+    if(locked!=="x")return;
+    if(Math.abs(dx)>55&&Math.abs(dx)>Math.abs(dy)) deckStep(dx<0?1:-1);
+  },{passive:true});
+}
+/* Arrow keys do the same on a laptop. Bound once, and only acts while a deck
+   is actually on screen. */
+document.addEventListener("keydown",e=>{
+  if(!DECK.ids.length)return;
+  const o=$("modalOverlay"); if(!o||!o.classList.contains("on"))return;
+  if(!o.querySelector(".deck-body"))return;
+  const el=document.activeElement;
+  if(el&&/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))return;   // let a field have its arrows
+  if(e.key==="ArrowRight"){deckStep(1);e.preventDefault()}
+  else if(e.key==="ArrowLeft"){deckStep(-1);e.preventDefault()}
+});
 /* Hover card. The old SVG <title> was the browser's native tooltip: ~1s delay
    and unstyleable. This one is instant and follows the cursor. */
 function owTip(e,g){
@@ -7933,7 +8080,8 @@ function storePicker(opts){
   const dis=disabled?" disabled":"";
   return `<div class="sp" data-sp="${id}">
     <select class="input sp-native" id="${id}"${dis} onchange="${onChange||""}">${options}</select>
-    <input class="input sp-input" id="${id}_q"${dis} autocomplete="off" spellcheck="false"
+    <input class="input sp-input" id="${id}_q"${dis} type="search" inputmode="search" enterkeyhint="search"
+      autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"
       placeholder="Search stores…" value="${escA(cur)}"
       onfocus="spOpen('${id}')" oninput="spFilter('${id}')" onkeydown="spKey(event,'${id}')">
     <button type="button" class="sp-caret"${dis} onclick="spToggle('${id}')" tabindex="-1">▾</button>
