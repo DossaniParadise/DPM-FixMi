@@ -1336,7 +1336,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.41";
+const APP_VERSION = "9.42";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -3615,18 +3615,59 @@ async function silentRefresh(){
   // upload and can make it stall. Resume automatically once uploads finish.
   if(_uploadsInFlight>0) return;
   const dot=$("pollDot");dot.classList.add("busy");$("pollTxt").textContent="syncing";
-  try{await refresh();if(!$("modalOverlay")||!$("modalOverlay").classList.contains("on"))render()}catch(e){}
+  try{
+    await refresh();
+    const modalUp=$("modalOverlay")&&$("modalOverlay").classList.contains("on");
+    /* Never rebuild the view out from under someone who is typing in it. On a
+       phone that also resets the on-screen keyboard back to letters, which is
+       what made entering a number mid-search so painful. Repainting just the
+       results keeps their field, caret and keypad exactly as they were. */
+    if(!modalUp){ if(!typingInView()||!repaintList()) render(); }
+  }catch(e){}
   dot.classList.remove("busy");$("pollTxt").textContent="live";
 }
 async function manualRefresh(){const b=$("refreshBtn");b.style.transform="rotate(360deg)";await silentRefresh();setTimeout(()=>b.style.transform="",300);toast("Refreshed")}
 
 /* ============================================================ RENDER ROOT */
+/* ---- keeping the caret across a re-render --------------------------------
+   render() rebuilds #mainView wholesale, which destroys whatever the user was
+   typing in. onSearchInput put the focus back for its own keystroke, but the
+   20-second background poll calls render() too and did not — so roughly every
+   twenty seconds the search box went dead mid-word and had to be clicked
+   again. Capturing it here fixes it for every caller at once. */
+/* Is the user mid-entry somewhere inside the main view right now? */
+function typingInView(){
+  const el=document.activeElement, host=$("mainView");
+  return !!(el&&host&&host.contains(el)&&/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+}
+function captureFocus(){
+  const el=document.activeElement;
+  if(!el||!/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))return null;
+  const host=$("mainView");
+  if(!host||!host.contains(el))return null;          // modals rebuild themselves
+  const sel=el.id?"#"+CSS.escape(el.id)
+    :(el.className?el.tagName.toLowerCase()+"."+String(el.className).trim().split(/\s+/).map(c=>CSS.escape(c)).join("."):null);
+  if(!sel)return null;
+  let start=null,end=null;
+  try{start=el.selectionStart;end=el.selectionEnd}catch(e){}   // not every input type allows this
+  return {sel,start,end,scroll:host.scrollTop};
+}
+function restoreFocus(f){
+  if(!f)return;
+  const el=document.querySelector(f.sel);
+  if(!el)return;
+  try{
+    el.focus({preventScroll:true});
+    if(f.start!=null&&el.setSelectionRange)el.setSelectionRange(f.start,f.end);
+  }catch(e){}
+}
 function render(){
+  const _focus=captureFocus();
   const v=$("mainView");
   const role=SESSION.role;
   if(owView===null)owView=defaultViewFor(role);
   // Managers are single-store; map/tiles add nothing, so they keep their hub.
-  if(role==="manager"&&managerScreen==="hub"){v.innerHTML=renderManagerHub();applyTags();return}
+  if(role==="manager"&&managerScreen==="hub"){v.innerHTML=renderManagerHub();applyTags();restoreFocus(_focus);return}
   let body;
   if(owView==="map")        body=renderZoneMap();
   else if(owView==="tiles") body=(coachScreen==="hub")?renderCoachHub():renderCoachStore(coachScreen);
@@ -3635,6 +3676,7 @@ function render(){
   // renders the full inventory card inside the hub itself.
   v.innerHTML=(role==="admin"?paymiBanner():"")+owToggle()+(role==="admin"&&owView!=="tiles"?invOwBar():"")+body;
   applyTags();
+  restoreFocus(_focus);
   if(owView==="map")setTimeout(initZoneMap,0);
 }
 /* View switcher — available to every role. */
@@ -3643,18 +3685,53 @@ function owToggle(){
   return `<div class="ow-toggle">${b("map","Map","🗺")}${b("list","List","☰")}${b("tiles","Tiles","▦")}</div>`;
 }
 function setOwView(k){owView=k;if(k==="tiles")coachScreen="hub";render();}
-/* Typing in a search box re-renders the view, which replaces the <input> node
-   and drops focus after the first keystroke. This updates the term, re-renders,
-   then restores focus + caret to the freshly-rendered search field. */
+/* The results half of the board: heading, the "showing the first N" note and
+   the rows. Rendered on its own so a keystroke never touches the controls. */
+function boardListHtml(rows,label){
+  const shown=rows.slice(0,ROW_CAP);
+  const listHead=`<div class="list-head">${esc(label)} tickets <span class="lh-n">(${rows.length})</span></div>`;
+  const capNote=rows.length>shown.length
+    ? `<div class="cap-note">Showing the first ${shown.length} of ${rows.length}. ${curSearch?"Add another word to narrow it.":"Search, or pick a status, to narrow it."}</div>`
+    : "";
+  const body = rows.length
+    ? capNote+`<div class="rows">${shown.map(ticketRow).join("")}</div>`
+    : `<div class="empty"><div class="empty-mark">🗂️</div><h3>Nothing here</h3><p>${curSearch?"No tickets match your search.":"No tickets in this view."}</p></div>`;
+  return listHead+body;
+}
+/* Repaint only the results. Returns false if the board is not on screen, so
+   the caller can fall back to a full render. */
+function repaintList(){
+  const zone=$("listZone");
+  if(!zone||owView!=="list"||SESSION.role==="manager")return false;
+  let storeIds=myStoreIds(), all=[];
+  if(SESSION.role==="tech"){
+    all=Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}))
+      .filter(t=>TECH_VISIBLE_STATUSES.includes(t.status))
+      .filter(t=>t.assignedTechId===SESSION.refId);
+  }else{
+    storeIds.forEach(sid=>{all=all.concat(ticketsForStore(sid))});
+  }
+  let rows=all;
+  if(curStore!=="all")rows=rows.filter(t=>t.storeId===curStore);
+  rows=applyFilterSearch(rows);
+  const label=({active:"Open",all:"All",unassigned:"Unassigned",assigned:"Assigned",dispatched:"Dispatched",
+    waiting:"Waiting",in_progress:"In Progress",finished:"Finished",closed:"Closed"})[curFilter]||"";
+  zone.innerHTML=boardListHtml(rows,label);
+  applyTags();
+  return true;
+}
+/* Typing is debounced: at several hundred tickets a keystroke-by-keystroke
+   repaint is wasted work, and the pause lets a fast typist get ahead of it.
+   The INPUT ITSELF is never re-rendered, which is what keeps the caret, the
+   text selection and a phone's number pad where the user left them. */
+let _searchTimer=null;
 function onSearchInput(el){
   curSearch=el.value;
-  const caret=el.selectionStart;
-  render();
-  const next=document.querySelector(".input.search");
-  if(next){
-    next.focus();
-    try{const p=(caret==null?next.value.length:caret);next.setSelectionRange(p,p);}catch(e){}
-  }
+  if(_searchTimer)clearTimeout(_searchTimer);
+  _searchTimer=setTimeout(()=>{
+    _searchTimer=null;
+    if(!repaintList())render();      // not on the board — fall back
+  },140);
 }
 
 /* ---- manager hub: single action + their open tickets listed below ---- */
@@ -3913,18 +3990,16 @@ function renderBoard(){
      assign dropdown — and the archive can run to thousands. Past this many
      the browser spends longer laying out rows than anybody spends reading
      them, so draw a screenful and say what is being held back. */
-  const shown=rows.slice(0,ROW_CAP);
-  const listHead=`<div class="list-head">${esc(label)} tickets <span class="lh-n">(${rows.length})</span></div>`;
-  const capNote=rows.length>shown.length
-    ? `<div class="cap-note">Showing the first ${shown.length} of ${rows.length}. ${curSearch?"Add another word to narrow it.":"Search, or pick a status, to narrow it."}</div>`
-    : "";
-  const body = rows.length
-    ? capNote+`<div class="rows">${shown.map(ticketRow).join("")}</div>`
-    : `<div class="empty"><div class="empty-mark">🗂️</div><h3>Nothing here</h3><p>${curSearch?"No tickets match your search.":"No tickets in this view."}</p></div>`;
-
-  return head+listHead+body+(canCreate()?`<button class="fab" onclick="openCreate()">＋ New</button>`:"");
+  /* The list lives in its own element so that typing in the search box can
+     repaint JUST the results. Rebuilding the whole view on every keystroke
+     destroyed and recreated the search input, which on a phone also resets
+     the on-screen keyboard to letters — so a phone number had to be typed
+     one digit at a time. */
+  return head+`<div id="listZone">${boardListHtml(rows,label)}</div>`
+    +(canCreate()?`<button class="fab" onclick="openCreate()">＋ New</button>`:"");
 
   function tile(key,n,label,sub,c,extra){
+    // (declared inside renderBoard so it can read curFilter without arguments)
     const on=curFilter===key;
     const big=on&&["unassigned","assigned","dispatched","waiting","in_progress","finished"].includes(key)?" big":"";
     return `<button class="tile ${on?"on":""}${big}${extra?" "+extra:""}" style="--tc:${c}" onclick="pickStatus('${key}')">
@@ -4372,7 +4447,21 @@ async function rowUnassign(id){
 let activeModal=null;
 function modal(html){
   let o=$("modalOverlay");
-  if(!o){o=document.createElement("div");o.id="modalOverlay";o.className="overlay";document.body.appendChild(o);o.addEventListener("click",e=>{if(e.target===o)closeModal()})}
+  if(!o){
+    o=document.createElement("div");o.id="modalOverlay";o.className="overlay";document.body.appendChild(o);
+    /* Tapping the backdrop closes the sheet — but a click's target is the
+       nearest ancestor COMMON to where the button went down and where it came
+       up. Swipe to select text in a field and release past its edge, and the
+       browser reports that click on the overlay, which was closing the sheet
+       and throwing the typing away. So remember where the press started and
+       only close when the whole gesture belongs to the backdrop. */
+    o.addEventListener("pointerdown",e=>{o._downOn=e.target},true);
+    o.addEventListener("click",e=>{
+      const startedOnBackdrop = o._downOn===o || o._downOn==null;
+      o._downOn=null;
+      if(e.target===o && startedOnBackdrop) closeModal();
+    });
+  }
   // A closeModal() schedules a delayed content wipe (for the fade-out). If a
   // new modal opens before that timer fires, the wipe would erase it — cancel
   // any pending wipe so back-to-back close→open is always safe.
