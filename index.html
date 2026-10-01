@@ -252,6 +252,12 @@ body.no-reftags .reftag{display:none}
 .sp-opt:last-child{border-bottom:none}
 .sp-opt:hover{background:var(--panel-2)}
 .sp-opt.cur{background:rgba(29,118,187,.10);font-weight:700}
+.cap-note{background:var(--tint);border:1px solid var(--tint-line);border-radius:9px;
+  padding:9px 12px;margin-bottom:10px;font-size:12.5px;color:var(--ink-mid)}
+/* A tile whose number has gone out of date: the figure is still true of what
+   is in the browser, so it stays readable, but the tile stops looking live. */
+.tile.stale .tile-n{opacity:.5}
+.tile.stale .tile-s{color:var(--amber);font-weight:700}
 .sp-why{display:block;font-size:11.5px;color:var(--ink-dim);margin-top:2px;font-weight:400;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sp-opt.cur .sp-why{color:var(--amber)}
@@ -1330,7 +1336,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.40";
+const APP_VERSION = "9.41";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2839,6 +2845,9 @@ let pollTimer=null;
    is actually opened, then cached for the session (re-fetched if older than
    CLOSED_TTL_MS). Tickets closed locally are added to the cache immediately
    so the Closed tab is instantly correct even while the CDN copy lags. */
+/* How many rows the list will draw at once. Everything past this is still
+   counted, searched and sorted — just not laid out until the list is narrowed. */
+const ROW_CAP=250;
 let CLOSED_TICKETS={};      // id -> ticket (fetched on demand + locally closed)
 let CLOSED_COUNT=0;         // server-reported count; drives the tile number
 let CLOSED_LOADED=false;    // has ?closed=only been fetched this session?
@@ -3849,14 +3858,26 @@ function renderBoard(){
   const MID=["unassigned","assigned","dispatched","waiting","in_progress"].concat(["finished"]);
   const midActive=MID.includes(curFilter);
   if(midActive){tilesExpanded=true;_tilePinned=true;}
-  /* Closed rows are not downloaded until something asks for them, so until
-     then the honest total is what is loaded plus the count the server sent. */
-  const seesClosed=["admin","director"].includes(SESSION.role);
-  const allN=allTickets.length+((seesClosed&&!CLOSED_LOADED)?CLOSED_COUNT:0);
+  /* ---- the ALL tile ------------------------------------------------------
+     Overwatch only. Everyone else works inside one status at a time and does
+     not need — or want to pay for — the whole closed archive.
+
+     It never loads anything on its own and never shows a number it has not
+     actually got. At rest it reads "Tap to load"; once loaded it shows the
+     real total; when the server's closed count moves away from what we hold,
+     it says "Tap to refresh" rather than quietly re-downloading the archive
+     behind the user's back. */
+  const allOn=SESSION.role==="admin";
+  const allLoaded=CLOSED_LOADED;
+  const allStale=allLoaded&&closedStale();
+  const allTile=!allOn?"":tile("all",
+    allLoaded?String(allTickets.length):"—","ALL",
+    !allLoaded?"Tap to load":(allStale?"Tap to refresh":"Every status"),
+    "var(--ink-mid)",allStale?"stale":"");
   const tilesBlock=`
     <div class="tiles-wrap ${tilesExpanded?"expanded":""}" id="tilesWrap"
          onmouseenter="expandTiles(true)" onmouseleave="expandTiles(false)">
-      ${tile("all",allN,"ALL",seesClosed?"Every status":"Every open status","var(--ink-mid)")}
+      ${allTile}
       ${tile("active",activeN,"OPEN","All not closed","var(--amber)")}
       <button class="tiles-exp" onclick="toggleTiles()" title="Show all statuses" aria-label="Show all statuses">
         <span class="exp-chevs">⟨ ⟩</span><span class="exp-hint">statuses</span>
@@ -3888,28 +3909,77 @@ function renderBoard(){
   rows=applyFilterSearch(rows);
   const label=({active:"Open",all:"All",unassigned:"Unassigned",assigned:"Assigned",dispatched:"Dispatched",waiting:"Waiting",in_progress:"In Progress",finished:"Finished",closed:"Closed"})[curFilter]||"";
   // bulk-action bar — admin only, on the finished & closed pages
+  /* Building a row is not free — for Overwatch each one carries a full
+     assign dropdown — and the archive can run to thousands. Past this many
+     the browser spends longer laying out rows than anybody spends reading
+     them, so draw a screenful and say what is being held back. */
+  const shown=rows.slice(0,ROW_CAP);
   const listHead=`<div class="list-head">${esc(label)} tickets <span class="lh-n">(${rows.length})</span></div>`;
+  const capNote=rows.length>shown.length
+    ? `<div class="cap-note">Showing the first ${shown.length} of ${rows.length}. ${curSearch?"Add another word to narrow it.":"Search, or pick a status, to narrow it."}</div>`
+    : "";
   const body = rows.length
-    ? `<div class="rows">${rows.map(ticketRow).join("")}</div>`
+    ? capNote+`<div class="rows">${shown.map(ticketRow).join("")}</div>`
     : `<div class="empty"><div class="empty-mark">🗂️</div><h3>Nothing here</h3><p>${curSearch?"No tickets match your search.":"No tickets in this view."}</p></div>`;
 
   return head+listHead+body+(canCreate()?`<button class="fab" onclick="openCreate()">＋ New</button>`:"");
 
-  function tile(key,n,label,sub,c){
+  function tile(key,n,label,sub,c,extra){
     const on=curFilter===key;
     const big=on&&["unassigned","assigned","dispatched","waiting","in_progress","finished"].includes(key)?" big":"";
-    return `<button class="tile ${on?"on":""}${big}" style="--tc:${c}" onclick="pickStatus('${key}')">
+    return `<button class="tile ${on?"on":""}${big}${extra?" "+extra:""}" style="--tc:${c}" onclick="pickStatus('${key}')">
       <div class="tile-l">${label}</div><div class="tile-n">${n}</div><div class="tile-s">${sub}</div></button>`;
   }
 }
 // choosing OPEN or CLOSED unpins the strip; a middle status keeps it open
 function pickStatus(key){
+  if(key==="all"&&SESSION.role!=="admin")key="active";       // Overwatch only
+  const leavingArchive=(curFilter==="all"||curFilter==="closed")&&key!=="all"&&key!=="closed";
   curFilter=key; curAssignee="all"; curCategory="all";
   if(key==="active"||key==="closed"){_tilePinned=false;tilesExpanded=false;}
-  // Closed details are NOT downloaded until this moment (v2.7.6). Admin "All"
-  // also includes closed rows, so it triggers the same lazy load.
-  if(key==="closed"||(key==="all"&&["admin","director"].includes(SESSION.role))) ensureClosedLoaded();
+  if(key==="closed"||key==="all") cancelReleaseClosed();   // they came back
+  if(key==="closed"){ ensureClosedLoaded(); }
+  else if(key==="all"){
+    /* Tapping ALL loads the archive the first time, and RE-loads it only when
+       it has actually moved on. Otherwise it just shows what is already here —
+       the whole point of the resting tile is that this never re-downloads
+       several thousand tickets because somebody clicked twice. */
+    if(!CLOSED_LOADED) ensureClosedLoaded();
+    else if(closedStale()) ensureClosedLoaded(true);
+  }
+  /* Walking away from the archive hands the memory back — but not instantly.
+     Flicking between ALL and a status is a normal thing to do, and making
+     each bounce re-download several thousand tickets would trade one of the
+     complaints for the other. So the release is on a short delay, cancelled
+     if they come straight back. Every screen that needs the archive calls
+     ensureClosedLoaded itself, so nothing breaks either way. */
+  else if(leavingArchive) scheduleReleaseClosed();
   render();
+}
+/* Has the archive moved since we downloaded it? Every ordinary poll carries
+   the server's closed count, so this is exact and costs nothing: if a ticket
+   has been closed or reopened anywhere, the numbers stop agreeing. */
+function closedStale(){
+  if(!CLOSED_LOADED)return false;
+  const held=Object.values(CLOSED_TICKETS).filter(t=>t&&t.status==="closed").length;
+  return CLOSED_COUNT!==held || (Date.now()-CLOSED_FETCHED_AT)>CLOSED_TTL_MS;
+}
+/* Drop the closed archive. This is the big one for memory: it is by far the
+   largest thing this app holds, and most of a session never looks at it. */
+const CLOSED_GRACE_MS=90000;
+let _closedRelease=null;
+function scheduleReleaseClosed(){
+  cancelReleaseClosed();
+  _closedRelease=setTimeout(()=>{_closedRelease=null;releaseClosed();render()},CLOSED_GRACE_MS);
+}
+function cancelReleaseClosed(){
+  if(_closedRelease){clearTimeout(_closedRelease);_closedRelease=null}
+}
+function releaseClosed(){
+  if(!CLOSED_LOADED&&!Object.keys(CLOSED_TICKETS).length)return;
+  Object.keys(CLOSED_TICKETS).forEach(id=>{ if((TICKETS[id]||{}).status==="closed") delete TICKETS[id] });
+  CLOSED_TICKETS={}; CLOSED_LOADED=false; CLOSED_FETCHED_AT=0;
+  _tkHay={};                       // the search index over those tickets goes too
 }
 /* Fetch the closed-ticket details on demand and cache them for the session.
    Only Overwatch ever renders closed rows, so everyone else skips the fetch
@@ -3919,9 +3989,9 @@ let CLOSED_ERR=null;        // last closed-fetch failure message (job-costs pane
 /* Admins see the whole company; directors and district managers
    get the same report scoped to their own stores. */
 function canSeeClosedReport(){return ["admin","director","coach"].includes(SESSION.role)}
-async function ensureClosedLoaded(){
+async function ensureClosedLoaded(force){
   if(!canSeeClosedReport()) return false;
-  if(CLOSED_LOADED && (Date.now()-CLOSED_FETCHED_AT)<CLOSED_TTL_MS) return true;
+  if(!force && CLOSED_LOADED && (Date.now()-CLOSED_FETCHED_AT)<CLOSED_TTL_MS) return true;
   showLoader(true);
   try{
     // The closed set is the biggest payload this app pulls and the API may be
@@ -3963,6 +4033,7 @@ function toggleTiles(){
    Cached per ticket and thrown away when that ticket changes, because this
    runs against every ticket on every keystroke. */
 let _tkHay={};
+const HAY_CAP=1500;        // far more than any one list draws; stops a session growing forever
 function ticketHaystack(t){
   const key=t._id+"|"+(t.updatedAt||t.createdAt||0)+"|"+arr_(t.comments).length;
   const hit=_tkHay[t._id];
@@ -3975,6 +4046,7 @@ function ticketHaystack(t){
     t.waitingReason,(t.closeNote||{}).text,(t.assignNote||{}).text,
     ...arr_(t.comments).map(c=>[c&&c.by,c&&c.text].filter(Boolean).join(" ")),
     sh.text].filter(Boolean).join(" ").toLowerCase();
+  if(Object.keys(_tkHay).length>HAY_CAP)_tkHay={};     // cheap to rebuild, costly to hoard
   return (_tkHay[t._id]={key,text,digits:text.replace(/\D+/g,"")});
 }
 function arr_(v){return Array.isArray(v)?v:[]}
@@ -3997,7 +4069,7 @@ function applyFilterSearch(list){
   /* ALL is the one view that does not filter by status at all. Closed rows
      only reach here for the roles that may see them — ticketsForStore has
      already dropped them for everyone else — so this needs no second rule. */
-  else if(curFilter==="all"){}
+  else if(curFilter==="all"){ if(SESSION.role!=="admin") out=out.filter(t=>t.status!=="closed") }
   else out=out.filter(t=>t.status===curFilter);
   if((curFilter==="dispatched"||curFilter==="assigned")&&curAssignee!=="all"){
     out=out.filter(t=>{const w=ticketAssignee(t);return w&&(w.kind+":"+w.id)===curAssignee});
