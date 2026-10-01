@@ -1307,7 +1307,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.37";
+const APP_VERSION = "9.38";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1384,7 +1384,7 @@ function threadForEmail(t){
 function assigneeLabelFor(t){
   if(!t)return "";
   if(t.assignedTechId){const n=techName(t.assignedTechId);return n?("🔧 "+n+" (in-house)"):"Tech (removed)"}
-  if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];return v?("🏢 "+v.name+" (third-party)"):"Vendor (removed)"}
+  if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];return v?("🏢 "+v.name):"Vendor (removed)"}
   if(t.assignedCoachId){const c=(MASTER.areaCoaches||{})[t.assignedCoachId];return c?("👤 "+c.name+" (District Manager)"):"District Manager (removed)"}
   return "";
 }
@@ -4000,10 +4000,14 @@ function ticketRow(t){
     const {match,rest}=vendorGroupsFor(t);
     const vOpt=([id,v])=>`<option value="vendor:${id}">🏢 ${esc(v.name)}</option>`;
     const catLabel=ALL_CATEGORIES[t.category]||"category";
+    // The store's District Manager, same as the detail sheet offers.
+    const rCoaches=storeCoachIds(t.storeId).map(id=>[id,(MASTER.areaCoaches||{})[id]]).filter(([,c])=>c);
+    const coachOpt=rCoaches.map(([id,c])=>`<option value="coach:${id}">👤 ${esc(c.name)}</option>`).join("");
     right=`<div class="row-assign" onclick="event.stopPropagation()">
       <select class="input row-sel" id="rsel_${t._id}" onchange="if(this.value==='__add__'){this.value='';openVendors();return}rowAssign('${t._id}')">
         <option value="">Assign to…</option>
         <optgroup label="In-house tech for this store">${techOpt}</optgroup>
+        ${coachOpt?`<optgroup label="District Manager for this store">${coachOpt}</optgroup>`:""}
         ${match.length?`<optgroup label="Vendors — ${esc(catLabel)}">${match.map(vOpt).join("")}</optgroup>`:""}
         ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
         <option value="__add__">＋ Add new vendor…</option>
@@ -4193,11 +4197,14 @@ async function rowAssign(id){
     // In-house techs see dispatched jobs in their own app, so there is nobody to
     // phone first — skip "assigned" and dispatch immediately. Vendors still go
     // to "assigned" because someone has to actually contact them.
-    patch={assignedTechId:tid,assignedVendorId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
+    patch={assignedTechId:tid,assignedVendorId:null,assignedCoachId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
   }else if(val.startsWith("vendor:")){
     const vid=val.slice(7); const v=VENDORS[vid];
     if(!v){toast("That vendor no longer exists — left unassigned","err");return}
-    patch={assignedVendorId:vid,assignedTechId:null,status:"assigned"};note="🏢 "+v.name;
+    patch={assignedVendorId:vid,assignedTechId:null,assignedCoachId:null,status:"assigned"};note="🏢 "+v.name;
+  }else if(val.startsWith("coach:")){
+    // Straight to the instructions sheet; the row dropdown resets itself.
+    sel.value=""; promptAssignCoach(id,val.slice(6)); return;
   }else{toast("Pick a person to assign to","err");return}
   if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status}))toast((patch.status==="dispatched"?"Dispatched · ":"Assigned · ")+note);
 }
@@ -4210,7 +4217,7 @@ async function confirmContact(id){
     toast("Dispatched");
 }
 async function rowUnassign(id){
-  if(await patchTicket(id,{status:"unassigned",assignedTechId:null,assignedVendorId:null},{action:"assign",note:"unassigned (pool)",toStatus:"unassigned"}))
+  if(await patchTicket(id,{status:"unassigned",assignedTechId:null,assignedVendorId:null,assignedCoachId:null},{action:"assign",note:"unassigned (pool)",toStatus:"unassigned"}))
     toast("Back to unassigned");
 }
 
@@ -4412,7 +4419,7 @@ async function submitTicket(){
         taken.add(shortId);
         const id=uid();
         const ticket={shortId,shareToken:newShareToken(),storeId:tsid,category:tcat,subcategory:tsub,priority:$("cPri").value,description:desc,photos:urls,
-          status:(mine?"dispatched":"unassigned"),assignedVendorId:null,assignedTechId:(mine?SESSION.refId:null),
+          status:(mine?"dispatched":"unassigned"),assignedVendorId:null,assignedCoachId:null,assignedTechId:(mine?SESSION.refId:null),
           ...(mine?{dispatchedAt:now()}:{}),
           createdBy:SESSION.email,createdByRole:SESSION.role,createdByName:SESSION.name,
           createdAt:now(),updatedAt:now(),broadcast:true,
@@ -4445,7 +4452,7 @@ async function submitTicket(){
     const ticket={
       shortId, shareToken:newShareToken(), storeId:sid,
       category:cat, subcategory:sub, priority:$("cPri").value, description:desc, photos:urls,
-      status:(mine?"dispatched":"unassigned"), assignedVendorId:null, assignedTechId:(mine?SESSION.refId:null),
+      status:(mine?"dispatched":"unassigned"), assignedVendorId:null, assignedCoachId:null, assignedTechId:(mine?SESSION.refId:null),
       ...(mine?{dispatchedAt:now()}:{}),
       createdBy:SESSION.email, createdByRole:SESSION.role, createdByName:SESSION.name,
       createdAt:now(), updatedAt:now(),
@@ -4536,7 +4543,7 @@ function directorAssignOptions(t){
   let html=`<option value=""${none?" selected":""}>— Unassigned —</option>`;
   if(t.assignedVendorId){
     const nm=vend?vend.name:"Third-party (removed)";
-    html+=`<option value="vendor:${t.assignedVendorId}" selected>🏢 ${esc(nm)} — third-party</option>`;
+    html+=`<option value="vendor:${t.assignedVendorId}" selected>🏢 ${esc(nm)}</option>`;
   }
   html+=techs.map(([id,x])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("");
   /* A Director handing a job down to their own DM is the same motion, and it
@@ -4632,7 +4639,7 @@ async function applyDirectorAssign(id,val,fromDetail,confirmed){
 }
 /* DM asks for an outside vendor: stays unassigned so Overwatch chooses who. */
 async function requestThirdParty(id){
-  if(await patchTicket(id,{status:"unassigned",assignedTechId:null,assignedVendorId:null},
+  if(await patchTicket(id,{status:"unassigned",assignedTechId:null,assignedVendorId:null,assignedCoachId:null},
       {action:"status",toStatus:"unassigned",note:"Third-party tech requested by "+SESSION.name}))
     {toast("Flagged for Overwatch");openTicket(id)}
 }
@@ -4649,7 +4656,7 @@ async function _doDispatchToStoreTech(id,techId){
   if(!tech){toast("That tech no longer exists — left unassigned","err");closeModal();return}
   const btn=$("reqTechBtn");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>'}
   if(await patchTicket(id,
-      {assignedTechId:techId,assignedVendorId:null,status:"dispatched",dispatchedAt:now()},
+      {assignedTechId:techId,assignedVendorId:null,assignedCoachId:null,status:"dispatched",dispatchedAt:now()},
       {action:"status",toStatus:"dispatched",note:"District Manager requested "+tech.name})){
     toast("Dispatched to "+tech.name);closeModal();render();
   }else if(btn){btn.disabled=false;btn.textContent="Yes, request tech"}
@@ -4976,7 +4983,7 @@ function openTicket(id,ret){
   // unassigned ticket would look assigned.
   let assignee=null;
   if(t.assignedTechId){const n=techName(t.assignedTechId);assignee=n?("🔧 "+n+" (in-house)"):"Tech (removed)"}
-  else if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];assignee=v?("🏢 "+v.name+" (third-party)"):"Tech (removed)"}
+  else if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];assignee=v?("🏢 "+v.name):"Tech (removed)"}
   const activity=(t.activity||[]).slice().reverse().map(a=>`
     <div class="tl-item"><div class="tl-dot" style="background:${(STATUSES[a.toStatus]||{}).color||'var(--amber)'}"></div>
       <div class="tl-c"><div class="tl-act">${esc(actionText(a))}</div>
