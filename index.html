@@ -64,6 +64,11 @@
   --pri-e-bg:#fee2e2; --pri-e-line:#fca5a5; --pri-e-fg:#991b1b;
   --pri-u-bg:#ffedd5; --pri-u-line:#fdba74; --pri-u-fg:#9a3412;
   --pri-n-bg:#e0f2fe; --pri-n-line:#7dd3fc; --pri-n-fg:#075985;
+  /* status hues written as text — darker than the hue so small bold type
+     clears 4.5:1 on white (measured: 6.5, 7.1, 6.7, 5.8, 10.4, 5.5, 5.7) */
+  --s-open-ink:#b91c1c; --s-assigned-ink:#6d28d9; --s-dispatched-ink:#1d4ed8;
+  --s-waiting-ink:#9a5309; --s-progress-ink:#1e3a8a; --s-finished-ink:#047857;
+  --s-closed-ink:#5b6778;
   --sheet:#ffffff;                              /* emails and printouts stay light */
   --bar:rgba(255,255,255,.85); --veil:rgba(255,255,255,.6); --on-accent:#ffffff;
   --radius:10px; --radius-sm:7px; --shadow:0 8px 26px rgba(40,55,80,.12);
@@ -87,6 +92,10 @@ html[data-theme="dark"]{
   --blue:#8ab4ff; --green:#4ade80; --red:#f87171; --violet:#c4b5fd; --cyan:#67e8f9;
   --s-open:#f87171; --s-assigned:#c4b5fd; --s-progress:#93b4ff; --s-waiting:#fbbf24;
   --s-finished:#4ade80; --s-resolved:#6ee7b7; --s-closed:#8a97ae;
+  /* on a dark panel every status hue already reads as text (4.96–8.76:1) */
+  --s-open-ink:var(--s-open); --s-assigned-ink:var(--s-assigned); --s-dispatched-ink:var(--blue);
+  --s-waiting-ink:var(--s-waiting); --s-progress-ink:var(--s-progress);
+  --s-finished-ink:var(--s-finished); --s-closed-ink:var(--s-closed);
   --tint:#1b2c44; --tint-2:#16283d; --tint-line:#2f4f7e; --weave:#16324d;
   --deep:#061826; --deep-2:#0a0a00;
   --warn-bg:#2e2308; --warn-line:#8a5a12; --warn-fg:#fcd34d;
@@ -360,6 +369,13 @@ body.no-reftags .reftag{display:none}
 .row-meta{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-dim);flex-wrap:wrap}
 .r-id{color:var(--ink-dim);letter-spacing:.03em}
 .r-sep{opacity:.5}
+/* The status chip, shown only in the ALL view where the list is mixed. The
+   dot carries the colour and the word carries the meaning, so it still reads
+   in greyscale and for anyone who cannot separate the hues. */
+.r-st{display:inline-flex;align-items:center;gap:5px;font-weight:700;text-transform:uppercase;
+  font-size:10px;letter-spacing:.04em;color:var(--tci);border:1px solid var(--tc);
+  border-radius:999px;padding:2px 8px 2px 6px;white-space:nowrap}
+.r-st::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--tc);flex:0 0 auto}
 .r-pri{font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:.04em}
 .r-pri.n{color:var(--green)}
 .r-pri.u{color:var(--pri-u-fg);background:var(--pri-u-bg);padding:2px 7px;border-radius:4px;font-weight:700}
@@ -1314,7 +1330,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.39";
+const APP_VERSION = "9.40";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1428,14 +1444,19 @@ function notifyTicket(event,id,ticket,extra){
 }
 const VENDORS_NODE = "maintenanceVendors";
 
+/* `color` is the status hue, used for dots, bars and borders. `ink` is the
+   same status written as TEXT: in light mode three of these hues are too pale
+   on white for small bold type (waiting 3.0:1, finished 3.8:1, closed 3.0:1),
+   so the word uses a darker step while the dot keeps the bright one. In dark
+   mode the hues already clear 4.5:1 and ink is the same colour. */
 const STATUSES = {
-  unassigned:{label:"Unassigned",color:"var(--s-open)"},
-  assigned:{label:"Assigned",color:"var(--s-assigned)"},
-  dispatched:{label:"Dispatched",color:"var(--blue)"},
-  waiting:{label:"Waiting",color:"var(--s-waiting)"},
-  in_progress:{label:"In Progress",color:"var(--s-progress)"},
-  finished:{label:"Finished",color:"var(--s-finished)"},
-  closed:{label:"Closed",color:"var(--s-closed)"},
+  unassigned:{label:"Unassigned",color:"var(--s-open)",ink:"var(--s-open-ink)"},
+  assigned:{label:"Assigned",color:"var(--s-assigned)",ink:"var(--s-assigned-ink)"},
+  dispatched:{label:"Dispatched",color:"var(--blue)",ink:"var(--s-dispatched-ink)"},
+  waiting:{label:"Waiting",color:"var(--s-waiting)",ink:"var(--s-waiting-ink)"},
+  in_progress:{label:"In Progress",color:"var(--s-progress)",ink:"var(--s-progress-ink)"},
+  finished:{label:"Finished",color:"var(--s-finished)",ink:"var(--s-finished-ink)"},
+  closed:{label:"Closed",color:"var(--s-closed)",ink:"var(--s-closed-ink)"},
 };
 const STATUS_ORDER = ["unassigned","assigned","dispatched","waiting","in_progress","finished","closed"];
 // statuses that count as "still active" (not closed)
@@ -3828,9 +3849,14 @@ function renderBoard(){
   const MID=["unassigned","assigned","dispatched","waiting","in_progress"].concat(["finished"]);
   const midActive=MID.includes(curFilter);
   if(midActive){tilesExpanded=true;_tilePinned=true;}
+  /* Closed rows are not downloaded until something asks for them, so until
+     then the honest total is what is loaded plus the count the server sent. */
+  const seesClosed=["admin","director"].includes(SESSION.role);
+  const allN=allTickets.length+((seesClosed&&!CLOSED_LOADED)?CLOSED_COUNT:0);
   const tilesBlock=`
     <div class="tiles-wrap ${tilesExpanded?"expanded":""}" id="tilesWrap"
          onmouseenter="expandTiles(true)" onmouseleave="expandTiles(false)">
+      ${tile("all",allN,"ALL",seesClosed?"Every status":"Every open status","var(--ink-mid)")}
       ${tile("active",activeN,"OPEN","All not closed","var(--amber)")}
       <button class="tiles-exp" onclick="toggleTiles()" title="Show all statuses" aria-label="Show all statuses">
         <span class="exp-chevs">⟨ ⟩</span><span class="exp-hint">statuses</span>
@@ -3927,20 +3953,57 @@ function toggleTiles(){
   const w=$("tilesWrap"); if(w)w.classList.toggle("expanded",_tilePinned);
 }
 
+/* ---- what a ticket can be found by ----------------------------------------
+   The search used to look at the description, the category, the ticket number
+   and the store name. Everything you can find a STORE by now finds its
+   tickets too — address, GM, DM, tech, Director, phone — plus the ticket's own
+   status, priority, whoever it is on, the waiting reason, the instructions and
+   closing notes, and every comment on the thread.
+
+   Cached per ticket and thrown away when that ticket changes, because this
+   runs against every ticket on every keystroke. */
+let _tkHay={};
+function ticketHaystack(t){
+  const key=t._id+"|"+(t.updatedAt||t.createdAt||0)+"|"+arr_(t.comments).length;
+  const hit=_tkHay[t._id];
+  if(hit&&hit.key===key)return hit;
+  const who=ticketAssignee(t);
+  const sh=storeHaystack(t.storeId);
+  const text=[t.shortId,t.description,catPath(t),
+    (STATUSES[t.status]||{}).label,t.status,PRIORITIES[t.priority||"normal"],
+    who?who.name:"",who?who.email:"",
+    t.waitingReason,(t.closeNote||{}).text,(t.assignNote||{}).text,
+    ...arr_(t.comments).map(c=>[c&&c.by,c&&c.text].filter(Boolean).join(" ")),
+    sh.text].filter(Boolean).join(" ").toLowerCase();
+  return (_tkHay[t._id]={key,text,digits:text.replace(/\D+/g,"")});
+}
+function arr_(v){return Array.isArray(v)?v:[]}
+function tkMatches(t,term){
+  if(!term)return true;
+  const {text,digits}=ticketHaystack(t);
+  return term.split(/\s+/).filter(Boolean).every(tok=>{
+    if(text.includes(tok))return true;
+    const d=tok.replace(/\D+/g,"");
+    return d.length>=3&&digits.includes(d);
+  });
+}
+
 function applyFilterSearch(list){
   let out=list.slice();
   // Tech "Dispatched" tab is a bucket: dispatched + waiting + in_progress.
   if(SESSION.role==="tech" && curFilter==="dispatched")
     out=out.filter(t=>["dispatched","waiting","in_progress"].includes(t.status));
   else if(curFilter==="active")out=out.filter(t=>ACTIVE_STATUSES.includes(t.status));
-  else if(curFilter==="all")out=out.filter(t=>["admin","director"].includes(SESSION.role)?true:t.status!=="closed");
+  /* ALL is the one view that does not filter by status at all. Closed rows
+     only reach here for the roles that may see them — ticketsForStore has
+     already dropped them for everyone else — so this needs no second rule. */
+  else if(curFilter==="all"){}
   else out=out.filter(t=>t.status===curFilter);
   if((curFilter==="dispatched"||curFilter==="assigned")&&curAssignee!=="all"){
     out=out.filter(t=>{const w=ticketAssignee(t);return w&&(w.kind+":"+w.id)===curAssignee});
   }
   if(curCategory!=="all")out=out.filter(t=>t.category===curCategory);
-  if(curSearch){const q=curSearch.toLowerCase();
-    out=out.filter(t=>(t.description||"").toLowerCase().includes(q)||(catPath(t)||"").toLowerCase().includes(q)||(t.shortId||"").toLowerCase().includes(q)||storeName(t.storeId).toLowerCase().includes(q)||storeNum(t.storeId).toLowerCase().includes(q))}
+  if(curSearch){const q=curSearch.trim().toLowerCase(); out=out.filter(t=>tkMatches(t,q))}
   return sortRows(out);
 }
 // dropdown of the distinct assignees present in the current status, to filter by
@@ -3990,6 +4053,9 @@ function elapsedHM(ts){
 }
 function ticketRow(t){
   const st=STATUSES[t.status]||STATUSES.unassigned;
+  /* Every other view is a single status, so the heading already says which.
+     ALL mixes them, and then each row has to carry its own. */
+  const mixed=curFilter==="all";
   const cat=catPath(t);
   const pri=t.priority||"normal";
   const priClass={normal:"n",urgent:"u",emergency:"e"}[pri]||"n";
@@ -4141,6 +4207,7 @@ function ticketRow(t){
         <div class="row-desc">${esc(t.description||"No description")}</div>
         <div class="row-meta">
           <span class="r-id mono">${esc(t.shortId||t._id.slice(0,6).toUpperCase())}</span>
+          ${mixed?`<span class="r-st" style="--tc:${st.color};--tci:${st.ink||st.color}">${esc(st.label)}</span>`:""}
           <span class="r-pri ${priClass}">${PRIORITIES[pri]||"Normal"}</span>
           <span class="r-sep">·</span><span>${cat}</span>
           ${distChip}
