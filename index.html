@@ -226,6 +226,10 @@ body.no-reftags .reftag{display:none}
 @media(max-width:600px){.sort-select{max-width:none}}
 .loc-select{max-width:300px;flex:0 1 auto}
 .sp{position:relative;flex:1 1 220px;min-width:0}
+/* `flex:1 1 220px` is right in a horizontal control bar, but .field is a
+   COLUMN flex — there the 220px basis becomes a 220px HEIGHT, which left the
+   caret and the results menu floating a long way under the box. */
+.field>.sp{flex:0 0 auto}
 .sp-native{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
 .sp-input{width:100%;padding-right:34px}
 .sp-caret{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;
@@ -239,6 +243,9 @@ body.no-reftags .reftag{display:none}
 .sp-opt:last-child{border-bottom:none}
 .sp-opt:hover{background:var(--panel-2)}
 .sp-opt.cur{background:rgba(29,118,187,.10);font-weight:700}
+.sp-why{display:block;font-size:11.5px;color:var(--ink-dim);margin-top:2px;font-weight:400;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp-opt.cur .sp-why{color:var(--amber)}
 .sp-none{padding:14px 13px;font-size:12.5px;color:var(--ink-dim)}
 @media(max-width:600px){.sp{flex:1 1 100%}.sp-menu{max-height:min(320px,52vh)}.sp-opt{padding:13px;font-size:14px}}
 .search{flex:1;min-width:160px}
@@ -1307,7 +1314,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.38";
+const APP_VERSION = "9.39";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2914,6 +2921,7 @@ async function refresh(){
   // Vendors get the same treatment (their list is in the same cached payload).
   const serverVendors=MASTER[VENDORS_NODE]||{};
   VENDORS={...serverVendors};
+  spClearHaystacks();          // store, DM, tech or director details may have moved
   for(const [id,v] of Object.entries(VENDOR_ECHO)){
     const s=serverVendors[id];
     if(v.__deleted){
@@ -7704,6 +7712,74 @@ function storePicker(opts){
     <div class="sp-menu" id="${id}_menu"></div>
   </div>`;
 }
+/* ---- what a store can be found by -----------------------------------------
+   The picker used to match the dropdown label and the store number, which is
+   why typing a manager's name or a street found nothing. This is the same
+   field set DPM FindMi searches, so the two apps answer the same question the
+   same way: name, number, address, phone, email, the GM and assistant, every
+   named manager on the record, the DMs, the in-house techs, the Director and
+   the entity.
+
+   Built once per store and cached, because it walks four other tables and the
+   picker re-filters on every keystroke. refresh() clears the cache. */
+let _spHay={};
+function spClearHaystacks(){_spHay={}}
+function storeHaystack(sid){
+  if(_spHay[sid])return _spHay[sid];
+  const s=store(sid); if(!s)return {text:"",digits:""};
+  const people=[];
+  storeCoachIds(sid).forEach(id=>{const c=(MASTER.areaCoaches||{})[id]; if(c)people.push(c.name,c.email)});
+  storeTechIds(sid).forEach(id=>{const t=(MASTER.repairTechnicians||{})[id]; if(t)people.push(t.name,t.email)});
+  const dir=storeDirector(sid); if(dir)people.push(dir.name,dir.email);
+  const ent=(MASTER.entities||{})[s.assignedEntityId];
+  /* Managers arrive either as a list of records or as loose fields depending
+     on how old the store record is; read both. */
+  const mgrs=(Array.isArray(s.managers)?s.managers:(s.managers&&typeof s.managers==="object"?Object.values(s.managers):[]))
+    .filter(Boolean).map(m=>[m.name,m.title,m.phone,m.email].filter(Boolean).join(" "));
+  const text=[s.storeName,s.storeNumber,s.address,s.city,s.state,s.zip,s.phone,s.email,
+    s.storeManager,s.assistantManager,...mgrs,...people,
+    ent?ent.name:(s.entity||""),s.division]
+    .filter(Boolean).join(" ").toLowerCase();
+  /* A phone typed as 4421159 should find one written (817) 442-1159. */
+  const digits=text.replace(/\D+/g,"");
+  return (_spHay[sid]={text,digits});
+}
+/* Every word has to appear somewhere, in any order — so "melissa burger" and
+   "burger melissa" both find Burger King #100 Melissa, which a single
+   substring match cannot do. */
+function spMatches(sid,term){
+  if(!term)return true;
+  const {text,digits}=storeHaystack(sid);
+  return term.split(/\s+/).filter(Boolean).every(tok=>{
+    if(text.includes(tok))return true;
+    const d=tok.replace(/\D+/g,"");
+    return d.length>=3 && digits.includes(d);
+  });
+}
+/* The line under the store name, naming whichever field the search hit — so a
+   list of five stores after typing "Pat" shows which Pat is which. */
+function spWhy(sid,term){
+  const s=store(sid); if(!term)return "";
+  const toks=term.split(/\s+/).filter(Boolean);
+  /* If the store name on the row already accounts for everything typed, a
+     second line explaining the match is just noise — "Melissa" is in the
+     name AND the address, and saying so twice helps nobody. */
+  const label=String(s.storeName||"").toLowerCase();
+  if(toks.every(k=>label.includes(k)))return "";
+  const hit=v=>{const t=String(v||"").toLowerCase(); if(!t)return false;
+    return toks.some(k=>t.includes(k)||(k.replace(/\D+/g,"").length>=3&&t.replace(/\D+/g,"").includes(k.replace(/\D+/g,""))))};
+  const bits=[];
+  if(hit(s.storeManager))bits.push("GM "+s.storeManager);
+  if(hit(s.assistantManager))bits.push("AM "+s.assistantManager);
+  (Array.isArray(s.managers)?s.managers:[]).filter(Boolean).forEach(m=>{if(hit(m.name))bits.push((m.title?m.title+" ":"")+m.name)});
+  storeCoachIds(sid).forEach(id=>{const c=(MASTER.areaCoaches||{})[id]; if(c&&hit(c.name))bits.push("DM "+c.name)});
+  storeTechIds(sid).forEach(id=>{const t=(MASTER.repairTechnicians||{})[id]; if(t&&hit(t.name))bits.push("Tech "+t.name)});
+  const dir=storeDirector(sid); if(dir&&hit(dir.name))bits.push("Director "+dir.name);
+  if(hit(s.address))bits.push(s.address);
+  if(hit(s.phone))bits.push(s.phone);
+  if(hit(s.email))bits.push(s.email);
+  return bits.slice(0,2).join(" · ");
+}
 function spEls(id){return {sel:$(id),q:$(id+"_q"),menu:$(id+"_menu")}}
 function spItems(id){
   const {sel}=spEls(id); if(!sel)return[];
@@ -7721,12 +7797,16 @@ function spFilter(id,showAll){
   const term=(showAll?"":q.value).trim().toLowerCase();
   const hits=spItems(id).filter(o=>{
     if(!term)return true;
-    const num=(o.value&&o.value!=="all")?String(store(o.value).storeNumber||"").toLowerCase():"";
-    return o.label.toLowerCase().includes(term)||num.includes(term);
+    if(o.value==="all")return false;            // the "all stores" row is not a search result
+    return o.label.toLowerCase().includes(term)||spMatches(o.value,term);
   }).slice(0,60);
   menu.innerHTML=hits.length
-    ? hits.map(o=>`<button type="button" class="sp-opt${o.value===sel.value?" cur":""}"
-        onclick="spPick('${id}','${escA(o.value)}')">${esc(o.label)}</button>`).join("")
+    ? hits.map(o=>{
+        const why=o.value==="all"?"":spWhy(o.value,term);
+        return `<button type="button" class="sp-opt${o.value===sel.value?" cur":""}"
+          onclick="spPick('${id}','${escA(o.value)}')">${esc(o.label)}${
+            why?`<span class="sp-why">${esc(why)}</span>`:""}</button>`;
+      }).join("")
     : `<div class="sp-none">No store matches “${esc(q.value)}”</div>`;
   menu.classList.add("on"); menu.scrollTop=0;
 }
