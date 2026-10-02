@@ -1363,7 +1363,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.44";
+const APP_VERSION = "9.45";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2626,6 +2626,42 @@ async function digestPreview(){
     esc((r.body.to||[]).join(", ")||"nobody — no receipt address is set and no Overwatch login has an email")+". Nothing was sent.");
   f.scrollIntoView({block:"nearest",behavior:"smooth"});
 }
+/* The Monday roll-up — what came back after the digest went out. Built from
+   the real answers of the past week so the sample is not an empty page. */
+async function mondayPreview(){
+  const btn=$("wkMonBtn"); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Building\u2026';
+  const r=await chkPost({event:"mondayRoundup",mode:"preview"},25000);
+  btn.disabled=false;btn.textContent="Preview";
+  const f=$("wkFrame");
+  if(r.status!==200||!r.body||!r.body.ok){
+    f.classList.add("hidden");
+    return wkMsg("wkOut","bad","Couldn\u2019t build the roll-up",
+      esc(String((r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status)))+
+      (r.status===400?" \u2014 your deployed notify.js is an older copy that doesn\u2019t know about the roll-up.":""));
+  }
+  f.srcdoc=r.body.html; f.classList.remove("hidden");
+  wkMsg("wkOut","ok","Roll-up preview \u2014 "+esc(r.body.subject),
+    "Built from the last week of Monday answers ("+(r.body.answers||0)+" of them). On the real run it covers the morning just gone. Nothing was sent.");
+  f.scrollIntoView({block:"nearest",behavior:"smooth"});
+}
+/* Both of the scheduled reports, sent to you alone. These never go near the
+   receipt list, so trying one out does not email anybody else. */
+async function scheduledSendTest(event,btnId,label){
+  const to=(SESSION&&SESSION.email)||"";
+  if(!to)return toast("No email on your session","err");
+  if(!sendGuard("wkOut"))return;
+  const btn=$(btnId); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Sending\u2026';
+  const body={event,mode:"test",to:[to]};
+  if(event==="digest")body.dryKinds=SUMMARY_KINDS.map(k=>k.key).filter(k=>($("wk_"+k)||{}).checked);
+  const r=await chkPost(body,25000);
+  btn.disabled=false;btn.textContent="Email it to me";
+  if(r.status===200&&r.body&&r.body.ok)
+    wkMsg("wkOut","ok","Sent to "+esc(to),esc(label)+" \u2014 subject starts with [Sample]. It went to you only; the receipt list was not used.");
+  else{
+    const d=(r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status);
+    wkMsg("wkOut","bad","Nothing went out",esc(typeof d==="string"?d:JSON.stringify(d)));
+  }
+}
 async function summarySendTest(kind){
   const to=(SESSION&&SESSION.email)||"";
   if(!to)return toast("No email on your session","err");
@@ -2634,7 +2670,9 @@ async function summarySendTest(kind){
   const r=await chkPost({event:"summary",mode:"test",kind,to:[to]},25000);
   btn.disabled=false;btn.textContent="Email it to me";
   if(r.status===200&&r.body&&r.body.ok)
-    wkMsg("wkOut","ok","Sent to "+esc(to),"Subject: "+esc(r.body.subject)+". The Yes / No buttons in it are live — pressing one really does comment on that ticket.");
+    wkMsg("wkOut","ok","Sent to "+esc(to),"Subject: "+esc(r.body.subject)+
+      ". It is "+(r.body.sample?esc(r.body.forName||"a real person")+"\u2019s":"your")+
+      " real data. For the GM and DM ones, the button opens their Monday page as a sample \u2014 the switches move and nothing is saved.");
   else{
     const d=(r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status);
     wkMsg("wkOut","bad","Postmark wouldn't take it",esc(typeof d==="string"?d:JSON.stringify(d)));
@@ -8720,7 +8758,17 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
       <div class="field" style="margin-top:10px"><label class="label">Send me a receipt</label>
         <input class="input" id="wkDigestTo" value="${escA((np.digestTo||[]).join(", "))}" placeholder="itsupport@dossaniparadise.com" autocapitalize="off" spellcheck="false" oninput="sendSettingsHint()">
         <div class="uz-h mono" style="margin-top:5px;color:var(--ink-dim)">When the weekly run finishes, these people get one email listing every summary and reminder that went out, who it went to, and any that failed. Leave it blank and it goes to everyone with an Overwatch login. It is sent in test mode too.</div>
-        <button type="button" class="btn btn-ghost btn-sm" id="wkDigestBtn" onclick="digestPreview()" style="margin-top:8px">Preview the receipt</button>
+        <div class="wk-btns" style="margin-top:8px">
+          <button type="button" class="btn btn-ghost btn-sm" id="wkDigestBtn" onclick="digestPreview()">Preview the receipt</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="wkDigestSend" onclick="scheduledSendTest('digest','wkDigestSend','The weekly receipt')">Email it to me</button>
+        </div>
+      </div>
+      <div class="field" style="margin-top:10px"><label class="label">The Monday roll-up</label>
+        <div class="uz-h mono" style="margin-top:2px;color:var(--ink-dim)">The morning after the summaries, the same receipt list gets a second email: what came back from the Monday pages, and which managers never opened theirs. Preview it, or send yourself a copy built from the last week of real answers.</div>
+        <div class="wk-btns" style="margin-top:8px">
+          <button type="button" class="btn btn-ghost btn-sm" id="wkMonBtn" onclick="mondayPreview()">Preview</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="wkMonSend" onclick="scheduledSendTest('mondayRoundup','wkMonSend','The Monday roll-up')">Email it to me</button>
+        </div>
       </div>
       <div id="wkOut"></div>
       <iframe id="wkFrame" class="wk-frame hidden" title="Summary preview"></iframe>
