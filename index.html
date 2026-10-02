@@ -1363,7 +1363,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.45";
+const APP_VERSION = "9.46";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1894,8 +1894,8 @@ const CHK=[
   {key:"pmin",    label:"Postmark's inbound stream points back here"},
   {key:"replyto", label:"The reply address on a real ticket"},
   {key:"pmrecv",  label:"Mail Postmark has actually received"},
-  {g:"Weekly summaries and the Monday page", key:"mdreach", label:"The Monday update page is deployed"},
-  {key:"ansreach", label:"The older one-click answer links still work"},
+  {g:"Weekly summaries", key:"ansreach", label:"The Resolved / Unresolved buttons work"},
+  {key:"mdreach", label:"The Monday page (for links already sent)"},
   {key:"wkreach", label:"The weekly clock is deployed"},
   {key:"wkcfg",   label:"What the weekly schedule is set to"},
 ];
@@ -2184,13 +2184,13 @@ async function runConnectionCheck(){
       "Upload the newest api/notify.js and let Vercel redeploy.");
     chkSkip(["mdreach","wkreach","wkcfg"],"Skipped.");
   }else{
-    // 13a — the page every GM and DM lands on from the Monday email
+    // 13a — kept alive for Update links already sitting in inboxes
     chkSet("mdreach","run");
     const md=ep.monday||{};
     if(md.status===403) chkSet("mdreach","ok","Live at "+esc(base)+"/api/monday — it refused an unsigned visit, which is exactly right.<br>"+
-      "This is the page the Update button in the GM and DM summaries opens.");
-    else if(md.status===404) chkSet("mdreach","bad","404 — api/monday.js isn't in the deployment.",
-      "Upload monday.js into the api folder and let Vercel redeploy. Until then the Update button in every GM and DM summary goes nowhere.");
+      "Nothing links here any more; it stays deployed so the Update buttons already sitting in inboxes keep working.");
+    else if(md.status===404) chkSet("mdreach","warn","404 — api/monday.js isn't in the deployment.",
+      "Only matters if an older summary with an Update button is still in someone's inbox. Nothing FixMi sends now uses it.");
     else if(md.status===500) chkSet("mdreach","bad","It answered 500 — a required setting is missing.",
       "Most likely FIXMI_SHARED_SECRET or FIXMI_WRITE_PASSWORD isn't set in Vercel.");
     else if(!md.status) chkSet("mdreach","bad","Couldn't reach it ("+esc(md.error||"no answer")+").");
@@ -2671,8 +2671,8 @@ async function summarySendTest(kind){
   btn.disabled=false;btn.textContent="Email it to me";
   if(r.status===200&&r.body&&r.body.ok)
     wkMsg("wkOut","ok","Sent to "+esc(to),"Subject: "+esc(r.body.subject)+
-      ". It is "+(r.body.sample?esc(r.body.forName||"a real person")+"\u2019s":"your")+
-      " real data. For the GM and DM ones, the button opens their Monday page as a sample \u2014 the switches move and nothing is saved.");
+      ". Built from "+(r.body.sample?esc(r.body.forName||"a real person")+"\u2019s":"your")+
+      " real tickets. The Resolved and Unresolved buttons in it are live \u2014 pressing one really does comment on that ticket, under your name.");
   else{
     const d=(r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status);
     wkMsg("wkOut","bad","Postmark wouldn't take it",esc(typeof d==="string"?d:JSON.stringify(d)));
@@ -8764,7 +8764,7 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
         </div>
       </div>
       <div class="field" style="margin-top:10px"><label class="label">The Monday roll-up</label>
-        <div class="uz-h mono" style="margin-top:2px;color:var(--ink-dim)">The morning after the summaries, the same receipt list gets a second email: what came back from the Monday pages, and which managers never opened theirs. Preview it, or send yourself a copy built from the last week of real answers.</div>
+        <div class="uz-h mono" style="margin-top:2px;color:var(--ink-dim)">The morning after the summaries, the same receipt list gets a second email: who pressed Resolved or Unresolved, and which managers never answered at all. Preview it, or send yourself a copy built from the last week of real answers.</div>
         <div class="wk-btns" style="margin-top:8px">
           <button type="button" class="btn btn-ghost btn-sm" id="wkMonBtn" onclick="mondayPreview()">Preview</button>
           <button type="button" class="btn btn-ghost btn-sm" id="wkMonSend" onclick="scheduledSendTest('mondayRoundup','wkMonSend','The Monday roll-up')">Email it to me</button>
