@@ -402,6 +402,13 @@ body.no-reftags .reftag{display:none}
 .row-meta{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-dim);flex-wrap:wrap}
 .r-id{color:var(--ink-dim);letter-spacing:.03em}
 .r-sep{opacity:.5}
+/* Why a row is where it is. Sorting by activity reorders the list, so the
+   list has to say what moved — otherwise the order looks arbitrary. Muted by
+   default; it only takes colour when the activity is recent enough to be
+   worth a second look. */
+.r-act{display:inline-flex;align-items:center;gap:4px;font-weight:600;color:var(--ink-mid)}
+.r-act.fresh{color:var(--brand);font-weight:700}
+html[data-theme="dark"] .r-act.fresh{color:var(--brand)}
 /* The status chip, shown only in the ALL view where the list is mixed. The
    dot carries the colour and the word carries the meaning, so it still reads
    in greyscale and for anyone who cannot separate the hues. */
@@ -1363,7 +1370,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.46";
+const APP_VERSION = "9.47";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1799,6 +1806,7 @@ const SORT_OPTS=[
   ["newest",  "Newest first"],
   ["oldest",  "Oldest first"],
   ["updated", "Recently updated"],
+  ["commented","Newest comment first"],
   ["store",   "Store"],
   ["category","Category"],
 ];
@@ -1839,6 +1847,25 @@ function setSort(v){
   }
   render();
 }
+/* When did anything actually happen on this ticket?
+
+   updatedAt alone is not enough. Imported tickets carry comments stamped from
+   the old system that can be newer than the updatedAt we wrote at import, and
+   a ticket written by an older build may have no updatedAt at all. So take the
+   latest of everything we know about. Reminder sweeps deliberately do NOT
+   touch updatedAt, so this stays a record of real activity rather than of the
+   server having looked at the row. */
+function lastCommentAt(t){
+  const c=arr_(t&&t.comments);
+  let m=0; for(const x of c){const v=Number(x&&x.ts)||0; if(v>m)m=v}
+  return m;
+}
+function lastTouchAt(t){
+  if(!t)return 0;
+  let m=Math.max(Number(t.updatedAt)||0, Number(t.createdAt)||0, lastCommentAt(t));
+  for(const a of arr_(t.activity)){const v=Number(a&&a.ts)||0; if(v>m)m=v}
+  return m;
+}
 const PRI_RANK={emergency:0,urgent:1,normal:2};
 function priRankOf(t){const r=PRI_RANK[t.priority];return r===undefined?2:r}
 function sortRows(rows){
@@ -1854,7 +1881,19 @@ function sortRows(rows){
   }else if(curSort==="oldest"){
     out.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
   }else if(curSort==="updated"){
-    out.sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
+    out.sort((a,b)=>lastTouchAt(b)-lastTouchAt(a));
+  }else if(curSort==="commented"){
+    /* Only the conversation counts here, so a status change you made yourself
+       does not push a ticket above one somebody just replied to. Tickets
+       nobody has commented on sink to the bottom in their usual order rather
+       than being scattered through the list. */
+    out.sort((a,b)=>{
+      const ca=lastCommentAt(a), cb=lastCommentAt(b);
+      if(ca&&cb&&ca!==cb)return cb-ca;
+      if(ca&&!cb)return -1;
+      if(!ca&&cb)return 1;
+      return priRankOf(a)-priRankOf(b) || (a.createdAt||0)-(b.createdAt||0);
+    });
   }else{ // priority — emergencies on top, then oldest first within a band
     out.sort((a,b)=>priRankOf(a)-priRankOf(b) || (a.createdAt||0)-(b.createdAt||0));
   }
@@ -4427,6 +4466,21 @@ function ticketRow(t){
   // Distance chip (tech, when location is known and the store has coords)
   const dist = (SESSION.role==="tech") ? ticketDistance(t) : null;
   const distChip = (dist!=null) ? `<span class="r-sep">·</span><span class="r-dist">📍 ${dist<10?dist.toFixed(1):Math.round(dist)} mi</span>` : "";
+  /* Activity, so "Recently updated" and "Newest comment first" have a visible
+     reason. Only shown once something has actually happened since the ticket
+     was opened — a brand-new ticket saying "updated just now" would be noise
+     on every row. */
+  const nCmt=arr_(t.comments).length;
+  const touched=lastTouchAt(t);
+  const moved=touched-(t.createdAt||0)>120000;        // 2 min of slack for the write itself
+  const fresh=moved && (now()-touched)<86400000;      // something happened today
+  const actChip=moved
+    /* No leading separator: the meta row wraps on a phone and a lone "·"
+       stranded at the end of the line above looks like a mistake. The chip is
+       weighted differently, so it reads as its own thing without one. */
+    ? `<span class="r-act${fresh?" fresh":""}" title="Last activity on this ticket">${
+        nCmt?`💬 ${nCmt} · `:""}updated ${timeAgo(touched)}</span>`
+    : "";
   return `
     <div class="row-wrap">
     <div class="row${tintClass}${selClass}${progClass}${emergClass}"${tint} onclick="${rowClick}">
@@ -4440,7 +4494,8 @@ function ticketRow(t){
           <span class="r-pri ${priClass}">${PRIORITIES[pri]||"Normal"}</span>
           <span class="r-sep">·</span><span>${cat}</span>
           ${distChip}
-          <span class="r-sep">·</span><span>${timeAgo(t.createdAt)}</span>
+          <span class="r-sep">·</span><span title="When it was opened">opened ${timeAgo(t.createdAt)}</span>
+          ${actChip}
           ${photoN?`<span class="r-sep">·</span><span>📷 ${photoN}</span>`:""}
           ${isAdmin&&ticketCost(t._id)>0?`<span class="r-sep">·</span><span class="r-cost mono">${fmtMoney(ticketCost(t._id))}</span>`:""}
         </div>
