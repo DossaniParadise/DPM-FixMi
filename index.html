@@ -1370,7 +1370,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.47";
+const APP_VERSION = "9.48";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2348,7 +2348,7 @@ function ovPeople(){
     .map(c=>({email:c.email.toLowerCase(),name:c.name||c.email,role:"dm",roleLabel:"District Manager"}))
     .sort((a,b)=>a.name.localeCompare(b.name)));
   add("General Managers",Object.entries(MASTER.restaurants||{}).filter(([,r])=>r.email)
-    .map(([id,r])=>({email:r.email.toLowerCase(),name:(r.storeManager?r.storeManager+" — ":"")+(r.storeName||id),role:"gm",roleLabel:"General Manager"}))
+    .map(([id,r])=>{const mn=storeManagerName(id);return {email:r.email.toLowerCase(),name:(mn?mn+" — ":"")+(r.storeName||id),role:"gm",roleLabel:"General Manager"}})
     .sort((a,b)=>a.name.localeCompare(b.name)));
   add("Technicians",Object.values(MASTER.repairTechnicians||{}).filter(t=>t.email)
     .map(t=>({email:t.email.toLowerCase(),name:t.name||t.email,role:"tech",roleLabel:"Technician"}))
@@ -2464,7 +2464,7 @@ function oneSelect(){
   add("District Managers",Object.values(MASTER.areaCoaches||{}).filter(c=>c.email)
     .map(c=>({v:"dm|"+c.email.toLowerCase(),n:c.name||c.email})).sort((a,b)=>a.n.localeCompare(b.n)));
   add("General Managers",Object.entries(stores).filter(([,r])=>r.email)
-    .map(([id,r])=>({v:"gm|"+r.email.toLowerCase(),n:(r.storeManager?r.storeManager+" — ":"")+(r.storeName||id)})).sort((a,b)=>a.n.localeCompare(b.n)));
+    .map(([id,r])=>{const mn=storeManagerName(id);return {v:"gm|"+r.email.toLowerCase(),n:(mn?mn+" — ":"")+(r.storeName||id)}}).sort((a,b)=>a.n.localeCompare(b.n)));
   add("Repair technicians",Object.values(MASTER.repairTechnicians||{}).filter(t=>t&&t.email)
     .map(t=>({v:"tech|"+t.email.toLowerCase(),n:t.name||t.email})).sort((a,b)=>a.n.localeCompare(b.n)));
   return `<select class="input" id="wkOne"><option value="">— choose someone —</option>
@@ -3303,7 +3303,46 @@ function storeCoachIds(rid){
 function storeCoach(rid){const ids=storeCoachIds(rid);return ids.length?(MASTER.areaCoaches||{})[ids[0]]:null}
 function storeTech(rid){const ids=storeTechIds(rid);return ids.length?(MASTER.repairTechnicians||{})[ids[0]]:null}
 function techName(tid){return (MASTER.repairTechnicians||{})[tid]?.name||null}
-function storeManagerName(rid){return store(rid).storeManager||""}
+/* ---- who manages this store -----------------------------------------------
+   FindMi moved to a LIST of managers per store — {name, title, phone, email} —
+   and now treats storeManager / assistantManager as legacy fields kept only
+   for stores it has not imported yet. Its "Update Manager Contacts" importer
+   writes `managers` and says so in its own UI: "existing managers and the old
+   GM/AGM fields are left as-is."
+
+   So on any store whose contacts have been imported, `storeManager` is frozen
+   at whoever held the job before — not stale by a minute, stale for good. That
+   is why only a couple of stores look wrong: those are the imported ones.
+
+   This is the same precedence FindMi's own storeManagersOf() uses, kept in one
+   place so no caller has to remember it. Nothing is written back: two writable
+   copies of one fact is what caused this in the first place. */
+function storeManagers(rid){
+  const s=store(rid);
+  const raw=Array.isArray(s.managers)?s.managers
+    :(s.managers&&typeof s.managers==="object"?Object.values(s.managers):[]);
+  const list=raw.filter(m=>m&&String(m.name||"").trim())
+    .map(m=>({name:String(m.name).trim(),title:String(m.title||"").trim(),
+              phone:String(m.phone||"").trim(),email:String(m.email||"").trim()}));
+  if(list.length)return list;
+  // Not imported yet: fall back to the loose fields.
+  const out=[];
+  if(String(s.storeManager||"").trim())out.push({name:String(s.storeManager).trim(),title:"GM",phone:String(s.managerCell||"").trim(),email:""});
+  if(String(s.assistantManager||"").trim())out.push({name:String(s.assistantManager).trim(),title:"AGM",phone:String(s.assistantManagerCell||"").trim(),email:""});
+  return out;
+}
+/* The one name to show when there is room for one. A store can list an AGM and
+   other contacts; the GM is the person these emails and logins are about, so
+   prefer that title and only fall back to the first name on the list. */
+function storeManagerName(rid){
+  const l=storeManagers(rid);
+  const gm=l.find(m=>m.title.toUpperCase()==="GM");
+  return (gm||l[0]||{}).name||"";
+}
+function storeManagerFirst(rid){
+  const n=storeManagerName(rid);
+  return n.trim().split(/\s+/)[0]||"";
+}
 /* ---- GPS link for a store. Coordinates are most precise; if a store has none
    (a handful don't), fall back to its street address, then its name. Returns a
    universal maps URL that opens the native maps/GPS app on phones (Google Maps
@@ -3452,7 +3491,7 @@ function resolveSession(email,pw){
     return{email:lc,role:"tech",name:te[tId].name,scope:"stores",refField:"assignedRepairTechnicianId",refId:tId}}
   const sId=Object.keys(RESTAURANTS).find(r=>(RESTAURANTS[r].email||"").toLowerCase()===lc);
   if(sId){if(!checkStorePassword(sId,pw))return{error:"That password doesn't match this store."};
-    return{email:lc,role:"manager",name:RESTAURANTS[sId].storeManager||storeName(sId),scope:"single",storeId:sId}}
+    return{email:lc,role:"manager",name:storeManagerName(sId)||storeName(sId),scope:"single",storeId:sId}}
   return{error:"We couldn't find that email in the alignment master. Check it's the email on file."};
 }
 
@@ -3465,7 +3504,7 @@ function buildImpersonatedSession(kind,id){
   if(kind==="director"){const d=MASTER.directors[id];return{email:(d.email||"").toLowerCase(),role:"director",name:d.name,scope:"director",refId:id,_sim:true}}
   if(kind==="coach"){const c=MASTER.areaCoaches[id];return{email:(c.email||"").toLowerCase(),role:"coach",name:c.name,scope:"stores",refField:"assignedAreaCoachId",refId:id,_sim:true}}
   if(kind==="tech"){const t=MASTER.repairTechnicians[id];return{email:(t.email||"").toLowerCase(),role:"tech",name:t.name,scope:"stores",refField:"assignedRepairTechnicianId",refId:id,_sim:true}}
-  if(kind==="manager"){const s=RESTAURANTS[id];return{email:(s.email||"").toLowerCase(),role:"manager",name:s.storeManager||storeName(id),scope:"single",storeId:id,_sim:true}}
+  if(kind==="manager"){const s=RESTAURANTS[id];return{email:(s.email||"").toLowerCase(),role:"manager",name:storeManagerName(id)||storeName(id),scope:"single",storeId:id,_sim:true}}
   return null;
 }
 // flat roster of everyone an admin can view as; managers labeled by store
@@ -3482,11 +3521,11 @@ function viewAsRoster(){
   Object.entries(MASTER.repairTechnicians||{}).filter(([id])=>!isDir||myTechs.has(id)).forEach(([id,t])=>list.push({kind:"tech",id,primary:"Repair Tech — "+t.name,secondary:"",search:(t.name+" tech").toLowerCase(),sortk:"3"+t.name}));
   Object.keys(RESTAURANTS).filter(id=>!isDir||myStores.has(id)).forEach(id=>{
     const s=RESTAURANTS[id];
-    const mgr=s.storeManager||"—";
+    const mgr=storeManagerName(id)||"—";
     list.push({kind:"manager",id,
       primary:"Manager · "+storeNum(id),
-      secondary:storeName(id)+(s.storeManager?(" · "+s.storeManager):""),
-      search:[storeNum(id),storeName(id),s.storeManager,"manager store"].filter(Boolean).join(" ").toLowerCase(),
+      secondary:storeName(id)+(mgr!=="—"?(" · "+mgr):""),
+      search:[storeNum(id),storeName(id),mgr,s.storeManager,"manager store"].filter(Boolean).join(" ").toLowerCase(),
       sortk:"4"+(storeNum(id)||"")});
   });
   // default order: directors, DMs, techs, then managers by store number
@@ -8251,9 +8290,16 @@ function spWhy(sid,term){
   const hit=v=>{const t=String(v||"").toLowerCase(); if(!t)return false;
     return toks.some(k=>t.includes(k)||(k.replace(/\D+/g,"").length>=3&&t.replace(/\D+/g,"").includes(k.replace(/\D+/g,""))))};
   const bits=[];
-  if(hit(s.storeManager))bits.push("GM "+s.storeManager);
-  if(hit(s.assistantManager))bits.push("AM "+s.assistantManager);
-  (Array.isArray(s.managers)?s.managers:[]).filter(Boolean).forEach(m=>{if(hit(m.name))bits.push((m.title?m.title+" ":"")+m.name)});
+  /* The current list first. The legacy fields still match — searching a
+     previous manager's name should still find the store — but once a store
+     has an imported list those fields are history, so the match is labelled
+     "was" rather than claiming the person still runs the place. */
+  const mgrList=storeManagers(sid);
+  mgrList.forEach(m=>{if(hit(m.name))bits.push((m.title?m.title+" ":"")+m.name)});
+  const listed=new Set(mgrList.map(m=>m.name.toLowerCase()));
+  const old=v=>{const t=String(v||"").trim(); return t&&hit(t)&&!listed.has(t.toLowerCase())};
+  if(old(s.storeManager))bits.push((mgrList.length?"was GM ":"GM ")+s.storeManager);
+  if(old(s.assistantManager))bits.push((mgrList.length?"was AM ":"AM ")+s.assistantManager);
   storeCoachIds(sid).forEach(id=>{const c=(MASTER.areaCoaches||{})[id]; if(c&&hit(c.name))bits.push("DM "+c.name)});
   storeTechIds(sid).forEach(id=>{const t=(MASTER.repairTechnicians||{})[id]; if(t&&hit(t.name))bits.push("Tech "+t.name)});
   const dir=storeDirector(sid); if(dir&&hit(dir.name))bits.push("Director "+dir.name);
@@ -8455,7 +8501,7 @@ function managerLoginRows(){
         director: dir?(dir.name||""):"",
         store: storeName(sid),
         division: (typeof divisionLabel==="function")?divisionLabel(storeDivision(sid)):storeDivision(sid),
-        manager: st.storeManager||"",
+        manager: storeManagerName(sid),
         email: email||"(no email in FindMi — cannot log in)",
         password: email?storePassword(sid):"",
       });
@@ -8493,7 +8539,7 @@ function onboardingData(dmId){
     .sort((a,b)=>storeName(a).localeCompare(storeName(b)));
   const gms=stores.filter(sid=>(store(sid).email||"").trim()).map(sid=>{
     const st=store(sid);
-    return {sid,storeName:storeName(sid),gm:(st.storeManager||"").trim().split(/\s+/)[0]||"there",
+    return {sid,storeName:storeName(sid),gm:storeManagerFirst(sid)||"there",
             email:(st.email||"").trim(),pw:storePassword(sid)};
   });
   const missing=stores.filter(sid=>!(store(sid).email||"").trim()).map(storeName);
