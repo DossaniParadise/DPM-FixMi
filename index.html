@@ -1440,7 +1440,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.53";
+const APP_VERSION = "9.54";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -6346,16 +6346,18 @@ function gatherTechRange(techId,fromYmd,toYmd){
   const ambiguous=sharers.length>0;
   const mine=t=>!ambiguous||t.assignedTechId===techId;
   const start=dayBounds(fromYmd)[0], end=dayBounds(toYmd)[1];
+  /* Only moves of the ticket's status count. A tech leaving a note is not
+     progress on the job, and mixing comments in buried the thing this report
+     is for: what changed, and when. clockin and clockout ARE status moves (in
+     progress / finished) — they just carry their own action names. */
+  const MOVES={clockin:1,clockout:1,status:1};
   const events=[];
   Object.keys(TICKETS).forEach(tid=>{
     const t=TICKETS[tid];
     (Array.isArray(t.activity)?t.activity:[]).forEach(a=>{
+      if(!a||!MOVES[a.action])return;
       if(a.role==="tech" && key(a.by)===want && mine(t) && a.ts>=start && a.ts<=end)
         events.push({ts:a.ts,kind:"action",action:a.action,toStatus:a.toStatus,note:a.note||"",ticketId:tid,storeId:t.storeId});
-    });
-    (Array.isArray(t.comments)?t.comments:[]).forEach(c=>{
-      if(c.role==="tech" && key(c.by)===want && mine(t) && c.ts>=start && c.ts<=end)
-        events.push({ts:c.ts,kind:"comment",text:c.text||"",ticketId:tid,storeId:t.storeId});
     });
   });
   events.sort((a,b)=>a.ts-b.ts);
@@ -6368,14 +6370,12 @@ function gatherTechRange(techId,fromYmd,toYmd){
 /* The long form reads well in a wide row and is unusable in a 150px column,
    where "10:18 AM ▶ Started (in progress)" wraps to six lines. */
 function actionGlyph(e){
-  if(e.kind==="comment")return "💬";
   return {clockin:"▶",clockout:"✓",status:"→",created:"✚",assign:"⇢",edit:"✎"}[e.action]||"•";
 }
 function shortClock(ts){
   return new Date(ts).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}).replace(/\s?([AP])M/i,(m,a)=>a.toLowerCase());
 }
 function actionLabel(e){
-  if(e.kind==="comment")return `💬 Commented`;
   const map={clockin:"▶ Started (in progress)",clockout:"✓ Marked finished",status:e.toStatus?`→ ${(STATUSES[e.toStatus]||{}).label||e.toStatus}`:"Status change",created:"Created",assign:"Assigned",edit:"Edited"};
   return map[e.action]||e.action||"Action";
 }
@@ -6396,8 +6396,8 @@ async function runTechReport(){
   if(!data){out.innerHTML=`<div class="rp-empty">Tech not found.</div>`;return}
   const {name,events,pings,ambiguous,sharers}=data;
 
-  /* Per day: which TICKETS were progressed (a ticket counts once however many
-     times it was touched), the stores visited in time order, and the miles
+  /* Per day: which TICKETS this tech MOVED (a ticket counts once however
+     many times its status changed), the stores visited in time order, and the miles
      between them. Mileage is per-day on purpose — summing one route across the
      week would join Saturday's last stop to Sunday's first. */
   const byDay={};
@@ -6487,7 +6487,6 @@ async function runTechReport(){
     const t=TICKETS[tid]||{};
     const es=(dayKey?byDay[dayKey].tickets.get(tid):scopeEvents.filter(e=>e.ticketId===tid)).slice().sort((a,b)=>a.ts-b.ts);
     const st=STATUSES[t.status]||{};
-    const note=es.filter(e=>e.kind==="comment"&&e.text).pop();
     const gps=storeGeoUrl(t.storeId);
     if(compact){
       /* A column card has about 150px to work with. Glyph + time per action,
@@ -6514,7 +6513,6 @@ async function runTechReport(){
         <div class="tr-i-store">${esc(storeName(t.storeId))}</div>
         <div class="tr-i-desc">${esc(t.description||"")}</div>
         <div class="tr-i-did">${esc(did)}</div>
-        ${note?`<div class="rp-note">"${esc(note.text)}"</div>`:""}
       </div>
       ${gps?`<button type="button" class="rp-gps" title="Open this store in maps" onclick="event.stopPropagation();window.open('${escA(gps)}','_blank')">📍</button>`:""}
       <span class="tr-i-go">›</span>
@@ -6549,10 +6547,10 @@ async function runTechReport(){
         </div>
         <div class="tr-col-b">${ids.length
           ? ticketRows(ids,d,true)
-          : `<div class="tr-col-none">Nothing logged</div>`}</div>
+          : `<div class="tr-col-none">No changes</div>`}</div>
       </div>`;}).join("")}</div>
     <div class="tr-hint">Oldest on the left.${hiddenWeekend
-      ? ` ${hiddenWeekend===1?"One weekend day is":"Saturday and Sunday are"} hidden \u2014 nothing was logged.`
+      ? ` ${hiddenWeekend===1?"One weekend day is":"Saturday and Sunday are"} hidden \u2014 no status changes.`
       : ""}</div>`;
 
   const stacked=days.slice().reverse().filter(d=>byDay[d].tickets.size).map(d=>
@@ -6568,9 +6566,9 @@ async function runTechReport(){
      shape, so it still says it plainly. */
   let list;
   if(_reportLayout==="cols"){
-    list=(scopeEvents.length?"":`<div class="rp-empty">Nothing logged by ${esc(name)} in these 7 days.</div>`)+columns;
+    list=(scopeEvents.length?"":`<div class="rp-empty">${esc(name)} did not move any ticket\u2019s status in these 7 days.</div>`)+columns;
   }else{
-    list=scopeEvents.length?stacked:`<div class="rp-empty">Nothing logged by ${esc(name)} in these 7 days.</div>`;
+    list=scopeEvents.length?stacked:`<div class="rp-empty">${esc(name)} did not move any ticket\u2019s status in these 7 days.</div>`;
   }
 
   out.innerHTML=`
@@ -6579,7 +6577,7 @@ async function runTechReport(){
     ${onPlate}
     ${summary}
     ${map}
-    <div class="section-label" style="margin-top:20px">Jobs worked${_reportLayout==="cols"?"":", newest day first"}<span class="ln"></span></div>
+    <div class="section-label" style="margin-top:20px">Status changes${_reportLayout==="cols"?"":", newest day first"}<span class="ln"></span></div>
     ${layoutToggle}
     ${list}`;
 }
