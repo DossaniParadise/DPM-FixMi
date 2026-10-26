@@ -372,7 +372,12 @@ body.no-reftags .reftag{display:none}
 .tr-day.on .tr-dow,.tr-day.on .tr-num,.tr-day.on .tr-dom{color:#fff;opacity:1}
 .tr-hint{font-size:12px;color:var(--ink-dim);margin:8px 2px 16px;text-align:center}
 /* ---- tech report: stacked vs seven columns ---- */
-.tr-layout{display:flex;gap:6px;margin:10px 0 4px}
+.tr-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  flex-wrap:wrap;margin:10px 0 4px}
+.tr-step{display:flex;align-items:center;gap:6px}
+.tr-step-l{font-size:12px;font-weight:700;color:var(--ink-mid);white-space:nowrap}
+.tr-nav.sm{width:30px;height:30px;font-size:16px}
+.tr-layout{display:flex;gap:6px}
 .tr-lay{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:6px 12px;
   font-size:12.5px;font-weight:600;color:var(--ink-mid);cursor:pointer}
 .tr-lay.on{background:var(--amber-fill);border-color:var(--amber-fill);color:var(--on-accent)}
@@ -1432,7 +1437,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.51";
+const APP_VERSION = "9.52";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -6380,9 +6385,20 @@ async function runTechReport(){
   /* The day strip is gone. It made you click one square at a time to see
      anything, which is the whole complaint — every day in the window is listed
      below instead, newest first. */
-  const layoutToggle=`<div class="tr-layout">
-    <button type="button" class="tr-lay${_reportLayout==="rows"?" on":""}" onclick="setReportLayout('rows')" title="One day after another">☰ Stacked</button>
-    <button type="button" class="tr-lay${_reportLayout==="cols"?" on":""}" onclick="setReportLayout('cols')" title="All seven days side by side">▥ Columns</button>
+  /* The week nav also sits at the top, but in Columns the list is below the
+     stats and the map — so changing week meant scrolling back up and losing
+     your place. Same controls, repeated where the work actually is. */
+  const layoutToggle=`<div class="tr-bar">
+    <div class="tr-layout">
+      <button type="button" class="tr-lay${_reportLayout==="rows"?" on":""}" onclick="setReportLayout('rows')" title="One day after another">☰ Stacked</button>
+      <button type="button" class="tr-lay${_reportLayout==="cols"?" on":""}" onclick="setReportLayout('cols')" title="All seven days side by side">▥ Columns</button>
+    </div>
+    <div class="tr-step">
+      <button type="button" class="tr-nav sm" onclick="shiftReportWeek(-1)" title="The week before this one (or press ←)">‹</button>
+      <span class="tr-step-l">${esc(fmtDayLabel(from))} – ${esc(fmtDayLabel(to))}</span>
+      <button type="button" class="tr-nav sm${thisWeek?" off":""}" ${thisWeek?"disabled":`onclick="shiftReportWeek(1)"`} title="The week after this one (or press →)">›</button>
+      ${thisWeek?"":`<button type="button" class="tr-today" onclick="thisReportWeek()">Latest</button>`}
+    </div>
   </div>`;
 
   const scope=days;
@@ -6496,11 +6512,16 @@ async function runTechReport(){
         <div class="tr-list">${ticketRows([...byDay[d].tickets.keys()],d)}</div>
       </div>`).join("");
 
+  /* Columns keeps its seven columns even for a silent week. Collapsing to a
+     one-line message moved the controls up the page, so paging back through
+     quiet weeks made the arrows jump around under the cursor — which is the
+     opposite of what paging should feel like. Stacked has nothing to hold its
+     shape, so it still says it plainly. */
   let list;
-  if(!scopeEvents.length){
-    list=`<div class="rp-empty">Nothing logged by ${esc(name)} in these 7 days.</div>`;
+  if(_reportLayout==="cols"){
+    list=(scopeEvents.length?"":`<div class="rp-empty">Nothing logged by ${esc(name)} in these 7 days.</div>`)+columns;
   }else{
-    list=(_reportLayout==="cols")?columns:stacked;
+    list=scopeEvents.length?stacked:`<div class="rp-empty">Nothing logged by ${esc(name)} in these 7 days.</div>`;
   }
 
   out.innerHTML=`
@@ -6862,6 +6883,18 @@ document.addEventListener("keydown",e=>{
   if(el&&/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))return;   // let a field have its arrows
   if(e.key==="ArrowRight"){deckStep(1);e.preventDefault()}
   else if(e.key==="ArrowLeft"){deckStep(-1);e.preventDefault()}
+});
+/* Arrow keys page the tech report a week at a time. Deliberately placed after
+   the deck's handler and guarded against it: a deck opened from the report
+   sits on top, and its arrows move between tickets, not weeks. */
+document.addEventListener("keydown",e=>{
+  if(DECK.ids.length)return;                                   // the deck has the arrows
+  const o=$("modalOverlay"); if(!o||!o.classList.contains("on"))return;
+  if(!o.querySelector("#reportOut"))return;                    // only the tech report
+  const el=document.activeElement;
+  if(el&&/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))return;   // let a field have its arrows
+  if(e.key==="ArrowLeft"){shiftReportWeek(-1);e.preventDefault()}
+  else if(e.key==="ArrowRight"){shiftReportWeek(1);e.preventDefault()}
 });
 /* Hover card. The old SVG <title> was the browser's native tooltip: ~1s delay
    and unstyleable. This one is instant and follows the cursor. */
