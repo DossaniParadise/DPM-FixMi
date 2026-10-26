@@ -407,8 +407,10 @@ body.no-reftags .reftag{display:none}
    default; it only takes colour when the activity is recent enough to be
    worth a second look. */
 .r-act{display:inline-flex;align-items:center;gap:4px;font-weight:600;color:var(--ink-mid)}
-.r-act.fresh{color:var(--brand);font-weight:700}
-html[data-theme="dark"] .r-act.fresh{color:var(--brand)}
+/* --amber is the brand colour, but at 11px bold on a priority-tinted row it
+   measures 4.33:1 — just under AA. --amber-deep is the same hue, darkened for
+   exactly this, and clears it at 6.71:1. Dark mode redefines both. */
+.r-act.fresh{color:var(--amber-deep);font-weight:700}
 /* The status chip, shown only in the ALL view where the list is mixed. The
    dot carries the colour and the word carries the meaning, so it still reads
    in greyscale and for anyone who cannot separate the hues. */
@@ -779,9 +781,20 @@ html[data-theme="dark"] .leaflet-tooltip-top:before{border-top-color:var(--panel
 .ow-leg-name{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ow-leg-n{font-weight:700;color:var(--ink)}
 .ow-leg-s{color:var(--ink-dim);font-size:11px;min-width:64px;text-align:right}
-.ow-unmapped{margin-top:14px;font-size:12.5px;color:var(--ink-mid);background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px}
-.ow-um{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 11px;margin:5px 5px 0 0;font-size:12px;cursor:pointer}
-.ow-um:hover{border-color:var(--amber);color:var(--amber-deep)}
+/* Stores that cannot be plotted. These carry real jobs, so they are a panel
+   that reads as part of the map rather than a footnote under it. */
+.ow-unmapped{margin-top:14px;font-size:13px;color:var(--ink-mid);background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px}
+.ow-um-head{color:var(--ink);line-height:1.5}
+.ow-um-fix{margin-top:10px;font-size:12px;color:var(--ink-dim)}
+.ow-um-rows{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}
+.ow-um{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;padding:9px 12px;font-size:13px;cursor:pointer;text-align:left;color:var(--ink)}
+.ow-um-n{font-weight:600}
+.ow-um-c{font-size:11.5px;color:var(--ink-dim);white-space:nowrap}
+.ow-um.has{border-color:var(--tint-line);background:var(--tint);box-shadow:inset 3px 0 0 var(--amber)}
+.ow-um.has .ow-um-c{color:var(--amber-deep);font-weight:700}
+.ow-um:hover{border-color:var(--amber)}
+@media(max-width:600px){.ow-um{flex:1 1 100%;justify-content:space-between}}
 @media(max-width:600px){.ow-toggle{width:100%}.ow-tab{flex:1;padding:8px 6px}.ow-leg-s{display:none}}
 .v-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;margin-right:2px;box-shadow:0 0 0 1px rgba(0,0,0,.12)}
 .v-tag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;background:var(--panel-2);border:1px solid var(--line);
@@ -1370,7 +1383,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.48";
+const APP_VERSION = "9.49";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -6450,7 +6463,8 @@ function renderZoneMap(){
     </div>`).join("");
   const techCount=Object.keys(zones).length;
 
-  let svg=`<div class="rp-empty">No store coordinates available to map.</div>`;
+  let svg=`<div class="rp-empty">None of these stores has GPS coordinates yet, so there is nothing to plot.<br>
+    Every open job is listed underneath.</div>`;
   if(mapped.length){
     const lats=mapped.map(p=>p.lat),lngs=mapped.map(p=>p.lng);
     let minLat=Math.min(...lats),maxLat=Math.max(...lats),minLng=Math.min(...lngs),maxLng=Math.max(...lngs);
@@ -6471,20 +6485,45 @@ function renderZoneMap(){
         ${badge}
       </g>`;}).join("");
     ZONEMAP_PTS=mapped.map(p=>({sid:p.sid,lat:p.lat,lng:p.lng,open:p.open,cols:p.cols,techName:p.techName}));
-    svg=`<svg viewBox="0 0 ${W} ${H}" class="ow-map" preserveAspectRatio="xMidYMid meet">
-      <rect x="0" y="0" width="${W}" height="${H}" fill="var(--panel-2)"/>${dots}</svg>`;
+  }else{
+    /* Reset on EVERY render, not only when there is something to draw. This
+       used to live inside the branch above, so a user whose stores have no
+       coordinates inherited whoever rendered last: an admin switching to
+       "view as" saw their OWN pins drawn on the other person's map, while the
+       caption underneath said there were no coordinates. */
+    ZONEMAP_PTS=[];
+    if(ZONEMAP){try{ZONEMAP.remove()}catch(e){}ZONEMAP=null}
   }
 
+  /* A store with no usable latitude/longitude cannot be placed — but its jobs
+     must still be accounted for, or Map quietly shows fewer jobs than List and
+     Tiles do. For a district whose stores all lack coordinates that meant an
+     empty map and no explanation worth the name. So these get the same
+     treatment a pin gets: a row, its count, and a tap that opens the same
+     ticket deck. */
+  const offOpen=unmapped.reduce((n,r)=>n+r.open,0);
   const unmappedBlock=unmapped.length?`
     <div class="ow-unmapped">
-      <b>${unmapped.length} store${unmapped.length===1?"":"s"} without GPS coordinates</b> — not on the map:
-      ${unmapped.sort((a,b)=>b.open-a.open).map(r=>`<button class="ow-um" onclick="owFocusStore('${r.sid}')">${esc(storeName(r.sid))}${r.open?` <b>${r.open}</b>`:""}</button>`).join("")}
+      <div class="ow-um-head"><b>Not on the map</b> — ${unmapped.length} store${unmapped.length===1?"":"s"}
+        ${offOpen?`with <b>${offOpen} open job${offOpen===1?"":"s"}</b> between them `:""}${
+        unmapped.length===1?"has":"have"} no GPS coordinates in FindMi.</div>
+      <div class="ow-um-rows">${unmapped.slice().sort((a,b)=>b.open-a.open||storeName(a.sid).localeCompare(storeName(b.sid)))
+        .map(r=>`<button class="ow-um${r.open?" has":""}" onclick="${r.open?`openStoreDeck('${r.sid}')`:`owFocusStore('${r.sid}')`}">
+          <span class="ow-um-n">${esc(storeName(r.sid))}</span>
+          <span class="ow-um-c">${r.open?`${r.open} open`:"all clear"}</span></button>`).join("")}</div>
+      <div class="ow-um-fix">Add a latitude and longitude to ${unmapped.length===1?"it":"them"} in FindMi and ${unmapped.length===1?"it":"they"} will appear on the map.</div>
     </div>`:"";
+
+  /* Say it in the header too. "4 open" over a map showing two pins is the
+     thing that makes people think the map is broken. */
+  const offNote=offOpen
+    ? ` · <b>${offOpen} not on the map</b>`
+    : (unmapped.length?` · ${unmapped.length} store${unmapped.length===1?"":"s"} without GPS`:"");
 
   return `
     <div class="page-head"><div>
       <div class="page-title">Open tickets by zone</div>
-      <div class="page-meta">${totalOpen} open across ${ids.length} stores · ${techCount} in-house tech${techCount===1?"":"s"}</div>
+      <div class="page-meta">${totalOpen} open across ${ids.length} stores · ${techCount} in-house tech${techCount===1?"":"s"}${offNote}</div>
     </div></div>
     <div class="ow-map-wrap">
       <div id="owLeaflet" class="ow-leaflet"></div>
