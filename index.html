@@ -372,6 +372,9 @@ body.no-reftags .reftag{display:none}
 .tr-day.on .tr-dow,.tr-day.on .tr-num,.tr-day.on .tr-dom{color:#fff;opacity:1}
 .tr-hint{font-size:12px;color:var(--ink-dim);margin:8px 2px 16px;text-align:center}
 /* ---- tech report: stacked vs seven columns ---- */
+.upd-chip{position:fixed;right:14px;bottom:14px;z-index:70;background:var(--amber-fill);
+  color:var(--on-accent);border:none;border-radius:999px;padding:10px 16px;font-size:13px;
+  font-weight:700;cursor:pointer;box-shadow:var(--shadow)}
 .tr-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;
   flex-wrap:wrap;margin:10px 0 4px}
 .tr-step{display:flex;align-items:center;gap:6px}
@@ -1437,7 +1440,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.52";
+const APP_VERSION = "9.53";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -3198,6 +3201,37 @@ function cmpVer(a,b){ // 1 if a>b, -1 if a<b, 0 equal
   return 0;
 }
 const RELOAD_KEY="dpm_reloaded_for";
+/* "Busy" is anything a reload would destroy: an open sheet, a focused field,
+   or a photo going up. */
+function appBusy(){
+  const o=$("modalOverlay");
+  if(o&&o.classList.contains("on"))return true;
+  if(_uploadsInFlight>0)return true;
+  const el=document.activeElement;
+  if(el&&/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))return true;
+  return false;
+}
+/* A quiet, persistent offer in the header. Pressing it reloads on their terms;
+   ignoring it costs nothing, because the automatic path still runs the moment
+   they close what they are doing. */
+function showUpdateChip(server){
+  let b=$("updChip");
+  if(!b){
+    b=document.createElement("button");
+    b.id="updChip"; b.className="upd-chip";
+    b.title="A newer version of FixMi is published";
+    b.onclick=()=>doAppUpdate(b.dataset.v||server);
+    document.body.appendChild(b);   // fixed-position, so body is the right home
+  }
+  b.dataset.v=server;
+  b.innerHTML=`\u21bb Update to v${esc(server)}`;
+}
+function doAppUpdate(server){
+  _reloadArmed=true;
+  try{localStorage.setItem(RELOAD_KEY,server+"|"+APP_VERSION)}catch(e){}
+  const q=new URLSearchParams(location.search); q.set("v",server);
+  location.replace(location.pathname+"?"+q.toString()+location.hash);
+}
 function checkAppVersion(){
   const server=((MASTER.admins||{}).appMeta||{}).version;
   if(!server || cmpVer(APP_VERSION,server)>0){
@@ -3223,6 +3257,12 @@ function checkAppVersion(){
         loop, so we stay put and keep working. */
   if(!SESSION) return;
   if(_reloadArmed) return;
+  /* Do not take the page away from someone mid-task. Reloading while a sheet
+     was open threw away whatever they were reading or filling in, with no
+     warning beyond a toast — and while a run of versions goes out it happens
+     again on each one. If they are busy, park it and offer the update as a
+     button instead; it will take itself the next time they are idle. */
+  if(appBusy()){ showUpdateChip(server); return; }
   const attempt=server+"|"+APP_VERSION;
   let done=null;try{done=localStorage.getItem(RELOAD_KEY)}catch(e){}
   if(done===attempt) return;
@@ -6492,7 +6532,14 @@ async function runTechReport(){
      way a calendar does. Empty days are kept — a gap in the week is a fact
      worth seeing, and dropping them would make the columns stop lining up
      with the dates. Cards are the same ones, just narrower. */
-  const columns=`<div class="tr-cols">${days.map(d=>{
+  /* Saturday and Sunday are dead space on most weeks, and two empty columns
+     cost the five working ones a fifth of their width each. They appear only
+     when there is something on them — so a weekend callout is never hidden,
+     it just does not take up room when nobody worked. */
+  const isWeekend=d=>{const g=new Date(dayBounds(d)[0]).getDay();return g===0||g===6};
+  const colDays=days.filter(d=>!isWeekend(d)||byDay[d].tickets.size);
+  const hiddenWeekend=days.length-colDays.length;
+  const columns=`<div class="tr-cols">${colDays.map(d=>{
       const o=byDay[d], ids=[...o.tickets.keys()];
       return `<div class="tr-col${d===today?" today":""}${ids.length?"":" empty"}">
         <div class="tr-col-h">
@@ -6504,7 +6551,9 @@ async function runTechReport(){
           ? ticketRows(ids,d,true)
           : `<div class="tr-col-none">Nothing logged</div>`}</div>
       </div>`;}).join("")}</div>
-    <div class="tr-hint">Oldest on the left. Scroll sideways if the week runs off the edge.</div>`;
+    <div class="tr-hint">Oldest on the left.${hiddenWeekend
+      ? ` ${hiddenWeekend===1?"One weekend day is":"Saturday and Sunday are"} hidden \u2014 nothing was logged.`
+      : ""}</div>`;
 
   const stacked=days.slice().reverse().filter(d=>byDay[d].tickets.size).map(d=>
       `<div class="rp-day">
