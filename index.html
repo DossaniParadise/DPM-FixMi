@@ -320,6 +320,14 @@ body.no-reftags .reftag{display:none}
 .rp-empty{color:var(--ink-dim);font-size:13px;padding:18px;text-align:center;background:var(--panel-2);border-radius:10px}
 .rp-head{font-weight:800;font-size:16px;margin-bottom:12px}
 .rp-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px;margin-bottom:16px}
+.rp-warn{margin-top:14px;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-fg);
+  border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.55}
+.rp-plate{margin-top:14px;background:var(--tint);border:1px solid var(--tint-line);border-radius:10px;
+  padding:11px 13px;font-size:13px;line-height:1.7;color:var(--ink)}
+.rp-chip{display:inline-block;background:var(--panel);border:1px solid var(--line);border-radius:999px;
+  padding:3px 10px;margin:0 5px 4px 0;font-size:12px;cursor:pointer;color:var(--ink)}
+.rp-chip:hover{border-color:var(--amber)}
+.rp-more{font-size:12px;color:var(--ink-dim)}
 .rp-stat{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 8px;text-align:center}
 .rp-stat .rp-n{font-family:var(--disp);font-weight:800;font-size:22px;color:var(--amber-deep)}
 .rp-stat .rp-l{font-size:10px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
@@ -407,8 +415,10 @@ body.no-reftags .reftag{display:none}
    default; it only takes colour when the activity is recent enough to be
    worth a second look. */
 .r-act{display:inline-flex;align-items:center;gap:4px;font-weight:600;color:var(--ink-mid)}
-.r-act.fresh{color:var(--brand);font-weight:700}
-html[data-theme="dark"] .r-act.fresh{color:var(--brand)}
+/* --amber is the brand colour, but at 11px bold on a priority-tinted row it
+   measures 4.33:1 — just under AA. --amber-deep is the same hue, darkened for
+   exactly this, and clears it at 6.71:1. Dark mode redefines both. */
+.r-act.fresh{color:var(--amber-deep);font-weight:700}
 /* The status chip, shown only in the ALL view where the list is mixed. The
    dot carries the colour and the word carries the meaning, so it still reads
    in greyscale and for anyone who cannot separate the hues. */
@@ -779,9 +789,20 @@ html[data-theme="dark"] .leaflet-tooltip-top:before{border-top-color:var(--panel
 .ow-leg-name{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ow-leg-n{font-weight:700;color:var(--ink)}
 .ow-leg-s{color:var(--ink-dim);font-size:11px;min-width:64px;text-align:right}
-.ow-unmapped{margin-top:14px;font-size:12.5px;color:var(--ink-mid);background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px}
-.ow-um{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 11px;margin:5px 5px 0 0;font-size:12px;cursor:pointer}
-.ow-um:hover{border-color:var(--amber);color:var(--amber-deep)}
+/* Stores that cannot be plotted. These carry real jobs, so they are a panel
+   that reads as part of the map rather than a footnote under it. */
+.ow-unmapped{margin-top:14px;font-size:13px;color:var(--ink-mid);background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px}
+.ow-um-head{color:var(--ink);line-height:1.5}
+.ow-um-fix{margin-top:10px;font-size:12px;color:var(--ink-dim)}
+.ow-um-rows{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}
+.ow-um{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;padding:9px 12px;font-size:13px;cursor:pointer;text-align:left;color:var(--ink)}
+.ow-um-n{font-weight:600}
+.ow-um-c{font-size:11.5px;color:var(--ink-dim);white-space:nowrap}
+.ow-um.has{border-color:var(--tint-line);background:var(--tint);box-shadow:inset 3px 0 0 var(--amber)}
+.ow-um.has .ow-um-c{color:var(--amber-deep);font-weight:700}
+.ow-um:hover{border-color:var(--amber)}
+@media(max-width:600px){.ow-um{flex:1 1 100%;justify-content:space-between}}
 @media(max-width:600px){.ow-toggle{width:100%}.ow-tab{flex:1;padding:8px 6px}.ow-leg-s{display:none}}
 .v-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;margin-right:2px;box-shadow:0 0 0 1px rgba(0,0,0,.12)}
 .v-tag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;background:var(--panel-2);border:1px solid var(--line);
@@ -1370,7 +1391,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.48";
+const APP_VERSION = "9.50";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -4278,6 +4299,9 @@ function ticketHaystack(t){
   const text=[t.shortId,t.description,catPath(t),
     (STATUSES[t.status]||{}).label,t.status,PRIORITIES[t.priority||"normal"],
     who?who.name:"",who?who.email:"",
+    /* Raw ids too: when a directory record has gone, the id is the only handle
+       left on the job. */
+    t.assignedTechId,t.assignedVendorId,t.assignedCoachId,
     t.waitingReason,(t.closeNote||{}).text,(t.assignNote||{}).text,
     ...arr_(t.comments).map(c=>[c&&c.by,c&&c.text].filter(Boolean).join(" ")),
     sh.text].filter(Boolean).join(" ").toLowerCase();
@@ -4342,12 +4366,26 @@ function categoryFilterSelect(){
 // compact horizontal ticket row
 // resolve who a ticket is on, with kind + contact info (for the contact drafts)
 function ticketAssignee(t){
-  if(t.assignedTechId){const x=(MASTER.repairTechnicians||{})[t.assignedTechId];return x?{kind:"tech",id:t.assignedTechId,name:x.name,email:x.email||"",phone:x.phone||""}:null}
-  if(t.assignedVendorId){const x=VENDORS[t.assignedVendorId];return x?{kind:"vendor",id:t.assignedVendorId,name:x.name,email:x.email||"",phone:x.phone||""}:null}
+  /* An id that no longer resolves in the directory used to come back as null.
+     That did not just lose the name — it dropped the job out of the
+     "dispatched to" filter and out of search entirely, so a job assigned to
+     somebody FindMi no longer lists became genuinely unfindable. A job nobody
+     can find is worse than one labelled awkwardly, so an unresolved
+     assignment still comes back, flagged, with no contact details (the
+     contact buttons already skip a blank email or phone). */
+  const gone=(kind,id,label)=>({kind,id,name:label,email:"",phone:"",unresolved:true});
+  if(t.assignedTechId){const x=(MASTER.repairTechnicians||{})[t.assignedTechId];
+    return x?{kind:"tech",id:t.assignedTechId,name:x.name,email:x.email||"",phone:x.phone||""}
+            :gone("tech",t.assignedTechId,"Tech (removed)")}
+  if(t.assignedVendorId){const x=VENDORS[t.assignedVendorId];
+    return x?{kind:"vendor",id:t.assignedVendorId,name:x.name,email:x.email||"",phone:x.phone||""}
+            :gone("vendor",t.assignedVendorId,"Vendor (removed)")}
   /* A job can also be handed to the store's own District Manager — not to fix
      it themselves, but because the next move is theirs: chase the landlord,
      get a quote, walk the site. It always carries written instructions. */
-  if(t.assignedCoachId){const x=(MASTER.areaCoaches||{})[t.assignedCoachId];return x?{kind:"coach",id:t.assignedCoachId,name:x.name,email:x.email||"",phone:x.phone||""}:null}
+  if(t.assignedCoachId){const x=(MASTER.areaCoaches||{})[t.assignedCoachId];
+    return x?{kind:"coach",id:t.assignedCoachId,name:x.name,email:x.email||"",phone:x.phone||""}
+            :gone("coach",t.assignedCoachId,"District Manager (removed)")}
   return null;
 }
 // elapsed since a timestamp as "Xh Ym" (no seconds)
@@ -6127,7 +6165,11 @@ function openTechLocations(){
    plus an interactive map of where they were: job-site store locations and the
    day's location pings, connected in time order so you can see the route and the
    distances between stops. */
-let _reportTech="", _reportWeek="", _reportDay="";   // _reportWeek = the Sunday; _reportDay = "" for the whole week
+/* Was a Sunday-anchored week with a day strip you tapped one square at a time.
+   What people actually want is "what has this tech been doing lately", so it is
+   now a rolling SEVEN DAYS ending today, every day listed at once. _reportBack
+   steps that window backwards in 7-day blocks for history. */
+let _reportTech="", _reportBack=0;
 function ymdLocal(ts){const d=new Date(ts);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
 function todayYmd(){return ymdLocal(now());}
 function dayBounds(ymd){
@@ -6152,28 +6194,31 @@ function weekStartYmd(ymd){
   return ymdLocal(new Date(y,m-1,d-dt.getDay(),12,0,0,0).getTime());
 }
 function weekDays(sundayYmd){return [0,1,2,3,4,5,6].map(i=>ymdShift(sundayYmd,i));}
+/* The seven days ending `back*7` days ago, oldest first. back=0 → the last
+   seven days including today. */
+function last7(back){
+  const end=ymdShift(todayYmd(),-7*(back||0));
+  return [6,5,4,3,2,1,0].map(i=>ymdShift(end,-i));
+}
 
 function openTechReport(){
   const techs=Object.entries(MASTER.repairTechnicians||{}).sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
-  if(!_reportWeek)_reportWeek=weekStartYmd(todayYmd());   // this Sunday–Saturday
   const techOpts=`<option value="">— Choose a tech —</option>`+techs.map(([id,t])=>`<option value="${id}"${_reportTech===id?" selected":""}>${esc(t.name)}</option>`).join("");
   modal(`<div class="sheet-head"><h2>Tech report</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
     <div class="sheet-body">
       <div class="field"><label class="label">Technician</label>
-        <select class="input" id="rTech" onchange="_reportTech=this.value;_reportDay='';runTechReport()">${techOpts}</select></div>
+        <select class="input" id="rTech" onchange="_reportTech=this.value;_reportBack=0;runTechReport()">${techOpts}</select></div>
       <div id="reportOut" style="margin-top:16px"></div>
     </div>`);
   if(_reportTech)runTechReport();
 }
-/* Week navigation. Never past the week containing today. */
+/* Step the seven-day window. Never forward past the window ending today. */
 function shiftReportWeek(n){
-  const next=ymdShift(_reportWeek,n*7);
-  if(next>weekStartYmd(todayYmd()))return;
-  _reportWeek=next;_reportDay="";runTechReport();
+  const next=(_reportBack||0)-n;
+  if(next<0)return;
+  _reportBack=next;runTechReport();
 }
-function thisReportWeek(){_reportWeek=weekStartYmd(todayYmd());_reportDay="";runTechReport();}
-/* Click a day to narrow the list to it; click it again for the whole week. */
-function pickReportDay(ymd){_reportDay=(_reportDay===ymd)?"":ymd;runTechReport();}
+function thisReportWeek(){_reportBack=0;runTechReport();}
 /* Re-open the report after drilling into a ticket from its list. */
 function backToTechReport(){_modalReturn=null;clearTicketHash();openTechReport();}
 
@@ -6183,16 +6228,28 @@ function gatherTechRange(techId,fromYmd,toYmd){
   const tech=(MASTER.repairTechnicians||{})[techId];
   if(!tech)return null;
   const name=tech.name;
+  /* Activity and comments stamp the actor's NAME, not their id, so a rename in
+     FindMi — or a stray double space — orphaned everything that person had
+     already logged. Compare on a normalised form instead of character-exact. */
+  const key=v=>String(v||"").trim().replace(/\s+/g," ").toLowerCase();
+  const want=key(name);
+  /* Matching on a name is ambiguous when two people in the directory share
+     one. Rather than quietly credit one tech with the other's work, fall back
+     to "only tickets actually assigned to this id" and say so in the report. */
+  const sharers=Object.entries(MASTER.repairTechnicians||{})
+    .filter(([id,x])=>id!==techId&&key(x&&x.name)===want).map(([,x])=>x.name);
+  const ambiguous=sharers.length>0;
+  const mine=t=>!ambiguous||t.assignedTechId===techId;
   const start=dayBounds(fromYmd)[0], end=dayBounds(toYmd)[1];
   const events=[];
   Object.keys(TICKETS).forEach(tid=>{
     const t=TICKETS[tid];
     (Array.isArray(t.activity)?t.activity:[]).forEach(a=>{
-      if(a.role==="tech" && a.by===name && a.ts>=start && a.ts<=end)
+      if(a.role==="tech" && key(a.by)===want && mine(t) && a.ts>=start && a.ts<=end)
         events.push({ts:a.ts,kind:"action",action:a.action,toStatus:a.toStatus,note:a.note||"",ticketId:tid,storeId:t.storeId});
     });
     (Array.isArray(t.comments)?t.comments:[]).forEach(c=>{
-      if(c.role==="tech" && c.by===name && c.ts>=start && c.ts<=end)
+      if(c.role==="tech" && key(c.by)===want && mine(t) && c.ts>=start && c.ts<=end)
         events.push({ts:c.ts,kind:"comment",text:c.text||"",ticketId:tid,storeId:t.storeId});
     });
   });
@@ -6200,7 +6257,7 @@ function gatherTechRange(techId,fromYmd,toYmd){
   // location pings for that day
   const rec=((MASTER.admins||{}).techLocations||{})[techId];
   const pings=(rec&&Array.isArray(rec.pings)?rec.pings:[]).filter(p=>p.ts>=start&&p.ts<=end).sort((a,b)=>a.ts-b.ts);
-  return {tech,name,events,pings};
+  return {tech,name,events,pings,ambiguous,sharers};
 }
 
 function actionLabel(e){
@@ -6215,8 +6272,7 @@ async function runTechReport(){
   if(!out)return;
   if(!techId){out.innerHTML=`<div class="rp-empty">Choose a technician above.</div>`;return}
   _reportTech=techId;
-  if(!_reportWeek)_reportWeek=weekStartYmd(todayYmd());
-  const days=weekDays(_reportWeek), from=days[0], to=days[6];
+  const days=last7(_reportBack), from=days[0], to=days[6];
 
   // Finished work usually ends up closed, and closed tickets aren't in the
   // default payload — pull them in or the week would under-report.
@@ -6224,7 +6280,7 @@ async function runTechReport(){
   await ensureClosedLoaded();
   const data=gatherTechRange(techId,from,to);
   if(!data){out.innerHTML=`<div class="rp-empty">Tech not found.</div>`;return}
-  const {name,events,pings}=data;
+  const {name,events,pings,ambiguous,sharers}=data;
 
   /* Per day: which TICKETS were progressed (a ticket counts once however many
      times it was touched), the stores visited in time order, and the miles
@@ -6243,34 +6299,19 @@ async function runTechReport(){
   });
   days.forEach(d=>{const o=byDay[d];for(let i=1;i<o.seq.length;i++)o.miles+=distanceMiles(o.seq[i-1],o.seq[i])||0;});
 
-  const today=todayYmd(), thisWeek=_reportWeek===weekStartYmd(today);
+  const today=todayYmd(), thisWeek=!_reportBack;
   const weekLabel=`${fmtDayLabel(from)} – ${fmtDayLabel(to)}, ${to.slice(0,4)}`;
   const nav=`<div class="tr-week">
       <button type="button" class="tr-nav" onclick="shiftReportWeek(-1)" title="Previous week">‹</button>
-      <div class="tr-week-l"><div class="tr-week-t">${esc(weekLabel)}</div><div class="tr-week-s">${thisWeek?"This week":"Week of "+esc(fmtDayLabel(from))}</div></div>
-      <button type="button" class="tr-nav${thisWeek?" off":""}" ${thisWeek?"disabled":`onclick="shiftReportWeek(1)"`} title="Next week">›</button>
-      ${thisWeek?"":`<button type="button" class="tr-today" onclick="thisReportWeek()">This week</button>`}
+      <div class="tr-week-l"><div class="tr-week-t">${esc(weekLabel)}</div><div class="tr-week-s">${thisWeek?"The last 7 days":(_reportBack*7)+" to "+(_reportBack*7+6)+" days ago"}</div></div>
+      <button type="button" class="tr-nav${thisWeek?" off":""}" ${thisWeek?"disabled":`onclick="shiftReportWeek(1)"`} title="Later">›</button>
+      ${thisWeek?"":`<button type="button" class="tr-today" onclick="thisReportWeek()">Last 7 days</button>`}
     </div>`;
 
-  // Sunday → Saturday strip. The number is TICKETS progressed that day.
-  const strip=`<div class="tr-days">${days.map(d=>{
-      const o=byDay[d], n=o.tickets.size;
-      const cls=["tr-day"];
-      if(_reportDay===d)cls.push("on");
-      if(d===today)cls.push("today");
-      if(!n)cls.push("tr-none");
-      if(d>today)cls.push("tr-future");
-      return `<button type="button" class="${cls.join(" ")}" onclick="pickReportDay('${d}')" title="${esc(fmtDayLabel(d))} — ${n} ticket${n===1?"":"s"} progressed">
-        <span class="tr-dow">${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][days.indexOf(d)]}</span>
-        <span class="tr-num">${n}</span>
-        <span class="tr-dom">${Number(d.slice(8,10))}</span>
-      </button>`;}).join("")}</div>
-    <div class="tr-hint">${_reportDay
-      ? `Showing <b>${esc(fmtDayLabel(_reportDay))}</b> — tap the day again for the whole week.`
-      : `Tickets progressed each day. Tap a day to see just that day.`}</div>`;
-
-  // Scope everything below the strip to the selected day, or the whole week.
-  const scope=_reportDay?[_reportDay]:days;
+  /* The day strip is gone. It made you click one square at a time to see
+     anything, which is the whole complaint — every day in the window is listed
+     below instead, newest first. */
+  const scope=days;
   const scopeEvents=scope.flatMap(d=>byDay[d].events);
   const ticketIds=[...new Set(scopeEvents.map(e=>e.ticketId))];
   const stops=[];const seenAll={};
@@ -6280,17 +6321,35 @@ async function runTechReport(){
   const startedN=scopeEvents.filter(e=>e.action==="clockin").length;
   const activeDays=days.filter(d=>byDay[d].tickets.size).length;
 
+  /* The window above is "what did they do". This is "what is on them now",
+     counted by id straight off the tickets, so it does not depend on the
+     activity log or on names matching. When somebody says "I can't find the
+     jobs dispatched to X", this line is the answer either way: a number means
+     the jobs exist and something downstream is hiding them; a zero means
+     nothing is actually dispatched to that id. */
+  const openNow=Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}))
+    .filter(t=>t.assignedTechId===techId && ACTIVE_STATUSES.includes(t.status));
+  /* Said plainly, because a quiet report here would look like a quiet week. */
+  const dupeNote=ambiguous?`<div class="rp-warn">Another technician in FindMi is also called
+    <b>${esc(sharers[0])}</b>. The activity log records names, not ids, so this report is limited to
+    jobs assigned to this ${esc(name)} — work either of them logged on anyone else's ticket is left out.
+    Give them distinct names in FindMi to fix it.</div>`:"";
+  const onPlate=dupeNote+`<div class="rp-plate">
+    <b>${openNow.length}</b> job${openNow.length===1?"":"s"} dispatched to ${esc(name)} right now${
+      openNow.length?`: ${openNow.slice(0,8).map(t=>`<button type="button" class="rp-chip" onclick="openTicket('${t._id}','techreport')">${esc(t.shortId||t._id.slice(0,6))} · ${esc(storeName(t.storeId))}</button>`).join("")}${openNow.length>8?` <span class="rp-more">+${openNow.length-8} more</span>`:""}`:"."}
+  </div>`;
+
   const stat=(n,l)=>`<div class="rp-stat"><div class="rp-n">${n}</div><div class="rp-l">${l}</div></div>`;
   const summary=`<div class="rp-summary">
     ${stat(ticketIds.length,"tickets")}
     ${stat(finishedN,"finished")}
     ${stat(startedN,"started")}
     ${stat(stops.length,"stores")}
-    ${_reportDay?"":stat(activeDays,activeDays===1?"day active":"days active")}
+    ${stat(activeDays,activeDays===1?"day active":"days active")}
     ${stat("~"+(miles<10?miles.toFixed(1):Math.round(miles)),"mi between stops")}
   </div>`;
 
-  const map=reportMap(stops,pings.filter(pg=>scope.includes(ymdLocal(pg.ts))),!!_reportDay);
+  const map=reportMap(stops,pings.filter(pg=>scope.includes(ymdLocal(pg.ts))),false);
 
   /* One row per TICKET (not per action) — what the tech did to it, in that
      scope, summarised. Tap it to open the ticket itself. */
@@ -6316,13 +6375,9 @@ async function runTechReport(){
 
   let list;
   if(!scopeEvents.length){
-    list=`<div class="rp-empty">${_reportDay
-      ? `Nothing logged by ${esc(name)} on ${esc(fmtDayLabel(_reportDay))}.`
-      : `No tracked work by ${esc(name)} this week.`}</div>`;
-  }else if(_reportDay){
-    list=`<div class="tr-list">${ticketRows(ticketIds,_reportDay)}</div>`;
+    list=`<div class="rp-empty">Nothing logged by ${esc(name)} in these 7 days.</div>`;
   }else{
-    // Whole week: still grouped by day, newest first, so the shape matches the strip.
+    // Every day in the window, newest first, all expanded. No clicking.
     list=days.slice().reverse().filter(d=>byDay[d].tickets.size).map(d=>{
       const o=byDay[d], ids=[...o.tickets.keys()];
       const bits=[`${ids.length} ticket${ids.length===1?"":"s"}`];
@@ -6338,10 +6393,10 @@ async function runTechReport(){
   out.innerHTML=`
     <div class="rp-head">${esc(name)}</div>
     ${nav}
-    ${strip}
+    ${onPlate}
     ${summary}
     ${map}
-    <div class="section-label" style="margin-top:20px">${_reportDay?esc(fmtDayLabel(_reportDay)):"Tickets this week"}<span class="ln"></span></div>
+    <div class="section-label" style="margin-top:20px">Jobs worked, newest day first<span class="ln"></span></div>
     ${list}`;
 }
 
@@ -6450,7 +6505,8 @@ function renderZoneMap(){
     </div>`).join("");
   const techCount=Object.keys(zones).length;
 
-  let svg=`<div class="rp-empty">No store coordinates available to map.</div>`;
+  let svg=`<div class="rp-empty">None of these stores has GPS coordinates yet, so there is nothing to plot.<br>
+    Every open job is listed underneath.</div>`;
   if(mapped.length){
     const lats=mapped.map(p=>p.lat),lngs=mapped.map(p=>p.lng);
     let minLat=Math.min(...lats),maxLat=Math.max(...lats),minLng=Math.min(...lngs),maxLng=Math.max(...lngs);
@@ -6471,20 +6527,45 @@ function renderZoneMap(){
         ${badge}
       </g>`;}).join("");
     ZONEMAP_PTS=mapped.map(p=>({sid:p.sid,lat:p.lat,lng:p.lng,open:p.open,cols:p.cols,techName:p.techName}));
-    svg=`<svg viewBox="0 0 ${W} ${H}" class="ow-map" preserveAspectRatio="xMidYMid meet">
-      <rect x="0" y="0" width="${W}" height="${H}" fill="var(--panel-2)"/>${dots}</svg>`;
+  }else{
+    /* Reset on EVERY render, not only when there is something to draw. This
+       used to live inside the branch above, so a user whose stores have no
+       coordinates inherited whoever rendered last: an admin switching to
+       "view as" saw their OWN pins drawn on the other person's map, while the
+       caption underneath said there were no coordinates. */
+    ZONEMAP_PTS=[];
+    if(ZONEMAP){try{ZONEMAP.remove()}catch(e){}ZONEMAP=null}
   }
 
+  /* A store with no usable latitude/longitude cannot be placed — but its jobs
+     must still be accounted for, or Map quietly shows fewer jobs than List and
+     Tiles do. For a district whose stores all lack coordinates that meant an
+     empty map and no explanation worth the name. So these get the same
+     treatment a pin gets: a row, its count, and a tap that opens the same
+     ticket deck. */
+  const offOpen=unmapped.reduce((n,r)=>n+r.open,0);
   const unmappedBlock=unmapped.length?`
     <div class="ow-unmapped">
-      <b>${unmapped.length} store${unmapped.length===1?"":"s"} without GPS coordinates</b> — not on the map:
-      ${unmapped.sort((a,b)=>b.open-a.open).map(r=>`<button class="ow-um" onclick="owFocusStore('${r.sid}')">${esc(storeName(r.sid))}${r.open?` <b>${r.open}</b>`:""}</button>`).join("")}
+      <div class="ow-um-head"><b>Not on the map</b> — ${unmapped.length} store${unmapped.length===1?"":"s"}
+        ${offOpen?`with <b>${offOpen} open job${offOpen===1?"":"s"}</b> between them `:""}${
+        unmapped.length===1?"has":"have"} no GPS coordinates in FindMi.</div>
+      <div class="ow-um-rows">${unmapped.slice().sort((a,b)=>b.open-a.open||storeName(a.sid).localeCompare(storeName(b.sid)))
+        .map(r=>`<button class="ow-um${r.open?" has":""}" onclick="${r.open?`openStoreDeck('${r.sid}')`:`owFocusStore('${r.sid}')`}">
+          <span class="ow-um-n">${esc(storeName(r.sid))}</span>
+          <span class="ow-um-c">${r.open?`${r.open} open`:"all clear"}</span></button>`).join("")}</div>
+      <div class="ow-um-fix">Add a latitude and longitude to ${unmapped.length===1?"it":"them"} in FindMi and ${unmapped.length===1?"it":"they"} will appear on the map.</div>
     </div>`:"";
+
+  /* Say it in the header too. "4 open" over a map showing two pins is the
+     thing that makes people think the map is broken. */
+  const offNote=offOpen
+    ? ` · <b>${offOpen} not on the map</b>`
+    : (unmapped.length?` · ${unmapped.length} store${unmapped.length===1?"":"s"} without GPS`:"");
 
   return `
     <div class="page-head"><div>
       <div class="page-title">Open tickets by zone</div>
-      <div class="page-meta">${totalOpen} open across ${ids.length} stores · ${techCount} in-house tech${techCount===1?"":"s"}</div>
+      <div class="page-meta">${totalOpen} open across ${ids.length} stores · ${techCount} in-house tech${techCount===1?"":"s"}${offNote}</div>
     </div></div>
     <div class="ow-map-wrap">
       <div id="owLeaflet" class="ow-leaflet"></div>
