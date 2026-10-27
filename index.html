@@ -1440,7 +1440,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.54";
+const APP_VERSION = "9.55";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -4795,7 +4795,8 @@ function openCreate(preStore){
     <div class="sheet-body">
       <div class="field"><label class="label">Store</label>
         ${storePicker({id:"cStore",ids,selected:preStore||(ids.length===1?ids[0]:""),
-          disabled:ids.length===1,onChange:"syncCreateCats()"})}</div>
+          disabled:ids.length===1,onChange:"syncCreateCats()",
+          placeholder:ids.length===1?"Search stores…":"Choose a store…"})}</div>
       ${canBroadcast()?`
       <label class="cat-chk" style="margin-top:10px">
         <input type="checkbox" id="cMulti" onchange="toggleMultiStore(this.checked)">
@@ -6130,13 +6131,19 @@ async function confirmWaiting(id){
     toast("Set to waiting");waitReason=null;openTicket(id);
   }else if(btn){btn.disabled=false;btn.innerHTML="⏸ Set to waiting"}
 }
-let EDIT_ID=null;
-function openEdit(id){
+let EDIT_ID=null, EDIT_STORE=null;
+/* Moving a ticket to another store re-opens the sheet so the category list can
+   follow the new store's division. Remembering the choice here is what makes
+   it survive that. */
+function editMoveStore(v){ EDIT_STORE=v||null; openEdit(EDIT_ID,true); }
+function openEdit(id,keepStore){
   EDIT_ID=id;
+  if(!keepStore)EDIT_STORE=null;         // a fresh open starts from the ticket
   const t=TICKETS[id];editPhotos=(t.photos||[]).slice();
-  // Category list follows the ticket's own store division; a retired category
+  const storeNow=(EDIT_STORE&&RESTAURANTS[EDIT_STORE])?EDIT_STORE:t.storeId;
+  // Category list follows the chosen store's division; a retired category
   // stays selectable so editing other fields can't silently reassign it.
-  const eList=catsForStore(t.storeId).slice();
+  const eList=catsForStore(storeNow).slice();
   if(!eList.some(c=>c.key===t.category)){
     const lbl=ALL_CATEGORIES[t.category]||LEGACY_CATEGORIES[t.category];
     if(lbl)eList.push({key:t.category,label:lbl+" (retired)",subs:[]});
@@ -6148,16 +6155,17 @@ function openEdit(id){
   // Overwatch can move a ticket to ANY store; a Director can move a misfiled
   // one between the stores in their own patch (never outside it).
   const canMoveStore = SESSION.role==="admin"||SESSION.role==="director";
-  const moveScope = SESSION.role==="admin" ? Object.keys(RESTAURANTS) : myStoreIds();
-  const storeOpts = canMoveStore
-    ? [...new Set([...moveScope,t.storeId])].sort((a,b)=>storeName(a).localeCompare(storeName(b)))
-        .map(rid=>`<option value="${rid}"${t.storeId===rid?" selected":""}>${esc(storeName(rid))}</option>`).join("")
-    : "";
+  /* Picking a store re-opens this sheet, because the category list depends on
+     the store. It used to re-read the store off the TICKET, which has not been
+     saved yet — so every choice snapped straight back and the store could not
+     be changed at all. EDIT_STORE carries the pending choice across that
+     re-render; it is cleared whenever the sheet is opened fresh. */
+  const sid = storeNow;
   modal(`<div class="sheet-head"><h2>Edit ticket</h2><button class="x-btn" onclick="openTicket('${id}')">✕</button></div>
     <div class="sheet-body">
       ${canMoveStore?`<div class="field"><label class="label">Store</label>
-        ${storePicker({id:"eStore",ids:(SESSION.role==="admin"?Object.keys(RESTAURANTS):myStoreIds()),
-          selected:t.storeId,onChange:"openEdit(EDIT_ID)"})}</div>`:""}
+        ${storePicker({id:"eStore",ids:[...new Set([...(SESSION.role==="admin"?Object.keys(RESTAURANTS):myStoreIds()),t.storeId])],
+          selected:sid,onChange:"editMoveStore(this.value)"})}</div>`:""}
       <div style="display:flex;gap:12px${canMoveStore?";margin-top:14px":""}">
         <div class="field" style="flex:1"><label class="label">Category</label><select class="input" id="eCat" onchange="syncEditSubs()">${catOpts}</select></div>
         <div class="field" style="flex:1"><label class="label">Priority</label><select class="input" id="ePri">${priOpts}</select></div></div>
@@ -6184,7 +6192,8 @@ async function addEditPhotos(input){
 function syncEditSubs(preset){
   const wrap=$("eSubWrap"), sub=$("eSub"); if(!wrap||!sub)return;
   const t=TICKETS[EDIT_ID]||{};
-  const cat=(catsForStore(t.storeId)||[]).find(c=>c.key===$("eCat").value);
+  const sid=(EDIT_STORE&&RESTAURANTS[EDIT_STORE])?EDIT_STORE:t.storeId;
+  const cat=(catsForStore(sid)||[]).find(c=>c.key===$("eCat").value);
   const subs=(cat&&cat.subs)||[];
   if(!subs.length){wrap.style.display="none";sub.innerHTML="";return}
   wrap.style.display="";
@@ -6197,8 +6206,17 @@ async function saveEdit(id){
   const patch={description:$("eDesc").value.trim(),category:$("eCat").value,subcategory:hasSub?(subEl.value||""):"",priority:$("ePri").value,photos:editPhotos.slice()};
   // Overwatch only: allow moving the ticket to a different store.
   const eStore=$("eStore");
-  if(eStore && eStore.value && eStore.value!==TICKETS[id].storeId) patch.storeId=eStore.value;
-  if(await patchTicket(id,patch,{action:"edit"})){toast("Ticket updated");openTicket(id)}
+  if(eStore && eStore.value && eStore.value!==TICKETS[id].storeId){
+    patch.storeId=eStore.value;
+    patch.storeMovedAt=now();
+  }
+  const moved=patch.storeId?storeName(patch.storeId):"";
+  if(await patchTicket(id,patch,{action:"edit",
+      ...(moved?{note:"Moved to "+moved}:{})})){
+    EDIT_STORE=null;
+    toast(moved?("Moved to "+moved):"Ticket updated");
+    openTicket(id);
+  }
   else{btn.disabled=false;btn.textContent="Save changes"}
 }
 
@@ -7531,6 +7549,11 @@ async function impStepSave(){
   const btn=$("isSave"); if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Saving…'}
   // take whatever is on screen now
   r.sid=$("isStore").value;
+  /* The queue only admits rows that already matched a store, so this should
+     never fire — but importing a batch against the wrong store is expensive to
+     undo, so it is checked rather than assumed. */
+  if(!r.sid){ toast("Pick a store for this row","err");
+    if(btn){btn.disabled=false;btn.textContent="Import this one"} return; }
   const cat=$("isCat").value;
   const sub=($("isSubWrap").style.display==="none")?"":($("isSub").value||"");
   r.pri=$("isPri").value;
@@ -8492,9 +8515,18 @@ function costDetail(id){
    keeps working untouched.
    Matches on store name AND store number, so "28313" finds it as fast as "Cross". */
 function storePicker(opts){
-  const {id,ids,selected,onChange,allLabel,disabled}=opts;
+  const {id,ids,selected,onChange,allLabel,disabled,placeholder}=opts;
   const list=ids.slice().sort((a,b)=>storeName(a).localeCompare(storeName(b)));
-  const options=(allLabel?`<option value="all"${selected==="all"?" selected":""}>${esc(allLabel)}</option>`:"")
+  /* A <select> with no empty option silently selects its FIRST one. The search
+     box the user actually looks at stayed blank, so a tech who never touched
+     this field filed every ticket against whichever of their stores happened
+     to sort first — "it always defaults to BK Nash". The hidden select must be
+     able to hold nothing, so that "nothing chosen" is a state the form can
+     see and refuse. */
+  const nothing=!selected||!list.includes(selected);
+  const blank=(allLabel||!nothing)?"":`<option value=""${nothing?" selected":""}></option>`;
+  const options=blank
+    +(allLabel?`<option value="all"${selected==="all"?" selected":""}>${esc(allLabel)}</option>`:"")
     +list.map(sid=>`<option value="${sid}"${selected===sid?" selected":""}>${esc(storeName(sid))}</option>`).join("");
   const cur=selected==="all"?(allLabel||""):(selected?storeName(selected):"");
   const dis=disabled?" disabled":"";
@@ -8502,7 +8534,7 @@ function storePicker(opts){
     <select class="input sp-native" id="${id}"${dis} onchange="${onChange||""}">${options}</select>
     <input class="input sp-input" id="${id}_q"${dis} type="search" inputmode="search" enterkeyhint="search"
       autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"
-      placeholder="Search stores…" value="${escA(cur)}"
+      placeholder="${escA(placeholder||"Search stores…")}" value="${escA(cur)}"
       onfocus="spOpen('${id}')" oninput="spFilter('${id}')" onkeydown="spKey(event,'${id}')">
     <button type="button" class="sp-caret"${dis} onclick="spToggle('${id}')" tabindex="-1">▾</button>
     <div class="sp-menu" id="${id}_menu"></div>
