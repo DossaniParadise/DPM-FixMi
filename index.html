@@ -454,6 +454,26 @@ body.no-reftags .reftag{display:none}
 .row-store{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row-desc{color:var(--ink-mid);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px}
 .row-meta{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-dim);flex-wrap:wrap}
+/* ---- duplicate check on the new-ticket sheet ---- */
+.dup-box{margin-top:10px;border:1px solid var(--warn-line);background:var(--warn-bg);
+  border-radius:11px;padding:11px 12px}
+.dup-box.linked{border-color:var(--tint-line);background:var(--tint)}
+.dup-h{font-weight:800;font-size:13px;color:var(--warn-fg);margin-bottom:8px}
+.dup-box.linked .dup-h{color:var(--ink)}
+.dup-row{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--warn-line)}
+.dup-row:first-of-type{border-top:0;padding-top:2px}
+.dup-main{flex:1;min-width:0}
+.dup-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:11px}
+.dup-id{font-weight:700;font-size:12px;color:var(--ink)}
+.dup-when{color:var(--ink-mid)}
+.dup-desc{font-size:13px;color:var(--ink);margin-top:3px;line-height:1.4}
+.dup-note{font-size:11.5px;color:var(--ink-mid);margin-top:3px}
+.dup-act{display:flex;flex-direction:column;gap:5px;flex:0 0 auto}
+.dup-foot{font-size:11.5px;color:var(--ink-mid);margin-top:9px}
+@media(max-width:600px){.dup-row{flex-direction:column}.dup-act{flex-direction:row;width:100%}}
+.tk-link{display:inline-block;margin-top:8px;font-size:12.5px}
+.tk-reopenreq{margin-top:10px;background:var(--warn-bg);border:1px solid var(--warn-line);
+  color:var(--warn-fg);border-radius:9px;padding:9px 11px;font-size:12.5px;line-height:1.5}
 .r-id{color:var(--ink-dim);letter-spacing:.03em}
 .r-sep{opacity:.5}
 /* Why a row is where it is. Sorting by activity reorders the list, so the
@@ -1440,7 +1460,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.56";
+const APP_VERSION = "9.57";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -4783,9 +4803,80 @@ function closeModal(){
   const o=$("modalOverlay");if(o){o.classList.remove("on");o._wipeTimer=setTimeout(()=>{if(o){o.innerHTML="";o._wipeTimer=null;}},220)}activeModal=null}
 
 /* ============================================================ CREATE */
+/* ======================================================= DUPLICATE CHECK
+   Before a ticket is filed, show anything at the same store that looks like
+   the same problem, and offer to add to it instead of starting a new thread.
+
+   What this is NOT: a blocker. It ranks, it suggests, and "file it separately"
+   is always one tap away. A warning people learn to click past is worse than
+   no warning.
+
+   Scope by role, on purpose. Open tickets at the store are already in memory
+   for everyone. CLOSED tickets are not: the API serves the archive all or
+   nothing and it is the largest payload the app pulls, and a GM or tech is not
+   even allowed to load it (canSeeClosedReport). So closed matching is offered
+   to the roles that can already see the archive, and never costs a phone a
+   multi-megabyte download it did not ask for. */
+const DUP_MAX=3;                  // more than three suggestions is a wall, not help
+const DUP_REOPEN_DAYS=30;         // closed longer ago than this is a RECURRENCE
+/* Token overlap, like the OwlOps importer's impSim — but 3-letter words count
+   here ("ice", "gas", "fan" carry the meaning in a one-line report) and a few
+   words that appear in nearly every ticket are ignored so they cannot create
+   a match on their own. */
+const DUP_STOP=new Set(["the","and","for","not","was","are","has","have","with","that","this","from","out","its","but","all","any","get","got","new","old","our","their","there","been","does","did","will","can","now","please","issue","problem","store","again","still"]);
+function dupTokens(x){
+  return new Set(String(x||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/)
+    .filter(w=>w.length>=3&&!DUP_STOP.has(w)));
+}
+function dupSim(a,b){
+  const A=dupTokens(a),B=dupTokens(b); if(!A.size||!B.size)return 0;
+  let hit=0; A.forEach(w=>{if(B.has(w))hit++});
+  return hit/Math.min(A.size,B.size);
+}
+/* How alike two reports are, weighing WHAT broke as well as the words. A
+   matching subcategory ("equipment › walk-in") is a far stronger signal than
+   a matching category ("equipment"), which half the store's tickets share. */
+function dupScore(t,{cat,sub,desc}){
+  const sim=dupSim(t.description,desc);
+  const sameSub=!!(sub&&t.subcategory&&t.subcategory===sub);
+  const sameCat=t.category===cat;
+  if(sameSub && sim>=0.25) return 0.55+sim*0.45;
+  if(sameCat && sim>=0.45) return 0.35+sim*0.45;
+  if(sim>=0.65)            return sim*0.6;      // different category, but the words really match
+  if(sameSub && sim>=0.10) return 0.30+sim;     // same piece of kit, loosely worded
+  return 0;
+}
+function dupAgeKind(t){
+  if(t.status!=="closed")return "open";
+  const when=Number(t.closedAt||t.finishedAt||t.updatedAt||0);
+  return (when && (now()-when) <= DUP_REOPEN_DAYS*864e5) ? "closed-recent" : "closed-old";
+}
+/* Everything at this store that might be the same problem, best first. */
+function dupMatches(sid,cat,sub,desc){
+  if(!sid||!String(desc||"").trim())return [];
+  const seen=Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}));
+  /* Closed tickets live in their own lazily-loaded cache, and only for the
+     roles allowed to have it. */
+  const pool=canSeeClosedReport()&&CLOSED_LOADED
+    ? seen.concat(Object.keys(CLOSED_TICKETS).map(k=>({_id:k,...CLOSED_TICKETS[k]})))
+    : seen;
+  const out=[];
+  const byId={};
+  pool.forEach(t=>{
+    if(!t||t.storeId!==sid||byId[t._id])return;
+    byId[t._id]=1;
+    const score=dupScore(t,{cat,sub,desc});
+    if(score>=0.42)out.push({t,score,kind:dupAgeKind(t)});
+  });
+  /* Open first — a live ticket is nearly always the right place for a new
+     report — then recent closes, then old ones, each by how close the match. */
+  const rank={open:0,"closed-recent":1,"closed-old":2};
+  out.sort((a,b)=>rank[a.kind]-rank[b.kind]||b.score-a.score);
+  return out.slice(0,DUP_MAX);
+}
 let draftPhotos=[];
 function openCreate(preStore){
-  draftPhotos=[]; MS_SEL=new Set();
+  draftPhotos=[]; MS_SEL=new Set(); DUP_HITS=[]; DUP_RECURRENCE_OF=null;
   let ids = SESSION.role==="manager" ? [SESSION.storeId] : myStoreIds();
   ids.sort((a,b)=>storeName(a).localeCompare(storeName(b)));
   const storeOpts=ids.map(id=>`<option value="${id}"${preStore===id?" selected":""}>${esc(storeName(id))}</option>`).join("");
@@ -4795,11 +4886,11 @@ function openCreate(preStore){
     <div class="sheet-body">
       <div class="field"><label class="label">Store</label>
         ${storePicker({id:"cStore",ids,selected:preStore||(ids.length===1?ids[0]:""),
-          disabled:ids.length===1,onChange:"syncCreateCats()",
+          disabled:ids.length===1,onChange:"syncCreateCats();dupCheckLater()",
           placeholder:ids.length===1?"Search stores…":"Choose a store…"})}</div>
       ${canBroadcast()?`
       <label class="cat-chk" style="margin-top:10px">
-        <input type="checkbox" id="cMulti" onchange="toggleMultiStore(this.checked)">
+        <input type="checkbox" id="cMulti" onchange="toggleMultiStore(this.checked);dupCheckLater()">
         <span>Send this ticket to <b>several stores</b> at once<br>
         <span style="font-weight:400;color:var(--ink-dim);font-size:12px">One separate ticket per store — e.g. "test your printer" for a whole district.</span></span></label>
       <div id="cMultiWrap" style="display:none;margin-top:10px">
@@ -4822,7 +4913,7 @@ function openCreate(preStore){
         <div class="ms-list" id="msList"></div>
       </div>`:""}
       <div style="display:flex;gap:12px;margin-top:14px">
-        <div class="field" style="flex:1"><label class="label">Category</label><select class="input" id="cCat" onchange="syncCreateSubs()"></select></div>
+        <div class="field" style="flex:1"><label class="label">Category</label><select class="input" id="cCat" onchange="syncCreateSubs();dupCheckLater()"></select></div>
         <div class="field" style="flex:1"><label class="label">Priority</label><select class="input" id="cPri">${priOpts}</select></div>
       </div>
       ${SESSION.role==="tech"?`<label class="cat-chk" style="margin-top:14px">
@@ -4832,7 +4923,8 @@ function openCreate(preStore){
         <label class="label">Subcategory <span style="font-weight:400;color:var(--ink-dim)">(required)</span></label>
         <select class="input" id="cSub"></select></div>
       <div class="field" style="margin-top:14px"><label class="label">What's the issue?</label>
-        <textarea class="input" id="cDesc" placeholder="Describe the problem and location."></textarea></div>
+        <textarea class="input" id="cDesc" placeholder="Describe the problem and location." oninput="dupCheckLater()"></textarea></div>
+      <div id="cDup"></div>
       <div class="field" style="margin-top:14px"><label class="label">Photos (optional)</label>
         <div class="upload-zone" onclick="$('cFile').click()"><div class="uz-ic">📷</div><div class="uz-t">Add photos</div><div class="uz-h mono">tap to choose · or paste a screenshot · up to 5</div></div>
         <input type="file" id="cFile" accept="image/*" multiple style="display:none" onchange="addDraftPhotos(this)">
@@ -4850,6 +4942,13 @@ function openCreate(preStore){
   // managers, whose store select is disabled so its onchange never fires).
   renderDraftPreview();
   syncCreateCats();
+  /* Overwatch, Directors and DMs may match against closed tickets too, but
+     only if the archive is already in memory. Warm it quietly in the
+     background rather than making them wait for a multi-megabyte download
+     they did not ask for; the panel re-checks when it lands. */
+  if(canSeeClosedReport()&&!CLOSED_LOADED){
+    ensureClosedLoaded().then(()=>{ if($("cDup"))dupCheckNow() }).catch(()=>{});
+  }
 }
 function addDraftPhotos(input){const f=[...input.files];input.value="";sayPhotoResult(addDraftFiles(f),"this ticket",5);}
 /* One sentence covering both halves: what went in, and what would not fit. */
@@ -4875,6 +4974,174 @@ function addDraftFiles(files){
   renderDraftPreview();
   return {took,skipped:files.length-took,cap:5};
 }
+/* ---- the panel under the description ---------------------------------- */
+let _dupTimer=null, DUP_HITS=[];
+function dupCheckLater(){ clearTimeout(_dupTimer); _dupTimer=setTimeout(dupCheckNow,350); }
+function dupCheckNow(){
+  const host=$("cDup"); if(!host)return;
+  // A broadcast is a deliberate bulk send; matching one store makes no sense.
+  const multi=$("cMulti")&&$("cMulti").checked;
+  const sid=($("cStore")||{}).value, desc=($("cDesc")||{}).value||"";
+  const cat=($("cCat")||{}).value, subEl=$("cSub");
+  const sub=($("cSubWrap")&&$("cSubWrap").style.display!=="none"&&subEl)?subEl.value:"";
+  DUP_HITS=(multi||desc.trim().length<6)?[]:dupMatches(sid,cat,sub,desc);
+  host.innerHTML=DUP_HITS.length?dupPanelHtml():"";
+  const btn=$("cSubmit");
+  if(btn)btn.textContent=DUP_HITS.length?"File as a separate ticket":"Create ticket";
+  applyTags();
+}
+function dupPanelHtml(){
+  const rows=DUP_HITS.map((h,i)=>{
+    const t=h.t, st=STATUSES[t.status]||{};
+    const when=t.status==="closed"
+      ? ("closed "+timeAgo(Number(t.closedAt||t.finishedAt||t.updatedAt||0)))
+      : ("opened "+timeAgo(t.createdAt));
+    /* Only Overwatch may reopen a close-out. Everyone else asks for one, so a
+       GM or DM can still say "this is back" without being able to reverse
+       somebody's close or quietly change last week's finished count. */
+    let action;
+    if(h.kind==="open")
+      action=`<button type="button" class="btn btn-primary btn-sm" onclick="dupMerge(${i})">Add to this one</button>`;
+    else if(h.kind==="closed-recent")
+      action=SESSION.role==="admin"
+        ? `<button type="button" class="btn btn-primary btn-sm" onclick="dupReopen(${i})">Reopen it</button>`
+        : `<button type="button" class="btn btn-primary btn-sm" onclick="dupRequestReopen(${i})">It's back \u2014 tell Overwatch</button>`;
+    else
+      action=`<button type="button" class="btn btn-ghost btn-sm" onclick="dupRecurrence(${i})">Log as a repeat of this</button>`;
+    return `<div class="dup-row">
+      <div class="dup-main">
+        <div class="dup-top"><span class="mono dup-id">${esc(t.shortId||t._id.slice(0,6).toUpperCase())}</span>
+          <span class="r-st" style="--tc:${st.color};--tci:${st.ink||st.color}">${esc(st.label||t.status)}</span>
+          <span class="dup-when">${esc(when)}</span></div>
+        <div class="dup-desc">${esc(t.description||"No description")}</div>
+        ${h.kind==="closed-old"?`<div class="dup-note">Closed a while ago \u2014 this is the same thing happening again, not a duplicate.</div>`:""}
+      </div>
+      <div class="dup-act">${action}
+        <button type="button" class="btn btn-ghost btn-sm" onclick="dupPeek(${i})">Look</button></div>
+    </div>`;}).join("");
+  return `<div class="dup-box">
+    <div class="dup-h">${DUP_HITS.length===1?"This store already has a similar ticket":"This store already has "+DUP_HITS.length+" similar tickets"}</div>
+    ${rows}
+    <div class="dup-foot">Not the same thing? Carry on \u2014 the button below files this separately.</div>
+  </div>`;
+}
+function dupPeek(i){const h=DUP_HITS[i]; if(h)openTicket(h.t._id);}
+
+/* Merge: the report becomes a comment on the live ticket, with its photos and
+   its author, so nothing the person typed is thrown away. */
+async function dupMerge(i){
+  const h=DUP_HITS[i]; if(!h)return;
+  const id=h.t._id, desc=($("cDesc").value||"").trim();
+  if(!desc){toast("Nothing to add","err");return}
+  const btn=$("cSubmit"); if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Adding…'}
+  try{
+    const urls=[];for(const p of draftPhotos)urls.push(await uploadPhoto(p.file));
+    const t=TICKETS[id]||CLOSED_TICKETS[id]; if(!t)throw new Error("That ticket is gone");
+    const comments=arr_(t.comments).slice();
+    comments.push({id:uid(),by:SESSION.name,role:SESSION.role,email:SESSION.email,
+      text:desc,ts:now(),reportedAgain:true,...(urls.length?{photos:urls}:{})});
+    const patch={comments};
+    const activity=arr_(t.activity).slice();
+    activity.push({ts:now(),by:SESSION.name,role:SESSION.role,action:"edit",
+      note:"Reported again by "+SESSION.name+" \u2014 added here instead of opening a new ticket"});
+    /* A freezer that was "normal" yesterday and is failing now must not stay
+       normal just because the second report was merged into the first. */
+    const newPri=$("cPri").value;
+    if(priRankOf({priority:newPri})<priRankOf(t)){
+      patch.priority=newPri;
+      activity.push({ts:now(),by:SESSION.name,role:SESSION.role,action:"edit",
+        note:"Raised to "+(PRIORITIES[newPri]||newPri)+" \u2014 the new report was more urgent"});
+    }
+    patch.activity=activity;
+    await apiWriteTicket(id,{...t,...patch,updatedAt:now()});
+    notifyTicket("comment",id,{...t,...patch},{comment:{by:SESSION.name,text:desc,photos:urls,ts:now()},
+      actorName:SESSION.name,actorEmail:SESSION.email});
+    draftPhotos=[];
+    toast(patch.priority?("Added \u2014 and raised to "+(PRIORITIES[newPri]||newPri)):"Added to "+(t.shortId||"that ticket"));
+    closeModal(); openTicket(id);
+  }catch(e){ toast(e.message||"Could not add to that ticket","err");
+    if(btn){btn.disabled=false;btn.textContent="File as a separate ticket"} }
+}
+/* Overwatch reopening a recent close-out. The original close is kept on the
+   record — it really did happen, and last week's numbers were not wrong. */
+async function dupReopen(i){
+  const h=DUP_HITS[i]; if(!h)return;
+  const id=h.t._id, desc=($("cDesc").value||"").trim();
+  const btn=$("cSubmit"); if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Reopening…'}
+  try{
+    const urls=[];for(const p of draftPhotos)urls.push(await uploadPhoto(p.file));
+    const t=CLOSED_TICKETS[id]||TICKETS[id]; if(!t)throw new Error("That ticket is gone");
+    const comments=arr_(t.comments).slice();
+    if(desc)comments.push({id:uid(),by:SESSION.name,role:SESSION.role,email:SESSION.email,
+      text:desc,ts:now(),reportedAgain:true,...(urls.length?{photos:urls}:{})});
+    const activity=arr_(t.activity).slice();
+    activity.push({ts:now(),by:SESSION.name,role:SESSION.role,action:"status",toStatus:"unassigned",
+      note:"Reopened \u2014 reported again by "+SESSION.name});
+    const newPri=$("cPri").value;
+    const pri=(priRankOf({priority:newPri})<priRankOf(t))?newPri:t.priority;
+    const updated={...t,comments,activity,priority:pri,status:"unassigned",
+      assignedTechId:null,assignedVendorId:null,assignedCoachId:null,
+      reopenedAt:now(),reopenedBy:SESSION.name,
+      previousClosedAt:Number(t.closedAt||t.finishedAt||0)||null,
+      reopenCount:(Number(t.reopenCount)||0)+1,
+      updatedAt:now()};
+    await apiWriteTicket(id,updated);
+    notifyTicket("status",id,updated,{prevStatus:"closed",actorName:SESSION.name,actorEmail:SESSION.email});
+    draftPhotos=[];
+    toast("Reopened "+(t.shortId||"that ticket"));
+    closeModal(); openTicket(id);
+  }catch(e){ toast(e.message||"Could not reopen","err");
+    if(btn){btn.disabled=false;btn.textContent="File as a separate ticket"} }
+}
+/* A DM or Director cannot reverse a close-out, so their report lands on the
+   ticket and flags it for Overwatch rather than being lost. */
+async function dupRequestReopen(i){
+  const h=DUP_HITS[i]; if(!h)return;
+  const id=h.t._id, desc=($("cDesc").value||"").trim();
+  const btn=$("cSubmit"); if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Sending…'}
+  try{
+    const urls=[];for(const p of draftPhotos)urls.push(await uploadPhoto(p.file));
+    const t=CLOSED_TICKETS[id]||TICKETS[id]; if(!t)throw new Error("That ticket is gone");
+    const comments=arr_(t.comments).slice();
+    comments.push({id:uid(),by:SESSION.name,role:SESSION.role,email:SESSION.email,
+      text:(desc||"This has happened again."),ts:now(),reportedAgain:true,...(urls.length?{photos:urls}:{})});
+    const activity=arr_(t.activity).slice();
+    activity.push({ts:now(),by:SESSION.name,role:SESSION.role,action:"edit",
+      note:"Reopen requested by "+SESSION.name+" \u2014 reported again"});
+    const updated={...t,comments,activity,
+      reopenRequest:{by:SESSION.name,email:SESSION.email,at:now(),note:desc||""},
+      updatedAt:now()};
+    await apiWriteTicket(id,updated);
+    notifyTicket("comment",id,updated,{comment:{by:SESSION.name,text:(desc||"This has happened again."),photos:urls,ts:now()},
+      actorName:SESSION.name,actorEmail:SESSION.email});
+    draftPhotos=[];
+    toast("Sent to Overwatch \u2014 they'll reopen it");
+    closeModal(); openTicket(id);
+  }catch(e){ toast(e.message||"Could not send that","err");
+    if(btn){btn.disabled=false;btn.textContent="File as a separate ticket"} }
+}
+/* Older than the reopen window: the equipment has failed AGAIN. That is a new
+   job, but the link between them is the whole point — four of these in a
+   quarter means replace the unit, not fix it a fifth time. */
+let DUP_RECURRENCE_OF=null;
+function dupRecurrence(i){
+  const h=DUP_HITS[i]; if(!h)return;
+  DUP_RECURRENCE_OF={id:h.t._id,shortId:h.t.shortId||h.t._id,
+    closedAt:Number(h.t.closedAt||h.t.finishedAt||0)};
+  dupCheckNow();
+  const host=$("cDup");
+  if(host)host.innerHTML=`<div class="dup-box linked"><div class="dup-h">Logging this as a repeat of ${esc(DUP_RECURRENCE_OF.shortId)}</div>
+    <div class="dup-foot">A new ticket will be opened and linked to it, so the pattern is on the record.
+    <button type="button" class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="DUP_RECURRENCE_OF=null;dupCheckNow()">Undo</button></div></div>`;
+  applyTags();
+}
+/* One write path for all three, so the local echo and the closed cache stay
+   coherent however the ticket was reached. */
+async function apiWriteTicket(id,updated){
+  await apiWrite(`${TICKETS_NODE}/${id}`,updated);
+  if(updated.status==="closed"){CLOSED_TICKETS[id]=updated;delete TICKETS[id];}
+  else {TICKETS[id]=updated;LOCAL_ECHO[id]=updated;delete CLOSED_TICKETS[id];}
+}
 function renderDraftPreview(){const el=$("cPreview");if(!el)return;
   el.innerHTML=draftPhotos.map((p,i)=>`<div class="pv"><img src="${p.localUrl}" alt=""><button class="pv-x" onclick="draftPhotos.splice(${i},1);renderDraftPreview()">✕</button></div>`).join("");applyTags()}
 /* The picker follows the selected store's division: Burger King gets the
@@ -4893,6 +5160,7 @@ function syncCreateSubs(){
   if(!subs.length){wrap.style.display="none";sub.innerHTML="";return}
   wrap.style.display="";
   sub.innerHTML=`<option value="">— choose —</option>`+subs.map(x=>`<option value="${x.key}">${esc(x.label)}</option>`).join("");
+  sub.onchange=dupCheckLater;        // the subcategory is the strongest match signal
 }
 /* ---- multi-store broadcast (Overwatch) --------------------------------------
    The list is a checklist of every store, filterable by text or narrowed to a
@@ -5012,7 +5280,9 @@ async function submitTicket(){
       ...(mine?{dispatchedAt:now()}:{}),
       createdBy:SESSION.email, createdByRole:SESSION.role, createdByName:SESSION.name,
       createdAt:now(), updatedAt:now(),
-      activity:[{ts:now(),by:SESSION.name,role:SESSION.role,action:"created"},
+      ...(DUP_RECURRENCE_OF?{recurrenceOf:DUP_RECURRENCE_OF.id,recurrenceOfShortId:DUP_RECURRENCE_OF.shortId}:{}),
+      activity:[{ts:now(),by:SESSION.name,role:SESSION.role,action:"created",
+          ...(DUP_RECURRENCE_OF?{note:"Repeat of "+DUP_RECURRENCE_OF.shortId}:{})},
         ...(mine?[{ts:now(),by:SESSION.name,role:SESSION.role,action:"assign",toStatus:"dispatched",note:"🔧 "+SESSION.name+" (self, found on site)"}]:[])],
       comments:[]
     };
@@ -5020,8 +5290,24 @@ async function submitTicket(){
     // Echo locally: the new ticket must appear NOW, not after the CDN copy catches up.
     TICKETS[id]=ticket; LOCAL_ECHO[id]=ticket;
     notifyTicket("created",id,ticket);
+    /* A repeat is only useful if you can see it from the old ticket as well —
+       otherwise the fourth failure of one freezer looks like four unrelated
+       jobs. Best effort: the new ticket is already filed either way. */
+    if(DUP_RECURRENCE_OF){
+      try{
+        const old=CLOSED_TICKETS[DUP_RECURRENCE_OF.id]||TICKETS[DUP_RECURRENCE_OF.id];
+        if(old){
+          const oa=arr_(old.activity).slice();
+          oa.push({ts:now(),by:SESSION.name,role:SESSION.role,action:"edit",
+            note:"Happened again \u2014 see "+shortId});
+          await apiWriteTicket(DUP_RECURRENCE_OF.id,{...old,activity:oa,
+            recurredAs:shortId,recurredAt:now(),updatedAt:now()});
+        }
+      }catch(e){ console.warn("[fixmi] could not back-link the repeat",e); }
+    }
+    const repeatOf=DUP_RECURRENCE_OF; DUP_RECURRENCE_OF=null;
     refreshInBackground();
-    closeModal();toast("Ticket created · "+shortId);
+    closeModal();toast(repeatOf?("Ticket created · "+shortId+" \u2014 repeat of "+repeatOf.shortId):("Ticket created · "+shortId));
     if(SESSION.role==="manager")managerScreen="list";
     if(SESSION.role==="coach"||SESSION.role==="director")coachScreen=sid;   // drop them onto the store they just filed for
     openGroups[sid]=true;render();
@@ -5573,6 +5859,15 @@ function openTicket(id,ret){
       <div class="detail-row"><span class="k">District Manager</span><span class="v">${coach?esc(coach.name):"—"}</span></div>
       <div class="detail-row"><span class="k">Reported by</span><span class="v">${esc(t.createdByName||t.createdBy||"—")}</span></div>
       <div class="detail-row"><span class="k">Opened</span><span class="v">${fmtDate(t.createdAt)}</span></div>
+      ${t.reopenCount?`<div class="detail-row"><span class="k">Reopened</span><span class="v">${t.reopenCount} time${t.reopenCount===1?"":"s"}${t.reopenedAt?" · last "+fmtDateShort(t.reopenedAt):""}</span></div>`:""}
+      ${linkedTicketRows(t)}
+      ${(t.reopenRequest&&!t.reopenRequest.done)?`<div class="tk-reopenreq">
+        <b>${esc(t.reopenRequest.by||"Someone")} says this has happened again</b>${t.reopenRequest.at?" · "+fmtDateShort(t.reopenRequest.at):""}.
+        ${SESSION.role==="admin"
+          ? `Reopen it from the controls below, or clear this if it is a separate job.
+             <button type="button" class="btn btn-ghost btn-sm" style="margin-top:7px" onclick="clearReopenRequest('${id}')">Clear the flag</button>`
+          : `Overwatch has been told.`}
+      </div>`:""}
       ${costDetail(id)}
       ${t.waitingReason?`<div class="detail-row"><span class="k">Waiting on</span><span class="v">${esc(t.waitingReason)}</span></div>`:""}
       ${ticketControls(t)}
@@ -5603,6 +5898,31 @@ function actionText(a){
   if(a.action==="share_off")return"Vendor link removed";
   if(a.action==="share_reset")return"Ticket link reset";
   return a.action;
+}
+/* The two ends of a repeat, so one failing unit never reads as four unrelated
+   jobs. Shown on both the old ticket and the new one. */
+function linkedTicketRows(t){
+  const find=sid=>Object.keys(TICKETS).find(k=>String(TICKETS[k].shortId||"")===sid)
+    ||Object.keys(CLOSED_TICKETS).find(k=>String(CLOSED_TICKETS[k].shortId||"")===sid);
+  let h="";
+  if(t.recurrenceOfShortId){
+    const to=t.recurrenceOf||find(t.recurrenceOfShortId);
+    h+=`<div class="detail-row"><span class="k">Repeat of</span><span class="v">${to
+      ?`<a class="tk-link" href="javascript:void(0)" onclick="openTicket('${to}')">${esc(t.recurrenceOfShortId)}</a>`
+      :esc(t.recurrenceOfShortId)}</span></div>`;
+  }
+  if(t.recurredAs){
+    const to=find(t.recurredAs);
+    h+=`<div class="detail-row"><span class="k">Happened again</span><span class="v">${to
+      ?`<a class="tk-link" href="javascript:void(0)" onclick="openTicket('${to}')">${esc(t.recurredAs)}</a>`
+      :esc(t.recurredAs)}</span></div>`;
+  }
+  return h;
+}
+async function clearReopenRequest(id){
+  const t=TICKETS[id]||CLOSED_TICKETS[id]; if(!t)return;
+  await apiWriteTicket(id,{...t,reopenRequest:{...(t.reopenRequest||{}),done:true,clearedBy:SESSION.name,clearedAt:now()},updatedAt:now()});
+  toast("Flag cleared"); openTicket(id);
 }
 function renderComments(t){
   const list=Array.isArray(t.comments)?t.comments:[];
