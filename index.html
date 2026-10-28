@@ -1440,7 +1440,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.55";
+const APP_VERSION = "9.56";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -4834,7 +4834,7 @@ function openCreate(preStore){
       <div class="field" style="margin-top:14px"><label class="label">What's the issue?</label>
         <textarea class="input" id="cDesc" placeholder="Describe the problem and location."></textarea></div>
       <div class="field" style="margin-top:14px"><label class="label">Photos (optional)</label>
-        <div class="upload-zone" onclick="$('cFile').click()"><div class="uz-ic">📷</div><div class="uz-t">Add photos</div><div class="uz-h mono">tap to choose · up to 5</div></div>
+        <div class="upload-zone" onclick="$('cFile').click()"><div class="uz-ic">📷</div><div class="uz-t">Add photos</div><div class="uz-h mono">tap to choose · or paste a screenshot · up to 5</div></div>
         <input type="file" id="cFile" accept="image/*" multiple style="display:none" onchange="addDraftPhotos(this)">
         <div class="preview-strip" id="cPreview"></div></div>
     </div>
@@ -4851,11 +4851,29 @@ function openCreate(preStore){
   renderDraftPreview();
   syncCreateCats();
 }
-function addDraftPhotos(input){
-  [...input.files].slice(0,5-draftPhotos.length).forEach(f=>{
+function addDraftPhotos(input){const f=[...input.files];input.value="";sayPhotoResult(addDraftFiles(f),"this ticket",5);}
+/* One sentence covering both halves: what went in, and what would not fit. */
+function sayPhotoResult(r,what,cap){
+  if(!r)return 0;
+  const {took=0,skipped=0}=r;
+  if(took&&skipped) toast(took+" added \u2014 "+skipped+" didn\u2019t fit ("+cap+" max)","err");
+  else if(skipped)  toast(skipped===1?("That photo didn\u2019t fit \u2014 "+cap+" max"):(skipped+" didn\u2019t fit \u2014 "+cap+" max"),"err");
+  else if(took)     toast(took===1?("Photo added to "+what):(took+" photos added to "+what));
+  return took;
+}
+/* Takes plain File objects so the same path serves the file picker and a
+   clipboard paste. Returns how many it took, so the caller can say so. */
+/* Returns {took, skipped} rather than toasting the overflow itself: the
+   caller fires ONE message. Two toasts meant the "added" one covered the
+   "2 didn't fit" one, and a couple of screenshots vanished without a word. */
+function addDraftFiles(files){
+  const room=Math.max(0,5-draftPhotos.length);
+  let took=0;
+  files.slice(0,room).forEach(f=>{
     if(f.size>25*1024*1024){toast("That photo is very large and was skipped","err");return}
-    draftPhotos.push({file:f,localUrl:URL.createObjectURL(f)})});
-  input.value="";renderDraftPreview();
+    draftPhotos.push({file:f,localUrl:URL.createObjectURL(f)});took++});
+  renderDraftPreview();
+  return {took,skipped:files.length-took,cap:5};
 }
 function renderDraftPreview(){const el=$("cPreview");if(!el)return;
   el.innerHTML=draftPhotos.map((p,i)=>`<div class="pv"><img src="${p.localUrl}" alt=""><button class="pv-x" onclick="draftPhotos.splice(${i},1);renderDraftPreview()">✕</button></div>`).join("");applyTags()}
@@ -5608,15 +5626,71 @@ function renderComments(t){
    `comments` array — so they live in the ticket schema and travel with the
    ticket, exactly like the ticket-level photos array. Upload starts as soon as
    a photo is picked; Post is blocked only while an upload is in flight. */
+/* ============================================================ PASTE A PHOTO
+   A screenshot lives on the clipboard and nowhere else. Making someone save it
+   to disk and then browse for it is the long way round, so every sheet that
+   takes photos takes a paste as well — the create sheet, a comment, the finish
+   notes and the edit sheet. */
+function clipboardImages(e){
+  const dt=e.clipboardData||window.clipboardData;
+  if(!dt)return {files:[],hasText:false};
+  const files=[];
+  const items=dt.items?[...dt.items]:[];
+  items.forEach(it=>{
+    if(it.kind==="file"&&/^image\//i.test(it.type||"")){const f=it.getAsFile();if(f)files.push(f)}
+  });
+  // Safari and some Windows apps put the image only on .files
+  if(!files.length&&dt.files)[...dt.files].forEach(f=>{if(/^image\//i.test(f.type||""))files.push(f)});
+  let hasText=false;
+  try{hasText=!!String(dt.getData("text/plain")||"").trim()}catch(err){}
+  return {files,hasText};
+}
+/* Clipboard images arrive called "image.png", or with no name at all, so a
+   ticket with three screenshots uploaded three files of the same name. */
+let _shotSeq=0;
+function nameShot(f,i){
+  const ext=((f.type||"image/png").split("/")[1]||"png").toLowerCase().replace("jpeg","jpg");
+  const d=new Date(), p2=v=>String(v).padStart(2,"0");
+  const stamp=`${d.getFullYear()}${p2(d.getMonth()+1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+  /* A plain timestamp collides when two pastes land in the same second, so a
+     running counter rides along. */
+  const seq=String(++_shotSeq).padStart(2,"0");
+  try{return new File([f],`screenshot-${stamp}-${seq}.${ext}`,{type:f.type||"image/png"})}
+  catch(err){return f}            // older browsers: keep the original
+}
+function photoTargetOnScreen(){
+  if($("cPreview"))   return {add:addDraftFiles,  what:"this ticket",     cap:5};
+  if($("cmtPreview")) return {add:addCommentFiles,what:"your comment",    cap:5};
+  if($("finPreview")) return {add:addFinishFiles, what:"the finish notes",cap:5};
+  if($("ePreview"))   return {add:addEditFiles,   what:"this ticket",     cap:8};
+  return null;
+}
+document.addEventListener("paste",async e=>{
+  const {files,hasText}=clipboardImages(e);
+  if(!files.length)return;                       // a plain text paste is none of our business
+  /* Copying from a web page or a document often carries BOTH an image and
+     text. If they are in a text box, the text is what they meant — grabbing
+     the picture instead would be maddening. A screenshot carries no text. */
+  const el=document.activeElement;
+  const inText=el&&/^(INPUT|TEXTAREA)$/.test(el.tagName);
+  if(hasText&&inText)return;
+  const target=photoTargetOnScreen();
+  if(!target)return;                             // nowhere to put it
+  e.preventDefault();
+  sayPhotoResult(await target.add(files.map(nameShot)),target.what,target.cap);
+});
 let cmtPhotos=[];
-async function addCommentPhotos(input){
-  const files=[...input.files].slice(0,5-cmtPhotos.length);input.value="";
+async function addCommentPhotos(input){const f=[...input.files];input.value="";return sayPhotoResult(await addCommentFiles(f),"your comment",5);}
+async function addCommentFiles(all){
+  const room=Math.max(0,5-cmtPhotos.length);
+  const files=all.slice(0,room);
   for(const f of files){
     if(f.size>25*1024*1024){toast("That photo is very large and was skipped","err");continue}
     const ph={file:f,localUrl:URL.createObjectURL(f),url:null,uploading:true,failed:false};
     cmtPhotos.push(ph);renderCmtPreview();
     await uploadOneCmt(ph);
   }
+  return {took:files.length,skipped:all.length-files.length,cap:5};
 }
 async function uploadOneCmt(ph){
   ph.uploading=true;ph.failed=false;renderCmtPreview();
@@ -6030,14 +6104,17 @@ function openFinish(id,opts){
       <button class="btn btn-primary fin" style="flex:1" id="finConfirm" onclick="confirmFinish('${id}')">✓ Mark finished</button>
     </div>`);
 }
-async function addFinishPhotos(id,input){
-  const files=[...input.files].slice(0,5-finishPhotos.length);input.value="";
+async function addFinishPhotos(id,input){const f=[...input.files];input.value="";return sayPhotoResult(await addFinishFiles(f),"the finish notes",5);}
+async function addFinishFiles(all){
+  const room=Math.max(0,5-finishPhotos.length);
+  const files=all.slice(0,room);
   for(const f of files){
     if(f.size>25*1024*1024){toast("That photo is very large and was skipped","err");continue}
     const ph={file:f,localUrl:URL.createObjectURL(f),url:null,uploading:true,failed:false};
     finishPhotos.push(ph);renderFinishPreview();
     await uploadOneFinish(ph);
   }
+  return {took:files.length,skipped:all.length-files.length,cap:5};
 }
 async function uploadOneFinish(ph){
   ph.uploading=true;ph.failed=false;renderFinishPreview();
@@ -6173,7 +6250,7 @@ function openEdit(id,keepStore){
         <label class="label">Subcategory</label><select class="input" id="eSub"></select></div>
       <div class="field" style="margin-top:14px"><label class="label">Description</label><textarea class="input" id="eDesc" rows="4">${esc(t.description||"")}</textarea></div>
       <div class="field" style="margin-top:14px"><label class="label">Photos</label>
-        <div class="upload-zone" onclick="$('eFile').click()"><div class="uz-ic">📷</div><div class="uz-t">Add photos</div><div class="uz-h mono">take one or pick from your gallery</div></div>
+        <div class="upload-zone" onclick="$('eFile').click()"><div class="uz-ic">📷</div><div class="uz-t">Add photos</div><div class="uz-h mono">take one, pick from your gallery, or paste a screenshot</div></div>
         <input type="file" id="eFile" accept="image/*" multiple style="display:none" onchange="addEditPhotos(this)">
         <div class="preview-strip" id="ePreview"></div></div>
     </div>
@@ -6184,10 +6261,13 @@ function openEdit(id,keepStore){
 }
 function renderEditPreview(){const el=$("ePreview");if(!el)return;
   el.innerHTML=editPhotos.map((u,i)=>`<div class="pv"><img src="${escA(u)}" alt=""><button class="pv-x" onclick="editPhotos.splice(${i},1);renderEditPreview()">✕</button></div>`).join("");applyTags()}
-async function addEditPhotos(input){
-  const files=[...input.files].slice(0,8-editPhotos.length);input.value="";
+async function addEditPhotos(input){const f=[...input.files];input.value="";return sayPhotoResult(await addEditFiles(f),"this ticket",8);}
+async function addEditFiles(all){
+  const room=Math.max(0,8-editPhotos.length);
+  const files=all.slice(0,room);
   for(const f of files){if(f.size>25*1024*1024){toast("That photo is very large and was skipped","err");continue}
     try{editPhotos.push(await uploadPhoto(f));renderEditPreview()}catch(e){toast("Photo upload failed: "+(e.message||"network error"),"err")}}
+  return {took:files.length,skipped:all.length-files.length,cap:8};
 }
 function syncEditSubs(preset){
   const wrap=$("eSubWrap"), sub=$("eSub"); if(!wrap||!sub)return;
