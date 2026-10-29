@@ -1478,7 +1478,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.59";
+const APP_VERSION = "9.61";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -3230,7 +3230,7 @@ async function refresh(){
    The DB was always shared, but browsers cache the HTML, so different devices
    could run different app versions (that's how a tech ends up seeing different
    numbers than overwatch). Fix: the newest client publishes its version to
-   admins/appMeta; every client compares on load + every poll, and a stale
+   admins/appMetaFixMi; every client compares on load + every poll, and a stale
    client force-reloads itself with a cache-busting URL. */
 let _versionPublished=false, _reloadArmed=false;
 function cmpVer(a,b){ // 1 if a>b, -1 if a<b, 0 equal
@@ -3261,6 +3261,21 @@ function cmpVer(a,b){ // 1 if a>b, -1 if a<b, 0 equal
    The permanent fix is not more code here: it is serving this file from
    somewhere that can send Cache-Control: no-cache. */
 const RELOAD_KEY="dpm_update_try";
+/* FixMi and FindMi share one alignment master, including the whole `admins`
+   node — so a single global "appMeta" key is whichever app wrote last. FindMi
+   is on 10.x while FixMi is on 9.x, so a FindMi client publishing its own
+   number told every FixMi client it was years behind. They then reloaded,
+   came back on the same build (there is nothing newer to fetch), and parked
+   on "Still on v9.59 — tap to retry" for good.
+
+   So FixMi keeps its own key, and only trusts a record that says which app
+   wrote it. Anything else is somebody else's number and is ignored. */
+const APPMETA_KEY="appMetaFixMi";
+function publishedVersion(){
+  const rec=((MASTER.admins||{})[APPMETA_KEY])||null;
+  if(!rec||rec.app!=="fixmi")return null;          // not ours — not a verdict about us
+  return rec.version||null;
+}
 /* "Busy" is anything a reload would destroy: an open sheet, a focused field,
    or a photo going up. */
 function appBusy(){
@@ -3304,14 +3319,17 @@ function showUpdateChip(server){
 }
 function hideUpdateChip(){ const b=$("updChip"); if(b)b.remove(); }
 function checkAppVersion(){
-  const server=((MASTER.admins||{}).appMeta||{}).version;
+  const server=publishedVersion();
   if(!server || cmpVer(APP_VERSION,server)>0){
-    // I'm the newest build seen so far — publish (once per session). This is
-    // also what heals a master whose appMeta got ahead of what's deployed.
+    // I'm the newest FixMi build seen so far — publish (once per session).
+    // This is also what heals a master whose record got ahead of what is
+    // actually deployed, and what seeds the key the first time.
     if(!_versionPublished){
       _versionPublished=true;
-      apiWrite("admins/appMeta",{version:APP_VERSION,updatedAt:now()}).catch(()=>{_versionPublished=false;});
+      apiWrite("admins/"+APPMETA_KEY,{app:"fixmi",version:APP_VERSION,updatedAt:now()})
+        .catch(()=>{_versionPublished=false;});
     }
+    hideUpdateChip();
     return;
   }
   if(cmpVer(server,APP_VERSION)<=0){ hideUpdateChip(); return; }   // level again
@@ -9869,7 +9887,8 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
         </div>`).join("")}</div>
       <div class="section-label" style="margin-top:22px">This build<span class="ln"></span></div>
       <div class="set-kv"><span>App version</span><span class="mono">v${esc(APP_VERSION)}</span></div>
-      <div class="set-kv"><span>Published version</span><span class="mono">v${esc(((MASTER.admins||{}).appMeta||{}).version||"—")}</span></div>
+      <div class="set-kv"><span>Newest FixMi seen</span><span class="mono">v${esc(publishedVersion()||"—")}</span></div>
+      ${(((MASTER.admins||{}).appMeta||{}).version)?`<div class="set-kv"><span>Shared appMeta \u2014 FindMi's, ignored here</span><span class="mono">v${esc(((MASTER.admins||{}).appMeta||{}).version)}</span></div>`:""}
       <div class="set-kv"><span>Signed in as</span><span class="mono">${esc(SESSION.email||"")}</span></div>`;
 
   modal(`
