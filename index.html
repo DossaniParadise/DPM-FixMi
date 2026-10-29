@@ -474,6 +474,24 @@ body.no-reftags .reftag{display:none}
 .tk-link{display:inline-block;margin-top:8px;font-size:12.5px}
 .tk-reopenreq{margin-top:10px;background:var(--warn-bg);border:1px solid var(--warn-line);
   color:var(--warn-fg);border-radius:9px;padding:9px 11px;font-size:12.5px;line-height:1.5}
+/* ---- closed-ticket repeats ---- */
+.tr-head{background:var(--tint);border:1px solid var(--tint-line);border-radius:11px;
+  padding:12px 14px;font-size:13.5px;line-height:1.55;color:var(--ink);margin-top:12px}
+.cl-list{display:flex;flex-direction:column;gap:7px;margin-top:8px}
+.cl-row{display:flex;align-items:center;gap:11px;width:100%;text-align:left;cursor:pointer;
+  background:var(--panel-2);border:1px solid var(--line);border-radius:11px;padding:10px 12px}
+.cl-row:hover{border-color:var(--amber)}
+.cl-row.warn{border-color:var(--warn-line);background:var(--warn-bg)}
+.cl-row.bad{border-color:var(--s-open);background:var(--panel-2);box-shadow:inset 3px 0 0 var(--s-open)}
+.cl-n{font-family:var(--disp);font-weight:800;font-size:19px;min-width:38px;color:var(--ink)}
+.cl-main{flex:1;min-width:0}
+.cl-t{font-weight:700;font-size:13.5px;color:var(--ink)}
+.cl-m{font-size:11.5px;color:var(--ink-mid);margin-top:2px}
+.cl-v{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--ink-mid);white-space:nowrap}
+.cl-row.bad .cl-v{color:var(--s-open)}
+.cl-row.warn .cl-v{color:var(--warn-fg)}
+@media(max-width:600px){.cl-row{flex-wrap:wrap}.cl-v{width:100%}}
 .r-id{color:var(--ink-dim);letter-spacing:.03em}
 .r-sep{opacity:.5}
 /* Why a row is where it is. Sorting by activity reorders the list, so the
@@ -1460,7 +1478,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.57";
+const APP_VERSION = "9.59";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -3220,7 +3238,29 @@ function cmpVer(a,b){ // 1 if a>b, -1 if a<b, 0 equal
   for(let i=0;i<Math.max(pa.length,pb.length);i++){const x=pa[i]||0,y=pb[i]||0;if(x!==y)return x>y?1:-1;}
   return 0;
 }
-const RELOAD_KEY="dpm_reloaded_for";
+/* ---- keeping everyone on the current build --------------------------------
+   None of this is part of the ticket system. It exists because the app is one
+   HTML file on GitHub Pages, which serves it with a ten-minute cache and gives
+   us no way to change that header. Without something here, a manager's phone
+   happily runs a build from last Tuesday.
+
+   It had three faults, and they are what made updating feel so rough:
+
+     1. Reloading with ?v=9.58 does not reliably fetch anything new. The CDN
+        caches by full URL, so the first person to ask for ?v=9.58 may still be
+        served the OLD file if the edge has not caught up — and then the "we
+        already tried this" guard gave up and left them stale for good. The
+        retry now carries a one-off token, which cannot be a cache hit.
+
+     2. It reloaded while people were working, and then offered a button in the
+        corner when it could not. Both are noise. It now waits silently for a
+        natural pause — the poll comes round every 20s and takes it then.
+
+     3. It said "Updating app to v…" out loud. Nobody needs to know.
+
+   The permanent fix is not more code here: it is serving this file from
+   somewhere that can send Cache-Control: no-cache. */
+const RELOAD_KEY="dpm_update_try";
 /* "Busy" is anything a reload would destroy: an open sheet, a focused field,
    or a photo going up. */
 function appBusy(){
@@ -3231,27 +3271,38 @@ function appBusy(){
   if(el&&/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))return true;
   return false;
 }
-/* A quiet, persistent offer in the header. Pressing it reloads on their terms;
-   ignoring it costs nothing, because the automatic path still runs the moment
-   they close what they are doing. */
+const _bootedAt=Date.now();
+function updTry(){ try{return JSON.parse(localStorage.getItem(RELOAD_KEY)||"null")}catch(e){return null} }
+function updSave(v){ try{localStorage.setItem(RELOAD_KEY,JSON.stringify(v))}catch(e){} }
+/* Attempt 1 is a plain ?v=, which is cheap and usually enough. Attempt 2 adds
+   a unique token so the CDN edge cannot serve its copy. After that we stop:
+   the file genuinely is not out there yet, and looping would only churn. */
+function doAppUpdate(server,attempt){
+  _reloadArmed=true;
+  updSave({v:server,n:attempt,at:Date.now()});
+  const q=new URLSearchParams(location.search);
+  q.set("v",server);
+  if(attempt>=2)q.set("cb",String(Date.now()));
+  else q.delete("cb");
+  // KEEP THE HASH — it carries the ticket someone followed a link to.
+  location.replace(location.pathname+"?"+q.toString()+location.hash);
+}
+/* Shown only when updating has actually failed twice — at that point silence
+   would be the dishonest option, because they are stuck on an old build and
+   nothing more will happen on its own. */
 function showUpdateChip(server){
   let b=$("updChip");
   if(!b){
     b=document.createElement("button");
     b.id="updChip"; b.className="upd-chip";
-    b.title="A newer version of FixMi is published";
-    b.onclick=()=>doAppUpdate(b.dataset.v||server);
+    b.title="The new build has not reached this device yet";
+    b.onclick=()=>{ const t=updTry()||{}; doAppUpdate(b.dataset.v||server,(t.n||2)+1); };
     document.body.appendChild(b);   // fixed-position, so body is the right home
   }
   b.dataset.v=server;
-  b.innerHTML=`\u21bb Update to v${esc(server)}`;
+  b.innerHTML=`\u21bb Still on v${esc(APP_VERSION)} \u2014 tap to retry`;
 }
-function doAppUpdate(server){
-  _reloadArmed=true;
-  try{localStorage.setItem(RELOAD_KEY,server+"|"+APP_VERSION)}catch(e){}
-  const q=new URLSearchParams(location.search); q.set("v",server);
-  location.replace(location.pathname+"?"+q.toString()+location.hash);
-}
+function hideUpdateChip(){ const b=$("updChip"); if(b)b.remove(); }
 function checkAppVersion(){
   const server=((MASTER.admins||{}).appMeta||{}).version;
   if(!server || cmpVer(APP_VERSION,server)>0){
@@ -3263,38 +3314,23 @@ function checkAppVersion(){
     }
     return;
   }
-  if(cmpVer(server,APP_VERSION)<=0) return;                 // same build, nothing to do
-  /* A newer build is published. Three rules, learned the hard way:
-     1. NEVER auto-update someone who isn't signed in. A vendor opening a ticket
-        link is not here to update our app — reloading under them is what made
-        shared links feel broken (sometimes the ticket, sometimes "Updating
-        app…", sometimes the sign-in screen).
-     2. One reload per page life (_reloadArmed), in case storage is blocked.
-     3. Remember the attempt in localStorage, keyed by BOTH versions, so it is
-        shared across tabs: if we already reloaded for v9.1 and came back still
-        running this same build, the new file isn't actually reachable (CDN lag,
-        or appMeta is just ahead of what's deployed). Trying again would only
-        loop, so we stay put and keep working. */
+  if(cmpVer(server,APP_VERSION)<=0){ hideUpdateChip(); return; }   // level again
+  /* Never auto-update someone who is not signed in. A vendor opening a ticket
+     link is not here to update our app, and reloading under them is what made
+     shared links feel broken. */
   if(!SESSION) return;
   if(_reloadArmed) return;
-  /* Do not take the page away from someone mid-task. Reloading while a sheet
-     was open threw away whatever they were reading or filling in, with no
-     warning beyond a toast — and while a run of versions goes out it happens
-     again on each one. If they are busy, park it and offer the update as a
-     button instead; it will take itself the next time they are idle. */
-  if(appBusy()){ showUpdateChip(server); return; }
-  const attempt=server+"|"+APP_VERSION;
-  let done=null;try{done=localStorage.getItem(RELOAD_KEY)}catch(e){}
-  if(done===attempt) return;
-  _reloadArmed=true;
-  try{localStorage.setItem(RELOAD_KEY,attempt)}catch(e){}
-  toast("Updating app to v"+server+"…");
-  // KEEP THE HASH — it carries the ticket someone followed a link to.
-  setTimeout(()=>{
-    const q=new URLSearchParams(location.search); q.set("v",server);
-    location.replace(location.pathname+"?"+q.toString()+location.hash);
-  },900);
+  if(Date.now()-_bootedAt < 15000) return;        // just landed; let the page settle
+  const prev=updTry();
+  const tries=(prev&&prev.v===server)?(prev.n||0):0;
+  if(tries>=2){ showUpdateChip(server); return; }  // two goes and still stale: say so
+  if(appBusy()) return;                            // quietly wait; the poll comes back
+  doAppUpdate(server,tries+1);
 }
+/* A reload that worked leaves nothing to remember. Clearing it here means a
+   later version starts from a clean slate instead of inheriting a stale
+   attempt count. */
+(function(){ const t=updTry(); if(t&&cmpVer(APP_VERSION,t.v)>=0) updSave(null); })();
 
 /* ============================================================ IMGBB */
 // Hard timeout on every network call so a stalled connection can never hang the
@@ -8259,7 +8295,7 @@ async function invSave(sid,key,val){
    How many tickets were closed in a window, and the split by category, as a
    bar chart meant to be screenshotted. Closed tickets are lazily loaded, so
    this pulls them first. */
-let CR_DAYS=30, CR_MODE="cat";
+let CR_DAYS=30, CR_MODE="cat", CR_CLUSTER=null;
 let CR_PATH=[];          // breadcrumb chain of {dim,key,label} — drill as deep as you like
 let CR_LIST=false;       // showing the actual tickets rather than bars
 /* When was this ticket actually closed? The activity trail is authoritative;
@@ -8273,13 +8309,23 @@ function closedAt(t){
   return t.updatedAt||t.finishedAt||t.createdAt||0;
 }
 async function openClosedReport(days){
-  if(days){CR_DAYS=days;CR_PATH=[];CR_LIST=false;}
+  if(days){CR_DAYS=days;CR_PATH=[];CR_LIST=false;CR_CLUSTER=null;}
   await ensureClosedLoaded();      // closed tickets aren't in the default payload
   renderClosedReport();
 }
-function crSetMode(m){CR_MODE=m;CR_LIST=false;renderClosedReport()}
+function crSetMode(m){CR_MODE=m;CR_LIST=false;CR_CLUSTER=null;renderClosedReport()}
+/* Reading the tickets behind one repeat. Held as a list of ids rather than a
+   filter, because a cluster is not a category — it is a specific set. */
+function crOpenCluster(kind,i){
+  const rows=crRows();
+  const list=kind==="fleet"?crFleet(rows):crRepeats(rows);
+  const c=list[i]; if(!c)return;
+  CR_CLUSTER={title:kind==="fleet"?c.label:(storeName(c.storeId)+" · "+c.item),ids:c.ids};
+  renderClosedReport();
+}
+function crCloseCluster(){CR_CLUSTER=null;renderClosedReport()}
 function crDrill(dim,key){CR_PATH.push({dim,key,label:crLabel(dim,key)});CR_LIST=false;renderClosedReport()}
-function crBack(){ if(CR_LIST){CR_LIST=false;} else {CR_PATH.pop();} renderClosedReport(); }
+function crBack(){ if(CR_CLUSTER){CR_CLUSTER=null;} else if(CR_LIST){CR_LIST=false;} else {CR_PATH.pop();} renderClosedReport(); }
 function crShowList(){CR_LIST=true;renderClosedReport()}
 
 function crKey(t,dim){
@@ -8294,9 +8340,11 @@ function crLabel(dim,key){
   const parent=(SUBCATEGORIES[key]||{}).parent;
   return (subLabel(key)||key)+(parent?` · ${ALL_CATEGORIES[parent]||parent}`:"");
 }
+/* Rows carry their id. They did not before — nothing downstream needed it —
+   but a repeat cluster is a named set of tickets, so it does now. */
 function crRows(){
   const since=now()-CR_DAYS*86400000;
-  return Object.values(TICKETS).filter(t=>{
+  return Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]})).filter(t=>{
     if(t.status!=="closed"||closedAt(t)<since)return false;
     return CR_PATH.every(f=>crKey(t,f.dim)===f.key);
   });
@@ -8305,10 +8353,80 @@ function crRows(){
    This is the denominator: closed is measured against what actually came in. */
 function crOpenedRows(){
   const since=now()-CR_DAYS*86400000;
-  return Object.values(TICKETS).filter(t=>{
+  return Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]})).filter(t=>{
     if((t.createdAt||0)<since)return false;
     return CR_PATH.every(f=>crKey(t,f.dim)===f.key);
   });
+}
+/* ================================================== REPEATS AND TRENDS
+   Counting by category tells you where the volume is. It does not tell you
+   that ONE walk-in at ONE store has been fixed four times this quarter, which
+   is the thing worth acting on — at some point you stop paying to repair it.
+
+   So this groups closed tickets into the same problem recurring, rather than
+   ranking buckets. Same store + same ITEM (the subcategory) is a repeat on its
+   face, whatever words each person used. Where there is no subcategory, the
+   wording has to carry it, so those fall back to the text matcher the
+   new-ticket duplicate check uses. */
+function crClusterKey(t){
+  const item=t.subcategory||"";
+  return item ? (t.storeId+"|sub:"+item) : (t.storeId+"|cat:"+(t.category||"__none"));
+}
+function crMedianGapDays(tix){
+  if(tix.length<2)return null;
+  const ts=tix.map(closedAt).filter(Boolean).sort((a,b)=>a-b);
+  if(ts.length<2)return null;
+  const gaps=[];for(let i=1;i<ts.length;i++)gaps.push(ts[i]-ts[i-1]);
+  gaps.sort((a,b)=>a-b);
+  return +(gaps[Math.floor(gaps.length/2)]/86400000).toFixed(gaps.length>2?0:1);
+}
+function crMakeCluster(tix){
+  const t0=tix[0];
+  const ts=tix.map(closedAt).filter(Boolean).sort((a,b)=>a-b);
+  return {
+    ids:tix.map(t=>t._id||t.id).filter(Boolean),
+    tix, n:tix.length, storeId:t0.storeId,
+    item:t0.subcategory?crLabel("item",t0.subcategory):crLabel("cat",t0.category||"__none"),
+    first:ts[0]||0, last:ts[ts.length-1]||0,
+    gap:crMedianGapDays(tix),
+    reopened:tix.filter(t=>Number(t.reopenCount)>0).length,
+    cost:tix.reduce((sum,t)=>sum+(typeof ticketCost==="function"?(ticketCost(t._id||t.id)||0):0),0),
+  };
+}
+/* One store, one thing, more than once. */
+function crRepeats(rows){
+  const buckets={};
+  rows.forEach(t=>{ const k=crClusterKey(t); (buckets[k]=buckets[k]||[]).push(t); });
+  const out=[];
+  Object.entries(buckets).forEach(([k,list])=>{
+    if(list.length<2)return;
+    if(k.includes("|sub:")){ out.push(crMakeCluster(list)); return; }   // same item: a repeat on its face
+    /* No subcategory, so "equipment" or "other" would lump unrelated jobs
+       together. Only the wording can group these. */
+    const used=new Array(list.length).fill(false);
+    list.forEach((t,i)=>{
+      if(used[i])return;
+      const group=[t]; used[i]=true;
+      for(let j=i+1;j<list.length;j++){
+        if(!used[j]&&dupSim(t.description,list[j].description)>=0.34){group.push(list[j]);used[j]=true}
+      }
+      if(group.length>=2)out.push(crMakeCluster(group));
+    });
+  });
+  return out.sort((a,b)=>b.n-a.n||b.last-a.last);
+}
+/* The same item failing at MANY stores is a different problem — a model, a
+   supplier or a vendor, not one bad unit. */
+function crFleet(rows){
+  const by={};
+  rows.forEach(t=>{ if(!t.subcategory)return;
+    const b=by[t.subcategory]=by[t.subcategory]||{key:t.subcategory,tix:[],stores:new Set()};
+    b.tix.push(t); b.stores.add(t.storeId); });
+  return Object.values(by)
+    .filter(b=>b.tix.length>=3&&b.stores.size>=2)
+    .map(b=>({key:b.key,label:crLabel("item",b.key),n:b.tix.length,stores:b.stores.size,
+      tix:b.tix,ids:b.tix.map(t=>t._id||t.id).filter(Boolean)}))
+    .sort((a,b)=>b.n-a.n||b.stores-a.stores);
 }
 function crGroup(rows,dim){
   const by={};
@@ -8318,6 +8436,49 @@ function crGroup(rows,dim){
     by[k].n++;
   });
   return Object.values(by).sort((a,b)=>b.n-a.n||a.label.localeCompare(b.label));
+}
+function crTrendPanel(rows){
+  const reps=crRepeats(rows), fleet=crFleet(rows);
+  /* Tickets that genuinely came back, rather than ones we inferred are
+     similar — a reopen or a logged repeat is evidence, not a guess. */
+  const returned=rows.filter(t=>Number(t.reopenCount)>0||t.recurrenceOfShortId||t.recurredAs);
+  if(!reps.length&&!fleet.length&&!returned.length)
+    return `<div class="rp-empty" style="padding:18px">Nothing is repeating in this window. Widen it to 90 days to be sure.</div>`;
+
+  const worst=reps[0];
+  const head=worst?`<div class="tr-head">
+      <b>${esc(storeName(worst.storeId))} · ${esc(worst.item)}</b> is the one to look at —
+      closed <b>${worst.n} times</b> in ${CR_DAYS} days${worst.gap?`, about every ${worst.gap} day${worst.gap===1?"":"s"}`:""}.
+    </div>`:"";
+
+  const repRows=reps.slice(0,12).map((c,i)=>{
+    const verdict=c.n>=4?"replace it":(c.n>=3?"find the root cause":"watch it");
+    const cls=c.n>=4?"bad":(c.n>=3?"warn":"");
+    return `<button type="button" class="cl-row ${cls}" onclick="crOpenCluster('rep',${i})">
+      <div class="cl-n">${c.n}×</div>
+      <div class="cl-main">
+        <div class="cl-t">${esc(storeName(c.storeId))} · ${esc(c.item)}</div>
+        <div class="cl-m">last closed ${esc(timeAgo(c.last))}${c.gap?` · roughly every ${c.gap}d`:""}${
+          c.reopened?` · ${c.reopened} reopened`:""}${c.cost>0?` · ${esc(fmtMoney(c.cost))} spent`:""}</div>
+      </div>
+      <div class="cl-v">${verdict}</div></button>`;}).join("");
+
+  const fleetRows=fleet.slice(0,8).map((f,i)=>`<button type="button" class="cl-row" onclick="crOpenCluster('fleet',${i})">
+      <div class="cl-n">${f.n}×</div>
+      <div class="cl-main"><div class="cl-t">${esc(f.label)}</div>
+        <div class="cl-m">across ${f.stores} store${f.stores===1?"":"s"}</div></div>
+      <div class="cl-v">estate-wide</div></button>`).join("");
+
+  return head
+    +(reps.length?`<div class="section-label" style="margin-top:16px">Same thing, same store<span class="ln"></span></div>
+       <p class="cr-hint">A repeat is one store's item closed more than once in the window. Four or more and you are repairing something that wants replacing.</p>
+       <div class="cl-list">${repRows}</div>`:"")
+    +(fleet.length?`<div class="section-label" style="margin-top:18px">Same thing, many stores<span class="ln"></span></div>
+       <p class="cr-hint">One item failing across several stores is a model, a supplier or a vendor — not a bad unit.</p>
+       <div class="cl-list">${fleetRows}</div>`:"")
+    +(returned.length?`<div class="section-label" style="margin-top:18px">Came back after closing<span class="ln"></span></div>
+       <p class="cr-hint">Reopened or logged as a repeat — recorded, not inferred.</p>
+       ${crTicketList(returned)}`:"");
 }
 function crBars(list,dim,clickable){
   if(!list.length)return `<div class="rp-empty" style="padding:14px">Nothing to show.</div>`;
@@ -8360,10 +8521,15 @@ function renderClosedReport(){
   const crumb=CR_PATH.map(f=>esc(f.label)).join(" › ");
   const backLabel=CR_LIST?"‹ Back to the chart"
     :(CR_PATH.length>1?`‹ ${esc(CR_PATH[CR_PATH.length-2].label)}`:"‹ All closed tickets");
-  const backBtn=(CR_PATH.length||CR_LIST)?`<button class="cr-back" onclick="crBack()">${backLabel}</button>`:"";
+  const backBtn=(CR_PATH.length||CR_LIST||CR_CLUSTER)
+    ?`<button class="cr-back" onclick="crBack()">${CR_CLUSTER?"‹ Back to repeats":backLabel}</button>`:"";
 
   let body,heroSub;
-  if(CR_LIST){
+  if(CR_CLUSTER){
+    const real=CR_CLUSTER.ids.map(id=>{const t=TICKETS[id]||CLOSED_TICKETS[id];return t?{...t,_id:id}:null}).filter(Boolean);
+    heroSub=`<b>${esc(CR_CLUSTER.title)}</b><br><span class="mono">${real.length} closure${real.length===1?"":"s"} in the last ${CR_DAYS} days</span>`;
+    body=`<div class="section-label" style="margin-top:16px">Every time it came back<span class="ln"></span></div>${crTicketList(real)}`;
+  }else if(CR_LIST){
     heroSub=`${crumb?`in <b>${crumb}</b><br>`:""}<span class="mono">last ${CR_DAYS} days · ${esc(from)} – ${esc(to)}</span>`;
     body=`<div class="section-label" style="margin-top:16px">Tickets<span class="ln"></span></div>${crTicketList(rows)}`;
   }else if(CR_PATH.length){
@@ -8378,10 +8544,13 @@ function renderClosedReport(){
     }).join("")
     + `<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="crShowList()">📋 Read these ${total} ticket${total===1?"":"s"}</button>`;
   }else{
-    const modes=[["cat","Category"],["store","Store"],["item","Item"]];
+    const modes=[["cat","Category"],["store","Store"],["item","Item"],["trend","Repeats"]];
     const tabs=modes.map(([k,l])=>`<button class="ce-tab${CR_MODE===k?" on":""}" onclick="crSetMode('${k}')">${l}</button>`).join("");
     const list=crGroup(rows,CR_MODE), top=list[0];
     heroSub=`closed / raised in the last ${CR_DAYS} days<br><span class="mono">${esc(from)} – ${esc(to)}</span>`;
+    if(CR_MODE==="trend"){
+      body=`<div class="ce-tabs" style="margin-bottom:6px">${tabs}</div>${crTrendPanel(rows)}`;
+    }else{
     const hint=CR_MODE==="item"
       ? `<p class="cr-hint">Items repeating across the window are your persistent problems.</p>`
       : (CR_MODE==="store"?`<p class="cr-hint">Ranked by volume — the busiest store is first.</p>`:"");
@@ -8390,6 +8559,7 @@ function renderClosedReport(){
       ${hint}${crBars(list,CR_MODE,true)}
       <p class="cr-hint" style="margin-top:10px">Tap any bar to break it down, then read the tickets.</p>
       <button class="btn btn-ghost btn-block" onclick="crShowList()">📋 Read all ${total} ticket${total===1?"":"s"}</button>`;
+    }
   }
 
   // Opened vs closed in the same window. Closing MORE than came in is a real
