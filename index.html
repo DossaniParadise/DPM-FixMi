@@ -474,6 +474,29 @@ body.no-reftags .reftag{display:none}
 .tk-link{display:inline-block;margin-top:8px;font-size:12.5px}
 .tk-reopenreq{margin-top:10px;background:var(--warn-bg);border:1px solid var(--warn-line);
   color:var(--warn-fg);border-radius:9px;padding:9px 11px;font-size:12.5px;line-height:1.5}
+/* ---- closed-ticket speed ---- */
+.cs-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.cs-sel{flex:1 1 180px;min-width:150px}
+.cs-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.cs-row{display:grid;grid-template-columns:minmax(90px,1.3fr) minmax(60px,2fr) auto;
+  grid-template-areas:"name track val" "n n n";gap:4px 10px;align-items:center;width:100%;
+  text-align:left;cursor:pointer;background:var(--panel-2);border:1px solid var(--line);
+  border-radius:10px;padding:9px 12px}
+.cs-row:hover{border-color:var(--amber)}
+.cs-name{grid-area:name;font-weight:700;font-size:13px;color:var(--ink);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cs-track{grid-area:track;height:9px;background:var(--line);border-radius:999px;overflow:hidden}
+.cs-bar{height:100%;border-radius:999px}
+.cs-val{grid-area:val;font-family:var(--mono);font-weight:800;font-size:13px;white-space:nowrap}
+.cs-n{grid-area:n;font-size:11px;color:var(--ink-mid)}
+.cs-map-wrap{margin-top:10px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel-2)}
+.cs-map{display:block;width:100%;height:auto}
+.cs-dot{cursor:pointer}
+.cs-dot:hover circle,.cs-dot:focus circle{stroke:var(--ink);stroke-width:3}
+.cs-legend{display:flex;flex-wrap:wrap;gap:10px;padding:10px 12px;border-top:1px solid var(--line);
+  font-size:11.5px;color:var(--ink-mid)}
+.cs-legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.cs-legend i.cs-thin{background:var(--ink-dim);opacity:.45}
 /* ---- closed-ticket repeats ---- */
 .tr-head{background:var(--tint);border:1px solid var(--tint-line);border-radius:11px;
   padding:12px 14px;font-size:13.5px;line-height:1.55;color:var(--ink);margin-top:12px}
@@ -1478,7 +1501,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.61";
+const APP_VERSION = "9.62";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -8446,6 +8469,95 @@ function crFleet(rows){
       tix:b.tix,ids:b.tix.map(t=>t._id||t.id).filter(Boolean)}))
     .sort((a,b)=>b.n-a.n||b.stores-a.stores);
 }
+/* ================================================== SPEED / RESPONSE TIME
+   "For IT tickets, which areas are fast and which are slow — and where does
+   Kyle close quickest?" Two filters (category, technician) over the same
+   window, then the same question asked of stores, DMs, Directors and zones,
+   with a map so the geography is obvious.
+
+   MEDIAN, not mean. One forgotten ticket left open for 200 days drags a mean
+   so far that a good store looks terrible; the median says what a typical job
+   there actually takes. Both are shown on the detail line so a long tail is
+   visible rather than hidden.
+
+   Two clocks, because they answer different questions:
+     to close    — created → closed. The whole job.
+     to dispatch — created → first assigned to someone. How fast it is picked
+                   up, which is what people usually mean by "response time". */
+let CR_SPEED_CAT="all", CR_SPEED_TECH="all", CR_SPEED_DIM="store", CR_SPEED_CLOCK="close";
+const SPEED_MIN_N=3;     // below this, a ranking is noise dressed as insight
+function crSetSpeed(k,v){ if(k==="cat")CR_SPEED_CAT=v; else if(k==="tech")CR_SPEED_TECH=v;
+  else if(k==="dim")CR_SPEED_DIM=v; else if(k==="clock")CR_SPEED_CLOCK=v;
+  renderClosedReport(); }
+function firstDispatchAt(t){
+  if(t.dispatchedAt)return Number(t.dispatchedAt)||0;
+  const acts=Array.isArray(t.activity)?t.activity:[];
+  for(const a of acts){ if(a&&(a.action==="assign"||a.toStatus==="dispatched"||a.toStatus==="assigned")&&a.ts)return a.ts; }
+  return 0;
+}
+function speedDays(t,clock){
+  const from=Number(t.createdAt)||0; if(!from)return null;
+  const to=(clock==="dispatch")?firstDispatchAt(t):closedAt(t);
+  if(!to||to<from)return null;                 // an import with no usable clock
+  return (to-from)/86400000;
+}
+function median(a){ if(!a.length)return null; const x=a.slice().sort((p,q)=>p-q);
+  const m=Math.floor(x.length/2); return x.length%2?x[m]:(x[m-1]+x[m])/2; }
+function fmtDays(d){ if(d==null)return "—";
+  if(d<1)return Math.max(1,Math.round(d*24))+"h";
+  return (d<10?d.toFixed(1):Math.round(d))+"d"; }
+/* The rows this tab works on: closed, in window, and matching the two filters.
+   The tech filter is by who the ticket was ASSIGNED to, which is what "jobs
+   assigned to Kyle" means. */
+function crSpeedRows(){
+  return crRows().filter(t=>{
+    if(CR_SPEED_CAT!=="all"&&t.category!==CR_SPEED_CAT)return false;
+    if(CR_SPEED_TECH!=="all"&&t.assignedTechId!==CR_SPEED_TECH)return false;
+    return speedDays(t,CR_SPEED_CLOCK)!=null;
+  });
+}
+function crSpeedKeys(t,dim){
+  if(dim==="store")return [t.storeId||"__none"];
+  if(dim==="dm")   return (storeCoachIds(t.storeId)||[]).length?storeCoachIds(t.storeId):["__none"];
+  if(dim==="do")   return [store(t.storeId).assignedDirectorId||"__none"];
+  if(dim==="tech") return [t.assignedTechId||"__none"];
+  return ["__none"];
+}
+function crSpeedKeyLabel(dim,key){
+  if(key==="__none")return dim==="dm"?"No DM assigned":dim==="do"?"No Director":dim==="tech"?"Nobody assigned":"Unknown store";
+  if(dim==="store")return storeName(key);
+  if(dim==="dm")   return ((MASTER.areaCoaches||{})[key]||{}).name||key;
+  if(dim==="do")   return ((MASTER.directors||{})[key]||{}).name||key;
+  if(dim==="tech") return ((MASTER.repairTechnicians||{})[key]||{}).name||key;
+  return key;
+}
+/* A store with two DMs counts under each — their patch really does include it. */
+function crSpeedGroups(rows,dim){
+  const by={};
+  rows.forEach(t=>{
+    const d=speedDays(t,CR_SPEED_CLOCK); if(d==null)return;
+    crSpeedKeys(t,dim).forEach(k=>{
+      (by[k]=by[k]||{key:k,label:crSpeedKeyLabel(dim,k),days:[],ids:[]});
+      by[k].days.push(d); by[k].ids.push(t._id);
+    });
+  });
+  return Object.values(by).map(g=>({
+    key:g.key,label:g.label,n:g.days.length,ids:g.ids,
+    med:median(g.days),
+    mean:g.days.reduce((a,b)=>a+b,0)/g.days.length,
+    worst:Math.max(...g.days),
+  })).sort((a,b)=>a.med-b.med);      // fastest first
+}
+/* Colour against the overall median for THIS filter, so "slow" always means
+   slow compared with the rest of the same kind of work — not against a fixed
+   number that would be wrong for both a reboot and a compressor. */
+function speedBand(med,all){
+  if(all==null||med==null)return "mid";
+  if(med<=all*0.66)return "fast";
+  if(med>=all*1.5) return "slow";
+  return "mid";
+}
+const SPEED_COLOR={fast:"#047857",mid:"#c2740a",slow:"#c81e1e"};
 function crGroup(rows,dim){
   const by={};
   rows.forEach(t=>{
@@ -8454,6 +8566,111 @@ function crGroup(rows,dim){
     by[k].n++;
   });
   return Object.values(by).sort((a,b)=>b.n-a.n||a.label.localeCompare(b.label));
+}
+/* The map. SVG rather than Leaflet: it is inside a modal, needs no network,
+   and the question is "which corner of the patch is slow", not street detail.
+   Colour is never the only signal — every dot carries its number. */
+function crSpeedMap(groups){
+  const pts=groups.map(g=>({...g,...(storeCoords(g.key)||{})})).filter(p=>isFinite(p.lat)&&isFinite(p.lng));
+  const off=groups.length-pts.length;
+  if(!pts.length)return `<div class="rp-empty">No store in this slice has GPS coordinates, so there is nothing to map.</div>`;
+  const all=median(groups.flatMap(g=>Array(g.n).fill(g.med)));
+  const lats=pts.map(p=>p.lat),lngs=pts.map(p=>p.lng);
+  let minLat=Math.min(...lats),maxLat=Math.max(...lats),minLng=Math.min(...lngs),maxLng=Math.max(...lngs);
+  const padLat=Math.max((maxLat-minLat)*0.15,0.05),padLng=Math.max((maxLng-minLng)*0.15,0.05);
+  minLat-=padLat;maxLat+=padLat;minLng-=padLng;maxLng+=padLng;
+  const W=680,H=420;
+  const X=l=>((l-minLng)/(maxLng-minLng||1))*W, Y=l=>H-((l-minLat)/(maxLat-minLat||1))*H;
+  /* Slowest drawn last so it is never hidden under a fast neighbour. */
+  const dots=pts.slice().sort((a,b)=>a.med-b.med).map(p=>{
+    const x=X(p.lng).toFixed(1),y=Y(p.lat).toFixed(1);
+    const band=speedBand(p.med,all), thin=p.n<SPEED_MIN_N;
+    const r=thin?8:13;
+    return `<g class="cs-dot" tabindex="0" role="button"
+        aria-label="${escA(p.label+": typically "+fmtDays(p.med)+" over "+p.n+" ticket"+(p.n===1?"":"s"))}"
+        onclick="crSpeedDrill('${escA(p.key)}')">
+      <circle cx="${x}" cy="${y}" r="${r}" fill="${SPEED_COLOR[band]}" fill-opacity="${thin?0.4:0.92}"
+        stroke="#fff" stroke-width="2"/>
+      ${thin?"":`<text x="${x}" y="${(+y+4).toFixed(1)}" text-anchor="middle" fill="#fff"
+        font-size="${p.med>=100?8.5:10.5}" font-weight="800" pointer-events="none">${esc(fmtDays(p.med))}</text>`}
+      <title>${esc(p.label)} — typically ${esc(fmtDays(p.med))} · ${p.n} ticket${p.n===1?"":"s"}${thin?" (too few to rank)":""}</title>
+    </g>`;}).join("");
+  return `<div class="cs-map-wrap">
+    <svg viewBox="0 0 ${W} ${H}" class="cs-map" preserveAspectRatio="xMidYMid meet">
+      <rect x="0" y="0" width="${W}" height="${H}" fill="var(--panel-2)"/>${dots}</svg>
+    <div class="cs-legend">
+      <span><i style="background:${SPEED_COLOR.fast}"></i> Fast \u2014 a third quicker than typical</span>
+      <span><i style="background:${SPEED_COLOR.mid}"></i> About typical (${esc(fmtDays(all))})</span>
+      <span><i style="background:${SPEED_COLOR.slow}"></i> Slow \u2014 half again or worse</span>
+      <span><i class="cs-thin"></i> Under ${SPEED_MIN_N} tickets \u2014 shown, not ranked</span>
+    </div>
+    ${off?`<div class="cr-hint">${off} store${off===1?"":"s"} in this slice ${off===1?"has":"have"} no GPS and ${off===1?"is":"are"} not on the map \u2014 ${off===1?"it is":"they are"} still in the table.</div>`:""}
+  </div>`;
+}
+function crSpeedDrill(key){
+  const rows=crSpeedRows();
+  const g=crSpeedGroups(rows,CR_SPEED_DIM).find(x=>x.key===key);
+  if(!g)return;
+  CR_CLUSTER={title:g.label+" · typically "+fmtDays(g.med),ids:g.ids};
+  renderClosedReport();
+}
+function crSpeedPanel(){
+  const rows=crSpeedRows();
+  const cats=[...new Set(crRows().map(t=>t.category).filter(Boolean))]
+    .map(k=>[k,ALL_CATEGORIES[k]||k]).sort((a,b)=>a[1].localeCompare(b[1]));
+  const techIds=[...new Set(crRows().map(t=>t.assignedTechId).filter(Boolean))]
+    .map(k=>[k,((MASTER.repairTechnicians||{})[k]||{}).name||k]).sort((a,b)=>a[1].localeCompare(b[1]));
+  const sel=(id,cur,opts,allLabel)=>`<select class="input cs-sel" onchange="crSetSpeed('${id}',this.value)">
+      <option value="all"${cur==="all"?" selected":""}>${esc(allLabel)}</option>
+      ${opts.map(([k,l])=>`<option value="${escA(k)}"${cur===k?" selected":""}>${esc(l)}</option>`).join("")}</select>`;
+
+  const clockTabs=[["close","Time to close"],["dispatch","Time to pick up"]]
+    .map(([k,l])=>`<button class="ce-tab${CR_SPEED_CLOCK===k?" on":""}" onclick="crSetSpeed('clock','${k}')">${l}</button>`).join("");
+  const dims=[["store","Store"],["dm","District Manager"],["do","Director"],["tech","Technician"]]
+    .map(([k,l])=>`<button class="ce-tab${CR_SPEED_DIM===k?" on":""}" onclick="crSetSpeed('dim','${k}')">${l}</button>`).join("");
+
+  const controls=`<div class="cs-filters">${sel("cat",CR_SPEED_CAT,cats,"Every category")}${
+    techIds.length?sel("tech",CR_SPEED_TECH,techIds,"Every technician"):""}</div>
+    <div class="ce-tabs" style="margin-top:8px">${clockTabs}</div>`;
+
+  if(!rows.length)return controls+`<div class="rp-empty" style="margin-top:12px">Nothing closed in this window matches those filters.</div>`;
+
+  const groups=crSpeedGroups(rows,CR_SPEED_DIM);
+  const ranked=groups.filter(g=>g.n>=SPEED_MIN_N);
+  const thin=groups.filter(g=>g.n<SPEED_MIN_N);
+  const all=median(rows.map(t=>speedDays(t,CR_SPEED_CLOCK)));
+  const what=CR_SPEED_CLOCK==="dispatch"?"to pick up":"to close";
+  const scope=(CR_SPEED_CAT==="all"?"":(ALL_CATEGORIES[CR_SPEED_CAT]||CR_SPEED_CAT)+" ")
+    +(CR_SPEED_TECH==="all"?"":"for "+(((MASTER.repairTechnicians||{})[CR_SPEED_TECH]||{}).name||"")+" ");
+
+  const fastest=ranked[0], slowest=ranked[ranked.length-1];
+  const verdict=(ranked.length>=2&&fastest&&slowest&&fastest.key!==slowest.key)
+    ? `<div class="tr-head">Across ${rows.length} closed ${esc(scope)}ticket${rows.length===1?"":"s"},
+        typical ${what} is <b>${esc(fmtDays(all))}</b>.
+        Fastest is <b>${esc(fastest.label)}</b> at ${esc(fmtDays(fastest.med))};
+        slowest is <b>${esc(slowest.label)}</b> at ${esc(fmtDays(slowest.med))}.</div>`
+    : `<div class="tr-head">${rows.length} closed ${esc(scope)}ticket${rows.length===1?"":"s"},
+        typical ${what} <b>${esc(fmtDays(all))}</b>. Not enough spread to rank yet.</div>`;
+
+  const row=g=>{
+    const band=speedBand(g.med,all);
+    const w=Math.max(3,Math.round(g.med/Math.max(...groups.map(x=>x.med||0),1)*100));
+    return `<button type="button" class="cs-row" onclick="crSpeedDrill('${escA(g.key)}')">
+      <div class="cs-name">${esc(g.label)}</div>
+      <div class="cs-track"><div class="cs-bar" style="width:${w}%;background:${SPEED_COLOR[band]}"></div></div>
+      <div class="cs-val" style="color:${SPEED_COLOR[band]}">${esc(fmtDays(g.med))}</div>
+      <div class="cs-n">${g.n} ticket${g.n===1?"":"s"}${g.mean>g.med*1.6?` · one took ${esc(fmtDays(g.worst))}`:""}</div>
+    </button>`;};
+
+  return controls+verdict
+    +`<div class="ce-tabs" style="margin-top:14px">${dims}</div>
+      <p class="cr-hint">Fastest at the top. The number is the median \u2014 a typical job, not an average one freak ticket can wreck.</p>
+      <div class="cs-list">${ranked.map(row).join("")||`<div class="rp-empty">No group has ${SPEED_MIN_N} tickets yet.</div>`}</div>`
+    +(thin.length?`<div class="cr-hint" style="margin-top:10px"><b>Too few to rank:</b> ${
+        thin.sort((a,b)=>a.label.localeCompare(b.label)).map(g=>esc(g.label)+" ("+g.n+")").join(", ")}</div>`:"")
+    +(CR_SPEED_DIM==="store"
+      ? `<div class="section-label" style="margin-top:18px">On the map<span class="ln"></span></div>${crSpeedMap(groups)}`
+      : `<div class="cr-hint" style="margin-top:14px">Switch to <b>Store</b> to see this on the map.</div>`);
 }
 function crTrendPanel(rows){
   const reps=crRepeats(rows), fleet=crFleet(rows);
@@ -8540,7 +8757,7 @@ function renderClosedReport(){
   const backLabel=CR_LIST?"‹ Back to the chart"
     :(CR_PATH.length>1?`‹ ${esc(CR_PATH[CR_PATH.length-2].label)}`:"‹ All closed tickets");
   const backBtn=(CR_PATH.length||CR_LIST||CR_CLUSTER)
-    ?`<button class="cr-back" onclick="crBack()">${CR_CLUSTER?"‹ Back to repeats":backLabel}</button>`:"";
+    ?`<button class="cr-back" onclick="crBack()">${CR_CLUSTER?(CR_MODE==="speed"?"‹ Back to speed":"‹ Back to repeats"):backLabel}</button>`:"";
 
   let body,heroSub;
   if(CR_CLUSTER){
@@ -8562,12 +8779,14 @@ function renderClosedReport(){
     }).join("")
     + `<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="crShowList()">📋 Read these ${total} ticket${total===1?"":"s"}</button>`;
   }else{
-    const modes=[["cat","Category"],["store","Store"],["item","Item"],["trend","Repeats"]];
+    const modes=[["cat","Category"],["store","Store"],["item","Item"],["trend","Repeats"],["speed","Speed"]];
     const tabs=modes.map(([k,l])=>`<button class="ce-tab${CR_MODE===k?" on":""}" onclick="crSetMode('${k}')">${l}</button>`).join("");
     const list=crGroup(rows,CR_MODE), top=list[0];
     heroSub=`closed / raised in the last ${CR_DAYS} days<br><span class="mono">${esc(from)} – ${esc(to)}</span>`;
     if(CR_MODE==="trend"){
       body=`<div class="ce-tabs" style="margin-bottom:6px">${tabs}</div>${crTrendPanel(rows)}`;
+    }else if(CR_MODE==="speed"){
+      body=`<div class="ce-tabs" style="margin-bottom:6px">${tabs}</div>${crSpeedPanel()}`;
     }else{
     const hint=CR_MODE==="item"
       ? `<p class="cr-hint">Items repeating across the window are your persistent problems.</p>`
