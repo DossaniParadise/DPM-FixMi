@@ -814,6 +814,9 @@ html[data-theme="dark"] .leaflet-tooltip-top:before{border-top-color:var(--panel
 .set-tab:hover{color:var(--ink)}
 .set-tab.on{background:var(--amber-fill);color:#fff}
 .set-hint{color:var(--ink-dim);font-size:13px;margin-top:0}
+.va-group{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink-mid);margin:12px 2px 6px}
+.va-row{margin-bottom:6px}
 .set-kv{display:flex;justify-content:space-between;gap:12px;padding:8px 2px;border-bottom:1px solid var(--line-soft);font-size:13px}
 .set-kv span:first-child{color:var(--ink-mid)}
 .nt-table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13.5px}
@@ -1514,7 +1517,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.64";
+const APP_VERSION = "9.66";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -4103,6 +4106,24 @@ function canCreate(){return true}   // techs file tickets for issues they find o
 function canManageVendors(){return SESSION.role==="admin"}
 function canEditContent(){return ["admin","coach","director"].includes(SESSION.role);}
 function canAssign(){return SESSION.role==="admin"}
+/* ---- who may route a job to an outside vendor ------------------------------
+   Overwatch always. Directors and District Managers are per-person, set in
+   Settings → App. Everyone not named follows the default, so a new DO inherits
+   whatever policy is already in force rather than silently getting access —
+   or silently not. Stored as {def, people:{<key>:bool}} under admins. */
+const VENDOR_ACCESS_NODE="vendorAccess";
+function vendorAccessRec(){
+  const r=((MASTER.admins||{})[VENDOR_ACCESS_NODE])||{};
+  return {def:r.def!==false, people:(r.people&&typeof r.people==="object")?r.people:{}};
+}
+function canSeeVendorsFor(email,role){
+  if(role==="admin")return true;
+  if(role!=="director"&&role!=="coach")return false;
+  const {def,people}=vendorAccessRec();
+  const v=people[prefKeyFor(email||"")];
+  return (v===true||v===false)?v:def;
+}
+function canSeeVendors(){ return SESSION?canSeeVendorsFor(SESSION.email,SESSION.role):false }
 
 /* ============================================================ ENTER / POLL */
 function enterAppChrome(){
@@ -4873,9 +4894,15 @@ function ticketRow(t){
     right=`<div class="row-status" style="--tc:${st.color}">
       <div class="rs-label">${st.label}</div>${sub?`<div class="rs-who">${esc(sub)}</div>`:""}${extra}</div>`;
   }
-  // ----- below-row action bars (admin only) -----
+  /* ----- below-row action bars -----
+     These used to be Overwatch-only, which was fine while Overwatch was the
+     only role that could assign. Now that Directors and DMs route jobs too,
+     whoever assigned needs the same next step: contact them, then mark it
+     dispatched. Without this they could hand a job to a vendor and had no way
+     to move it on. */
   let below="";
-  if(isAdmin){
+  const canProgressAssign = isAdmin || ["director","coach"].includes(SESSION.role);
+  if(canProgressAssign){
     if(t.status==="assigned" && who){
       below=`<div class="row-bar" onclick="event.stopPropagation()">
         <span>Would you like to contact <b>${esc(who.name)}</b>?</span>
@@ -4896,14 +4923,14 @@ function ticketRow(t){
       below=`<div class="row-bar" onclick="event.stopPropagation()">
         <span><b>In progress</b> · ${elapsedHM(t.clockInAt)}</span>
         <div class="rb-btns">${contactBtns(t,who)}</div></div>`;
-    }else if(t.status==="finished"){
+    }else if(t.status==="finished" && isAdmin){
       below=`<div class="row-bar" onclick="event.stopPropagation()">
         <span><b>Finished</b> — ready to close out?</span>
         <div class="rb-btns">
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();confirmClose('${t._id}')" title="Close and leave a note">✎ Close with note</button>
           <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();closeOutTicket('${t._id}')">✓ Close out</button>
         </div></div>`;
-    }else if(t.status==="closed"){
+    }else if(t.status==="closed" && isAdmin){
       below=`<div class="row-bar" onclick="event.stopPropagation()">
         <span><b>Closed</b> — reopen to?</span>
         <div class="rb-btns">
@@ -4937,19 +4964,23 @@ function ticketRow(t){
     const canProgress = t.status!=="in_progress" && t.status!=="finished";
     // DM/director only: one-tap dispatch of an unassigned job to the store's tech.
     let reqBtn="";
-    if(SESSION.role==="director"){
-      // DOs route to their own in-house techs, or back to the pool. Third-party
-      // vendors are Overwatch-only — a DO leaving a job unassigned is the signal
-      // that an outside vendor is needed.
-      reqBtn=`<select class="input row-sel" id="dosel_${t._id}" onchange="rowDirectorAssign('${t._id}')">${directorAssignOptions(t)}</select>`;
-            }else if(SESSION.role==="coach" && t.status==="unassigned"){
-      const elig=eligibleTechsFor(t);
-      if(elig.length){
-        const tip=elig.length===1?`Requests ${esc(elig[0][1].name)}`:`${elig.length} techs cover this store`;
-        reqBtn=`<button class="btn btn-primary btn-sm" title="${tip}" onclick="requestInHouse('${t._id}')">🔧 Request In-House Tech</button>`;
+    if(SESSION.role==="director"||SESSION.role==="coach"){
+      /* Both route jobs from the row now: in-house techs, each other, and the
+         vendors that cover the store. A DM also keeps the specialty-matched
+         one-tap button on an unassigned job, which the raw list cannot do. */
+      if(SESSION.role==="coach" && t.status==="unassigned"){
+        const elig=eligibleTechsFor(t);
+        if(elig.length){
+          const tip=elig.length===1?`Requests ${esc(elig[0][1].name)}`:`${elig.length} techs cover this store`;
+          reqBtn=`<button class="btn btn-primary btn-sm" title="${tip}" onclick="requestInHouse('${t._id}')">🔧 Request In-House Tech</button>`;
+        }
       }
+      reqBtn+=`<select class="input row-sel" id="dosel_${t._id}" onchange="rowDirectorAssign('${t._id}')">${directorAssignOptions(t)}</select>`;
     }
-    below=`<div class="row-bar" onclick="event.stopPropagation()">
+    /* Append, do not replace. The bar above may already be offering "contact
+       the vendor you just assigned, then mark it dispatched" — overwriting it
+       here is what made that button vanish for the very roles that need it. */
+    below+=`<div class="row-bar" onclick="event.stopPropagation()">
       <span>${t.status==="in_progress"?`<b>In progress</b> · ${elapsedHM(t.clockInAt)}`:"Quick actions"}</span>
       <div class="rb-btns">
         ${reqBtn}
@@ -5707,21 +5738,39 @@ function requestInHouse(id){
    quietly removed that vendor. So when a vendor is on the ticket we include
    them as the selected option; applyDirectorAssign treats re-submitting the
    same vendor as a no-op, and Directors still can't pick a DIFFERENT one. */
+/* The assign dropdown Directors and District Managers get. Same three tiers
+   Overwatch sees — the store's own techs, then vendors whose categories match
+   this job, then the rest that cover the store — minus "add a new vendor",
+   which stays with Overwatch so the roster has one gatekeeper. */
 function directorAssignOptions(t){
   const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
-  const vend=t.assignedVendorId?VENDORS[t.assignedVendorId]:null;
   const none=!t.assignedTechId&&!t.assignedVendorId&&!t.assignedCoachId;
   let html=`<option value=""${none?" selected":""}>— Unassigned —</option>`;
-  if(t.assignedVendorId){
-    const nm=vend?vend.name:"Third-party (removed)";
-    html+=`<option value="vendor:${t.assignedVendorId}" selected>🏢 ${esc(nm)}</option>`;
-  }
-  html+=techs.map(([id,x])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("");
+  if(techs.length)
+    html+=`<optgroup label="In-house tech for this store">`
+      +techs.map(([id,x])=>`<option value="tech:${id}"${t.assignedTechId===id?" selected":""}>🔧 ${esc(x.name)}</option>`).join("")
+      +`</optgroup>`;
   /* A Director handing a job down to their own DM is the same motion, and it
      goes through the same instructions sheet. */
   const coaches=[...new Set([...storeCoachIds(t.storeId),t.assignedCoachId].filter(Boolean))]
     .map(id=>[id,(MASTER.areaCoaches||{})[id]]).filter(([,c])=>c);
-  html+=coaches.map(([id,c])=>`<option value="coach:${id}"${t.assignedCoachId===id?" selected":""}>👤 ${esc(c.name)} — District Manager</option>`).join("");
+  if(coaches.length)
+    html+=`<optgroup label="District Manager for this store">`
+      +coaches.map(([id,c])=>`<option value="coach:${id}"${t.assignedCoachId===id?" selected":""}>👤 ${esc(c.name)}</option>`).join("")
+      +`</optgroup>`;
+  const mayVendor=canSeeVendors();
+  const {match,rest}=mayVendor?vendorGroupsFor(t):{match:[],rest:[]};
+  const vOpt=([id,v])=>`<option value="vendor:${id}"${t.assignedVendorId===id?" selected":""}>🏢 ${esc(v.name)}</option>`;
+  const catLabel=ALL_CATEGORIES[t.category]||"this category";
+  if(match.length)html+=`<optgroup label="Vendors — ${escA(catLabel)}">${match.map(vOpt).join("")}</optgroup>`;
+  if(rest.length) html+=`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`;
+  /* A vendor already on the job that no longer covers this store (or was
+     deleted) would otherwise vanish from the list and read as unassigned. */
+  const covered=mayVendor&&[...match,...rest].some(([id])=>id===t.assignedVendorId);
+  if(t.assignedVendorId&&!covered){
+    const v=VENDORS[t.assignedVendorId];
+    html+=`<option value="vendor:${t.assignedVendorId}" selected>🏢 ${esc(v?v.name:"Third-party (removed)")}</option>`;
+  }
   return html;
 }
 /* Who last set this ticket's assignment, and when. Read from the activity
@@ -5802,8 +5851,12 @@ async function applyDirectorAssign(id,val,fromDetail,confirmed){
   }else{
     const vid=val.slice(7);
     if(vid===TICKETS[id].assignedVendorId){toast("No change");return}   // unchanged
-    // Directors cannot route TO a third-party vendor — Overwatch only.
-    toast("Vendor assignment is handled by Overwatch","err");return;
+    const v=VENDORS[vid];
+    if(!v){toast("That vendor no longer exists — left unassigned","err");return}
+    if(!canSeeVendors()){toast("Vendor routing isn't switched on for your account","err");return}
+    /* Identical to the Overwatch path: "assigned", not "dispatched", because
+       an outside firm has not accepted the job merely by being chosen. */
+    patch={assignedVendorId:vid,assignedTechId:null,assignedCoachId:null,status:"assigned"};note="🏢 "+v.name;
   }
   if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status}))
     toast((patch.status==="dispatched"?"Dispatched · ":"Assigned · ")+note);
@@ -6443,38 +6496,42 @@ function ticketControls(t){
     // Available at ANY status, not just unassigned, so a job can be re-routed
     // after the fact (this was the bug: the controls disappeared once a ticket
     // moved off unassigned).
-    if(role==="director"){
-      // In-house techs only. Vendor selection stays with Overwatch, so a DO who
-      // needs outside help leaves the ticket unassigned and flags it.
+    if(role==="director"||role==="coach"){
+      /* Directors and District Managers both route jobs: their own in-house
+         techs, each other, and now third-party vendors as well. Adding a NEW
+         vendor is still Overwatch's — one gatekeeper on the roster — so this
+         picks from vendors that already cover the store. */
       const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
-      h+=`<div class="section-label">Assign<span class="ln"></span></div>
-        <div class="field">
+      const mayVendor=canSeeVendors();
+      const {match,rest}=mayVendor?vendorGroupsFor(t):{match:[],rest:[]};
+      const nVend=match.length+rest.length;
+      h+=`<div class="section-label">Assign<span class="ln"></span></div>`;
+      /* A DM's quick button matches on specialty, which the raw list does not,
+         so it stays as the one-tap path. */
+      if(role==="coach"){
+        const elig=eligibleTechsFor(t);
+        if(elig.length){
+          const sub=elig.length===1
+            ? `Dispatches to ${esc(elig[0][1].name)}.`
+            : `${elig.length} in-house techs cover this store — you'll pick one.`;
+          h+=`<button class="btn btn-primary btn-block" onclick="requestInHouse('${t._id}')">🔧 Request In-House Tech</button>
+            <div style="font-size:11px;color:var(--ink-dim);margin:5px 0 9px">${sub}</div>`;
+        }
+      }
+      h+=`<div class="field">
           <select class="input" id="doAssign" onchange="doDirectorAssign('${t._id}')">${directorAssignOptions(t)}</select>
           <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">${
-            techs.length?"Choosing a tech dispatches the job to them straight away."
+            techs.length?"An in-house tech is dispatched straight away; a vendor is marked assigned until they accept."
                         :"No in-house tech is assigned to this store."}${
-            t.assignedVendorId?" This job is with a third-party — only Overwatch can change that.":""}</div>
+            !mayVendor?" Vendor routing isn't switched on for your account."
+            :nVend?` ${nVend} vendor${nVend===1?"":"s"} cover${nVend===1?"s":""} this store.`
+                 :" No vendor covers this store yet — Overwatch adds those."}</div>
         </div>
 `;
-      h+=`<button class="btn btn-ghost btn-block" style="margin-top:9px" onclick="requestThirdParty('${t._id}')">🏢 Leave unassigned — needs a third-party</button>
-        <div style="font-size:11px;color:var(--ink-dim);margin:5px 0 4px">Overwatch selects and dispatches the vendor.</div>`;
-        }else if(role==="coach"){
-      // DMs: request their own in-house tech, or leave it in the
-      // pool for Overwatch. They never see the vendor roster.
-      const elig=eligibleTechsFor(t);
-      const assignedNow=t.assignedTechId||t.assignedVendorId;
-      h+=`<div class="section-label">Assign<span class="ln"></span></div>`;
-      if(elig.length){
-        const sub=elig.length===1
-          ? `Dispatches to ${esc(elig[0][1].name)}.`
-          : `${elig.length} in-house techs cover this store — you'll pick one.`;
-        h+=`<button class="btn btn-primary btn-block" onclick="requestInHouse('${t._id}')">🔧 Request In-House Tech</button>
-          <div style="font-size:11px;color:var(--ink-dim);margin:5px 0 9px">${sub}</div>`;
-      }else{
-        h+=`<div style="font-size:12px;color:var(--ink-dim);margin-bottom:9px">No in-house tech covers this category at this store.</div>`;
-      }
-      h+=`<button class="btn btn-ghost btn-block" onclick="requestThirdParty('${t._id}')">🏢 Leave unassigned — needs a third-party</button>
-        <div style="font-size:11px;color:var(--ink-dim);margin:5px 0 4px">${assignedNow?"Clears the current assignment and":"Flags Overwatch to"} pick a vendor.</div>`;
+      h+=`<button class="btn btn-ghost btn-block" style="margin-top:9px" onclick="requestThirdParty('${t._id}')">🏢 Put it back in the pool for Overwatch</button>
+        <div style="font-size:11px;color:var(--ink-dim);margin:5px 0 4px">${mayVendor
+          ?"Use this when none of the vendors above is right."
+          :"Overwatch picks the vendor."}</div>`;
     }
     h+=`<div class="section-label">Update job<span class="ln"></span></div><div style="display:flex;flex-direction:column;gap:9px">`;
     if(t.status!=="in_progress" && t.status!=="finished")
@@ -10160,6 +10217,51 @@ function setSettingsTab(k){
 /* Settings is three tabs rather than one long scroll. Every pane stays in the
    DOM (just hidden), so switching tabs never loses a half-typed reply number —
    and saveSettings() can keep reading .reply-in / #vdRows document-wide. */
+/* One row per Director and DM, Directors first. The checkbox shows the
+   EFFECTIVE answer, so a person following the default looks the same as one
+   explicitly set — what matters is whether they can do it today. */
+function vendorAccessRows(){
+  const {def,people}=vendorAccessRec();
+  const mk=(kind,label,list)=>{
+    if(!list.length)return "";
+    return `<div class="va-group">${esc(label)}</div>`+list.map(([id,x])=>{
+      const key=prefKeyFor(x.email||"");
+      const explicit=(people[key]===true||people[key]===false);
+      const on=explicit?people[key]:def;
+      return `<label class="cat-chk va-row">
+        <input type="checkbox" data-vakey="${escA(key)}"${on?" checked":""} onchange="saveVendorAccess()">
+        <span>${esc(x.name||x.email||id)}<br>
+          <span style="font-weight:400;color:var(--ink-dim);font-size:12px">${esc(x.email||"no email on file")}${
+            explicit?"":" · following the default"}</span></span>
+      </label>`;}).join("");
+  };
+  const dirs=Object.entries(MASTER.directors||{}).filter(([,d])=>d&&d.email)
+    .sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
+  const dms=Object.entries(MASTER.areaCoaches||{}).filter(([,c])=>c&&c.email)
+    .sort((a,b)=>(a[1].name||"").localeCompare(b[1].name||""));
+  if(!dirs.length&&!dms.length)
+    return `<div class="rp-empty" style="padding:14px">No Directors or District Managers with an email address yet.</div>`;
+  return mk("do","Directors",dirs)+mk("dm","District Managers",dms);
+}
+/* Writes only the people whose box differs from the default, so the record
+   stays small and a later change of default moves everyone who never had an
+   opinion recorded about them. */
+async function saveVendorAccess(){
+  const def=!!($("vaDefault")||{}).checked;
+  const people={};
+  document.querySelectorAll("#vaRows input[data-vakey]").forEach(el=>{
+    const on=!!el.checked;
+    if(on!==def)people[el.dataset.vakey]=on;
+  });
+  const rec={def,people,updatedAt:now(),updatedBy:SESSION.email};
+  MASTER.admins=MASTER.admins||{}; MASTER.admins[VENDOR_ACCESS_NODE]=rec;   // show it immediately
+  try{
+    await apiWrite("admins/"+VENDOR_ACCESS_NODE,rec);
+    const n=Object.values(people).filter(v=>v===!def).length;
+    toast(def?`On by default${n?` · ${n} switched off`:""}`:`Off by default${n?` · ${n} switched on`:""}`);
+  }catch(e){ toast("Could not save that — try again","err"); }
+  const host=$("vaRows"); if(host)host.innerHTML=vendorAccessRows();
+}
 function openSettings(){
   const adminEmails=[...new Set([...ADMIN_EMAILS,...Object.values(MASTER.admins||{}).map(a=>(a.email||"").toLowerCase()).filter(Boolean)])];
   const rows=adminEmails.map(em=>`
@@ -10380,6 +10482,15 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
           <span class="vd-name">${esc({admin:"Overwatch",director:"Director (DO)",coach:"District Manager",support:"Support",tech:"Technician",manager:"Manager"}[rk])}</span>
           <select class="input">${["map","list","tiles"].map(v=>`<option value="${v}"${defaultViewFor(rk)===v?" selected":""}>${v[0].toUpperCase()+v.slice(1)}</option>`).join("")}</select>
         </div>`).join("")}</div>
+      <div class="section-label" style="margin-top:22px">Who can route jobs to vendors<span class="ln"></span></div>
+      <p class="set-hint">Overwatch always can. Tick a Director or District Manager to let them pick a third-party
+        vendor themselves instead of leaving the job for you. They still cannot add a vendor to the roster \u2014
+        that stays here.</p>
+      <label class="cat-chk" style="margin-bottom:8px">
+        <input type="checkbox" id="vaDefault"${vendorAccessRec().def?" checked":""} onchange="saveVendorAccess()">
+        <span><b>On by default</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Anyone not ticked below follows this \u2014 including people added to FindMi later.</span></span>
+      </label>
+      <div id="vaRows">${vendorAccessRows()}</div>
       <div class="section-label" style="margin-top:22px">This build<span class="ln"></span></div>
       <div class="set-kv"><span>App version</span><span class="mono">v${esc(APP_VERSION)}</span></div>
       <div class="set-kv"><span>Newest FixMi seen</span><span class="mono">v${esc(publishedVersion()||"—")}</span></div>
