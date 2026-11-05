@@ -1514,7 +1514,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.65";
+const APP_VERSION = "9.64";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1773,7 +1773,7 @@ function vendorArea(v){
 /* No area set = available everywhere (so existing vendors keep working). */
 function vendorCoversStore(v,sid){
   const a=vendorArea(v); if(!a)return true;
-  const c=storeCoords(sid); if(!c)return true;      // store not located (yet) — don't hide the vendor
+  const c=storeCoords(sid); if(!c)return true;      // store has no GPS — don't hide the vendor
   const d=distanceMiles({lat:a.lat,lng:a.lng},c);
   return d!=null && d<=a.radius;
 }
@@ -3560,115 +3560,16 @@ function storeManagerFirst(rid){
   const n=storeManagerName(rid);
   return n.trim().split(/\s+/)[0]||"";
 }
-/* ---- STORE LOCATION = THE LIVE ADDRESS IN FINDMI (v9.65) -----------------
-   The store's street address in FindMi is the ONLY source of where a store
-   is. FixMi never reads the latitude/longitude typed on the store record:
-   FindMi doesn't update those when an address is edited, so they can point
-   at the old location. Everything that needs a location derives it from the
-   address as FindMi has it right now:
-     - Open GPS: a maps search for the address, the same link FindMi uses.
-     - Distances (nearest-first for techs, the map, vendor service areas,
-       daily mileage, "near store" labels): the address is looked up on
-       OpenStreetMap (the same service FindMi uses), falling back to the
-       address's ZIP code if the street can't be found. Results are cached on
-       this device BY THE ADDRESS TEXT, so when an address changes in FindMi
-       the old result simply stops matching and the new address is looked up. */
-function storeAddress(rid){return String(store(rid).address||"").replace(/\s+/g," ").trim()}
+/* ---- GPS link for a store. Coordinates are most precise; if a store has none
+   (a handful don't), fall back to its street address, then its name. Returns a
+   universal maps URL that opens the native maps/GPS app on phones (Google Maps
+   on Android, Apple Maps on iOS) and a map in any browser. */
 function storeGeoUrl(rid){
-  const a=storeAddress(rid);
-  return a?"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(a):"";
-}
-const GEO_LS="fixmi_geo_addr_v1", GEO_MISS_TTL=7*864e5;
-let GEO_CACHE={};
-try{GEO_CACHE=JSON.parse(localStorage.getItem(GEO_LS)||"{}")||{}}catch(e){GEO_CACHE={}}
-let _geoQ=[], _geoBusy=false, _geoPending=new Set(), _geoWaiters=[], _geoRenderT=null;
-function _geoKey(a){return a.toLowerCase()}
-function _geoSave(){
-  try{
-    // keep only addresses some store still has, so edits don't pile up
-    const live=new Set(Object.keys(RESTAURANTS).map(r=>_geoKey(storeAddress(r))).filter(Boolean));
-    const out={}; Object.keys(GEO_CACHE).forEach(k=>{if(live.has(k)||!Object.keys(RESTAURANTS).length)out[k]=GEO_CACHE[k]});
-    GEO_CACHE=out; localStorage.setItem(GEO_LS,JSON.stringify(out));
-  }catch(e){}
-}
-/* Synchronous: the coordinates for the store's CURRENT address if they're
-   known on this device, otherwise null (and the lookup is queued; views
-   redraw when it lands). */
-function storeCoords(rid){
-  const a=storeAddress(rid); if(!a)return null;
-  const c=GEO_CACHE[_geoKey(a)];
-  if(c&&isFinite(c.lat)&&isFinite(c.lng))return {lat:c.lat,lng:c.lng};
-  if(c&&c.miss&&Date.now()-c.ts<GEO_MISS_TTL)return null;   // couldn't be found; retry in a week
-  queueGeocode(a);
-  return null;
-}
-function geoPending(rid){const a=storeAddress(rid);return !!a&&_geoPending.has(_geoKey(a))}
-function queueGeocode(a){
-  const k=_geoKey(a); if(_geoPending.has(k))return;
-  _geoPending.add(k); _geoQ.push(a); pumpGeocode();
-}
-/* Look up one address. {hit} when found, {miss} when the service answered
-   but had nothing, null when the service couldn't be reached (not cached, so
-   it is tried again next time). */
-async function _osmLookup(a){
-  try{
-    const r=await fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q="+encodeURIComponent(a),{headers:{"Accept":"application/json"}},12000);
-    if(!r.ok)return null;
-    const j=await r.json();
-    if(Array.isArray(j)&&j[0]&&isFinite(parseFloat(j[0].lat)))return {hit:{lat:parseFloat(j[0].lat),lng:parseFloat(j[0].lon)}};
-    return {miss:true};
-  }catch(e){return null}
-}
-async function pumpGeocode(){
-  if(_geoBusy)return; _geoBusy=true;
-  try{
-    while(_geoQ.length){
-      const a=_geoQ.shift(), k=_geoKey(a);
-      let res=await _osmLookup(a), src="address";
-      if(res&&res.miss){
-        // Street not found (common for rural highway addresses) — use the ZIP
-        // in the address instead, so the store is at least in the right town.
-        const z=(a.match(/\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/)||[])[1];
-        if(z){try{const g=await geocodeZip(z);if(isFinite(g.lat)){res={hit:{lat:g.lat,lng:g.lng}};src="zip"}}catch(e){}}
-      }
-      if(res&&res.hit)GEO_CACHE[k]={lat:res.hit.lat,lng:res.hit.lng,src,ts:Date.now()};
-      else if(res&&res.miss)GEO_CACHE[k]={miss:true,ts:Date.now()};
-      _geoPending.delete(k);
-      if(_geoQ.length)await new Promise(r=>setTimeout(r,1100));  // OpenStreetMap's limit: 1 lookup a second
-    }
-  }finally{
-    _geoBusy=false; _geoSave();
-    const w=_geoWaiters; _geoWaiters=[]; w.forEach(f=>f());
-    scheduleGeoRender();
-  }
-}
-/* For screens that compute with locations once (daily mileage): wait for
-   these stores' lookups, up to a limit. */
-function ensureStoreCoords(ids,maxMs){
-  ids.forEach(storeCoords);
-  if(!ids.some(geoPending))return Promise.resolve();
-  return new Promise(res=>{const t=setTimeout(res,maxMs||20000);_geoWaiters.push(()=>{clearTimeout(t);res()})});
-}
-/* Redraw once new locations are in — but never under someone's fingers:
-   wait while a sheet is open or they're typing. */
-function scheduleGeoRender(){
-  clearTimeout(_geoRenderT);
-  _geoRenderT=setTimeout(()=>{
-    if(!SESSION)return;
-    const ae=document.activeElement, typing=ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
-    const o=$("modalOverlay"), sheet=o&&o.classList.contains("on");
-    if(typing||sheet){scheduleGeoRender();return}
-    render();
-  },1200);
-}
-/* Start looking up the stores this person works with as soon as they sign
-   in, so distances and the map are ready by the time they're wanted. */
-function warmStoreCoords(){
-  if(!SESSION)return;
-  let ids=SESSION.role==="admin"?Object.keys(RESTAURANTS)
-    :SESSION.role==="tech"?[...new Set(techBoardTickets().map(t=>t.storeId).concat(myStoreIds()))]
-    :myStoreIds();
-  ids.forEach(storeCoords);
+  const s=store(rid);
+  const lat=parseFloat(s.latitude), lng=parseFloat(s.longitude);
+  if(isFinite(lat)&&isFinite(lng)) return `https://maps.google.com/?q=${lat},${lng}`;
+  const q=(s.address||storeName(rid)||"").trim();
+  return q?`https://maps.google.com/?q=${encodeURIComponent(q)}`:"";
 }
 /* ---- tech location (for nearest-first sorting) ----
    We ask once on load. If granted, we keep the tech's coords and re-render so
@@ -3735,6 +3636,10 @@ async function reportTechLocation(loc){
     while(pings.length>5)pings.shift();
     await apiWrite(`admins/techLocations/${SESSION.refId}`,{techId:SESSION.refId,name:SESSION.name,pings});
   }catch(e){/* non-critical; ignore */}
+}
+function storeCoords(rid){
+  const s=store(rid);const lat=parseFloat(s.latitude),lng=parseFloat(s.longitude);
+  return (isFinite(lat)&&isFinite(lng))?{lat,lng}:null;
 }
 // great-circle distance in miles; null if either point is missing
 function distanceMiles(a,b){
@@ -4223,7 +4128,6 @@ function enterAppChrome(){
 function enterApp(){
   CL_F=null;               // closed-view filters are per person
   enterAppChrome();
-  setTimeout(warmStoreCoords,1500);
   loadSortPref();          // now that we know who this is
   if(SESSION.role==="tech" && (curFilter==="active"||curFilter==="all")) curFilter="dispatched";
   if(SESSION.role==="tech") requestTechLocation();
@@ -7267,9 +7171,6 @@ async function runTechReport(){
      many times its status changed), the stores visited in time order, and the miles
      between them. Mileage is per-day on purpose — summing one route across the
      week would join Saturday's last stop to Sunday's first. */
-  // Locations come from the stores' live addresses; make sure they're looked
-  // up before adding up miles.
-  await ensureStoreCoords([...new Set(events.map(e=>e.storeId))],20000);
   const byDay={};
   days.forEach(d=>byDay[d]={events:[],tickets:new Map(),seq:[],seen:{},miles:0});
   events.forEach(e=>{
@@ -7557,7 +7458,7 @@ function renderZoneMap(){
     </div>`).join("");
   const techCount=Object.keys(zones).length;
 
-  let svg=`<div class="rp-empty">None of these stores has been placed from its FindMi address yet, so there is nothing to plot.<br>
+  let svg=`<div class="rp-empty">None of these stores has GPS coordinates yet, so there is nothing to plot.<br>
     Every open job is listed underneath.</div>`;
   if(mapped.length){
     const lats=mapped.map(p=>p.lat),lngs=mapped.map(p=>p.lng);
@@ -7596,25 +7497,23 @@ function renderZoneMap(){
      treatment a pin gets: a row, its count, and a tap that opens the same
      ticket deck. */
   const offOpen=unmapped.reduce((n,r)=>n+r.open,0);
-  const locating=unmapped.filter(r=>geoPending(r.sid)).length;
-  const noAddr=unmapped.filter(r=>!storeAddress(r.sid)).length;
   const unmappedBlock=unmapped.length?`
     <div class="ow-unmapped">
       <div class="ow-um-head"><b>Not on the map</b> — ${unmapped.length} store${unmapped.length===1?"":"s"}
         ${offOpen?`with <b>${offOpen} open job${offOpen===1?"":"s"}</b> between them `:""}${
-        unmapped.length===1?"isn't":"aren't"} placed yet.${locating?` Finding ${locating} from ${locating===1?"its":"their"} FindMi address now…`:""}</div>
+        unmapped.length===1?"has":"have"} no GPS coordinates in FindMi.</div>
       <div class="ow-um-rows">${unmapped.slice().sort((a,b)=>b.open-a.open||storeName(a.sid).localeCompare(storeName(b.sid)))
         .map(r=>`<button class="ow-um${r.open?" has":""}" onclick="${r.open?`openStoreDeck('${r.sid}')`:`owFocusStore('${r.sid}')`}">
           <span class="ow-um-n">${esc(storeName(r.sid))}</span>
           <span class="ow-um-c">${r.open?`${r.open} open`:"all clear"}</span></button>`).join("")}</div>
-      <div class="ow-um-fix">Stores are placed from their address in FindMi.${noAddr?` ${noAddr} ${noAddr===1?"has":"have"} no address — add one in FindMi.`:""}${unmapped.length-noAddr-locating>0?` Check the spelling of the others' addresses in FindMi; the map can't find them.`:""}</div>
+      <div class="ow-um-fix">Add a latitude and longitude to ${unmapped.length===1?"it":"them"} in FindMi and ${unmapped.length===1?"it":"they"} will appear on the map.</div>
     </div>`:"";
 
   /* Say it in the header too. "4 open" over a map showing two pins is the
      thing that makes people think the map is broken. */
   const offNote=offOpen
     ? ` · <b>${offOpen} not on the map</b>`
-    : (unmapped.length?` · ${unmapped.length} store${unmapped.length===1?"":"s"} not placed yet`:"");
+    : (unmapped.length?` · ${unmapped.length} store${unmapped.length===1?"":"s"} without GPS`:"");
 
   return `
     <div class="page-head"><div>
@@ -8950,7 +8849,7 @@ function crGroup(rows,dim){
 function crSpeedMap(groups){
   const pts=groups.map(g=>({...g,...(storeCoords(g.key)||{})})).filter(p=>isFinite(p.lat)&&isFinite(p.lng));
   const off=groups.length-pts.length;
-  if(!pts.length)return `<div class="rp-empty">No store in this slice has been placed from its FindMi address yet, so there is nothing to map.</div>`;
+  if(!pts.length)return `<div class="rp-empty">No store in this slice has GPS coordinates, so there is nothing to map.</div>`;
   const all=median(groups.flatMap(g=>Array(g.n).fill(g.med)));
   const lats=pts.map(p=>p.lat),lngs=pts.map(p=>p.lng);
   let minLat=Math.min(...lats),maxLat=Math.max(...lats),minLng=Math.min(...lngs),maxLng=Math.max(...lngs);
@@ -8981,7 +8880,7 @@ function crSpeedMap(groups){
       <span><i style="background:${SPEED_COLOR.slow}"></i> Slow \u2014 half again or worse</span>
       <span><i class="cs-thin"></i> Under ${SPEED_MIN_N} tickets \u2014 shown, not ranked</span>
     </div>
-    ${off?`<div class="cr-hint">${off} store${off===1?"":"s"} in this slice ${off===1?"has":"have"} no findable FindMi address and ${off===1?"is":"are"} not on the map \u2014 ${off===1?"it is":"they are"} still in the table.</div>`:""}
+    ${off?`<div class="cr-hint">${off} store${off===1?"":"s"} in this slice ${off===1?"has":"have"} no GPS and ${off===1?"is":"are"} not on the map \u2014 ${off===1?"it is":"they are"} still in the table.</div>`:""}
   </div>`;
 }
 function crSpeedDrill(key){
