@@ -203,6 +203,10 @@ body.no-reftags .reftag{display:none}
 .login-err{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.35);color:#fca5a5;border-radius:8px;padding:11px 13px;font-size:13px}
 .login-foot{font-size:11px;color:var(--ink-dim);text-align:center;font-family:var(--mono);letter-spacing:.06em;padding-top:4px}
 
+/* read-only closed ticket banner (v9.63) */
+.ro-banner{background:var(--panel-2);border:1px solid var(--line);border-left:4px solid var(--s-closed);
+  border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:var(--ink-mid);line-height:1.4}
+.ro-banner b{color:var(--ink)}
 /* ===== PAGE HEAD / STATS / FILTERS ===== */
 .page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap}
 .page-title{font-family:var(--disp);font-weight:900;font-size:26px;letter-spacing:-.01em;line-height:1.05}
@@ -1501,7 +1505,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.62";
+const APP_VERSION = "9.63";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -3818,19 +3822,75 @@ function myStoreIds(){
     return Object.keys(RESTAURANTS).filter(r=>storeCoachIds(r).includes(SESSION.refId));
   return Object.keys(RESTAURANTS).filter(r=>RESTAURANTS[r][SESSION.refField]===SESSION.refId);
 }
-// Closed tickets vanish from every view EXCEPT overwatch (kept for stats/reports).
-// Statuses a tech is ever allowed to see. To keep their world simple, a tech
-// only sees work that's been dispatched to them (dispatched/waiting/in_progress)
-// plus what they've finished. No unassigned/assigned/closed.
+/* ---- closed tickets: READ-ONLY for everyone but Overwatch (v9.63) ----------
+   Overwatch keeps every right on a closed ticket (reopen, edit, comment).
+   Directors, DMs, GMs and techs can LOOK at the closed tickets in their own
+   scope — the closing notes, photos and timeline are the job documentation —
+   but cannot change, comment on or reopen them. Support and vendor/guest
+   users are unchanged: no closed archive.
+   The archive is still downloaded lazily (only when someone opens a Closed
+   view), so nobody's phone pulls it at sign-in. */
+function canSeeClosed(){return !!SESSION&&["admin","director","coach","manager","tech"].includes(SESSION.role)}
+function closedReadOnly(t){return !!t&&t.status==="closed"&&(!SESSION||SESSION.role!=="admin")}
+const CLOSED_RO_MSG="Closed tickets are read only — only Overwatch can change or reopen them.";
+/* A tech's closed tickets are the ones assigned to them PLUS any they actually
+   worked — clocked in, clocked out / finished, or moved — even if someone
+   else was assigned at close, or a DM closed it after they finished. Activity
+   stamps the actor's NAME (and sometimes email), so match on a normalised
+   name the same way the tech report does; if another tech shares the name,
+   fall back to assigned-only rather than show someone else's work. */
+function _nk(v){return String(v||"").trim().replace(/\s+/g," ").toLowerCase()}
+function techWorkedOn(t){
+  if(!t||!SESSION)return false;
+  if(t.assignedTechId===SESSION.refId)return true;
+  const me=(MASTER.repairTechnicians||{})[SESSION.refId]||{};
+  const name=_nk(me.name||SESSION.name), email=_nk(SESSION.email);
+  if(!name&&!email)return false;
+  const shared=Object.entries(MASTER.repairTechnicians||{})
+    .some(([id,x])=>id!==SESSION.refId&&name&&_nk(x&&x.name)===name);
+  const MOVES={clockin:1,clockout:1,status:1};
+  return (Array.isArray(t.activity)?t.activity:[]).some(a=>a&&a.role==="tech"&&MOVES[a.action]
+    &&((email&&_nk(a.email)===email)||(!shared&&name&&_nk(a.by)===name)));
+}
+/* How far back a non-Overwatch Closed view reaches. Saved per device. */
+let CLOSED_RANGE_DAYS=90;
+try{const v=localStorage.getItem("fixmi_closed_range");if(v!==null&&["30","90","365","0"].includes(v))CLOSED_RANGE_DAYS=Number(v)}catch(e){}
+function inClosedRange(t){return !CLOSED_RANGE_DAYS||closedAt(t)>=Date.now()-CLOSED_RANGE_DAYS*864e5}
+function closedRangeLabel(){return CLOSED_RANGE_DAYS?("Last "+(CLOSED_RANGE_DAYS===365?"year":CLOSED_RANGE_DAYS+" days")):"All time"}
+function setClosedRange(v){CLOSED_RANGE_DAYS=Number(v)||0;try{localStorage.setItem("fixmi_closed_range",String(CLOSED_RANGE_DAYS))}catch(e){}render()}
+function closedRangeSelect(){
+  const o=(v,l)=>`<option value="${v}"${CLOSED_RANGE_DAYS===v?" selected":""}>${l}</option>`;
+  return `<select class="input" style="flex:0 0 auto;width:auto" title="How far back" onchange="setClosedRange(this.value)">
+    ${o(30,"Last 30 days")}${o(90,"Last 90 days")}${o(365,"Last year")}${o(0,"All time")}</select>`;
+}
+/* Newest close first — the order you want when checking what got done. */
+function sortClosedNewest(rows){return rows.slice().sort((a,b)=>closedAt(b)-closedAt(a))}
+/* Shown in place of a closed list until the archive is loaded. */
+function closedLoadPrompt(){
+  if(CLOSED_ERR&&!CLOSED_LOADED)
+    return `<div class="empty" style="padding:26px 20px"><h3>Couldn't load closed tickets</h3><p>${esc(CLOSED_ERR)}</p>
+      <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="ensureClosedLoaded(true)">Try again</button></div>`;
+  return `<div class="empty" style="padding:26px 20px"><div class="empty-mark">🗄️</div><h3>Closed tickets</h3>
+    <p>Read only. Closing notes, photos and the full timeline.</p>
+    <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="ensureClosedLoaded()">Load closed tickets</button></div>`;
+}
+// Statuses a tech sees on their working board. Closed tickets they worked are
+// added separately (read only) — see techBoardTickets().
 const TECH_VISIBLE_STATUSES=["dispatched","waiting","in_progress","finished"];
+function techBoardTickets(){
+  return Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}))
+    .filter(t=>(TECH_VISIBLE_STATUSES.includes(t.status)&&t.assignedTechId===SESSION.refId)
+      ||(t.status==="closed"&&techWorkedOn(t)));
+}
 function ticketsForStore(sid){
   return Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}))
     .filter(t=>t.storeId===sid)
-    .filter(t=>["admin","director"].includes(SESSION.role) || t.status!=="closed")
-    .filter(t=>SESSION.role!=="tech" || TECH_VISIBLE_STATUSES.includes(t.status))
+    .filter(t=>canSeeClosed() || t.status!=="closed")
     // A tech sees ONLY tickets dispatched specifically to them — never other
-    // tickets at the store, even unassigned ones.
-    .filter(t=>SESSION.role!=="tech" || t.assignedTechId===SESSION.refId);
+    // tickets at the store, even unassigned ones — plus closed ones they worked.
+    .filter(t=>SESSION.role!=="tech"
+      || (TECH_VISIBLE_STATUSES.includes(t.status)&&t.assignedTechId===SESSION.refId)
+      || (t.status==="closed"&&techWorkedOn(t)));
 }
 
 /* ---- tech zones, specialties and colours -------------------------------------
@@ -4065,9 +4125,7 @@ function repaintList(){
   if(!zone||owView!=="list"||SESSION.role==="manager")return false;
   let storeIds=myStoreIds(), all=[];
   if(SESSION.role==="tech"){
-    all=Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}))
-      .filter(t=>TECH_VISIBLE_STATUSES.includes(t.status))
-      .filter(t=>t.assignedTechId===SESSION.refId);
+    all=techBoardTickets();
   }else{
     storeIds.forEach(sid=>{all=all.concat(ticketsForStore(sid))});
   }
@@ -4075,7 +4133,7 @@ function repaintList(){
   if(curStore!=="all")rows=rows.filter(t=>t.storeId===curStore);
   rows=applyFilterSearch(rows);
   const label=({active:"Open",all:"All",unassigned:"Unassigned",assigned:"Assigned",dispatched:"Dispatched",
-    waiting:"Waiting",in_progress:"In Progress",finished:"Finished",closed:"Closed"})[curFilter]||"";
+    waiting:"Waiting",in_progress:"In Progress",finished:"Finished",closed:SESSION.role==="admin"?"Closed":"Closed (read only)"})[curFilter]||"";
   zone.innerHTML=boardListHtml(rows,label);
   applyTags();
   return true;
@@ -4095,6 +4153,20 @@ function onSearchInput(el){
 }
 
 /* ---- manager hub: single action + their open tickets listed below ---- */
+/* Read-only closed section used by the GM hub and the per-store Tiles page.
+   Nothing is downloaded until they ask; "Hide" hands the memory back. */
+function closedSectionHtml(list){
+  if(!CLOSED_LOADED){
+    return `<button class="btn btn-ghost btn-block" style="margin-top:24px" onclick="ensureClosedLoaded()">🗄️ Show closed tickets${SESSION.role==="admin"?"":" (read only)"}</button>
+      ${CLOSED_ERR?`<div style="font-size:12px;color:var(--ink-dim);margin-top:6px;text-align:center">${esc(CLOSED_ERR)} — tap to try again.</div>`:""}`;
+  }
+  const cl=sortClosedNewest(list.filter(t=>t.status==="closed"&&inClosedRange(t)));
+  return `<div class="section-label" style="margin-top:26px">Closed${SESSION.role==="admin"?"":" · read only"} · ${cl.length}<span class="ln"></span></div>
+    <div class="board-controls" style="margin-bottom:10px">${closedRangeSelect()}
+      <button class="btn btn-ghost btn-sm" onclick="releaseClosed();render()">Hide</button></div>
+    ${cl.length?`<div class="rows">${cl.map(ticketRow).join("")}</div>`
+      :`<div class="empty" style="padding:26px 20px"><h3>Nothing closed</h3><p>No tickets closed here in this period.</p></div>`}`;
+}
 function renderManagerHub(){
   const sid=SESSION.storeId, mine=ticketsForStore(sid);
   const open=mine.filter(t=>ACTIVE_STATUSES.includes(t.status)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
@@ -4119,7 +4191,8 @@ function renderManagerHub(){
       <div class="hb-d">Open a ticket for your store. Add photos if helpful.</div>
     </button>
     <div class="section-label" style="margin-top:0">Your open tickets · ${open.length}<span class="ln"></span></div>
-    ${cards}`;
+    ${cards}
+    ${closedSectionHtml(mine)}`;
 }
 
 /* ---- district manager hub: a tile per store with its open-ticket count.
@@ -4169,14 +4242,12 @@ function renderCoachStore(sid){
   if(!coachStoreList().includes(sid)){coachScreen="hub";return renderCoachHub();}
   const all=ticketsForStore(sid);
   const open=sortRows(all.filter(t=>ACTIVE_STATUSES.includes(t.status)));
-  const done=all.filter(t=>!ACTIVE_STATUSES.includes(t.status)).sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
   const dir=storeDirector(sid), coach=storeCoach(sid), tech=storeTech(sid);
   const openCards=open.length
     ? `<div class="rows">${open.map(ticketRow).join("")}</div>`
     : `<div class="empty" style="padding:34px 20px"><div class="empty-mark">✅</div><h3>No open tickets</h3><p>All clear at this store.</p></div>`;
-  const doneBlock=done.length
-    ? `<div class="section-label" style="margin-top:22px">Recently finished · ${done.length}<span class="ln"></span></div><div class="rows">${done.map(ticketRow).join("")}</div>`
-    : "";
+  // Closed tickets for this store, read only (Overwatch's own tools are elsewhere).
+  const doneBlock=closedSectionHtml(all);
   return `
     <div class="page-head">
       <div>
@@ -4208,9 +4279,7 @@ function renderBoard(){
     // A tech sees ONLY tickets dispatched specifically to them (assignedTechId
     // === their id) — nothing else at the store. The store list is derived from
     // those tickets so the location filter only shows relevant stores.
-    allTickets=Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}))
-      .filter(t=>TECH_VISIBLE_STATUSES.includes(t.status))
-      .filter(t=>t.assignedTechId===SESSION.refId);
+    allTickets=techBoardTickets();
     storeIds=[...new Set(allTickets.map(t=>t.storeId))];
   }else{
     storeIds.forEach(sid=>{allTickets=allTickets.concat(ticketsForStore(sid))});
@@ -4219,7 +4288,8 @@ function renderBoard(){
   const activeN=allTickets.filter(t=>ACTIVE_STATUSES.includes(t.status)).length;
 
   let title,meta;
-  if(SESSION.role==="tech"){title="My dispatched jobs";meta=`${esc(SESSION.name)} · ${allTickets.length} job${allTickets.length===1?"":"s"} across ${storeIds.length} store${storeIds.length===1?"":"s"}`}
+  if(SESSION.role==="tech"){const live=allTickets.filter(t=>t.status!=="closed"),ls=new Set(live.map(t=>t.storeId)).size;
+    title="My dispatched jobs";meta=`${esc(SESSION.name)} · ${live.length} job${live.length===1?"":"s"} across ${ls} store${ls===1?"":"s"}`}
   else if(SESSION.role==="admin"){title="All stores";meta=`${storeIds.length} locations · overwatch`}
   else if(SESSION.role==="manager"){title=storeName(SESSION.storeId);meta="Your store"}
   else{title=ROLE_LABEL[SESSION.role]+" board";meta=`${storeIds.length} stores in your area`}
@@ -4229,10 +4299,14 @@ function renderBoard(){
   if(SESSION.role==="tech"){
     const dispN=cnt("dispatched")+cnt("waiting")+cnt("in_progress");
     const finN=cnt("finished");
+    // CLOSED (v9.63): read-only history of jobs they worked. The number is
+    // only shown once the archive is actually loaded.
+    const clN=CLOSED_LOADED?allTickets.filter(t=>t.status==="closed"&&inClosedRange(t)).length:"—";
     const techTiles=`
       <div class="tiles-wrap" id="tilesWrap">
         ${tile("dispatched",dispN,"DISPATCHED","On your plate","var(--blue)")}
         ${tile("finished",finN,"FINISHED","Work done","var(--s-finished)")}
+        ${tile("closed",clN,"CLOSED",CLOSED_LOADED?closedRangeLabel():"Tap to load","var(--s-closed)")}
       </div>`;
     const techHead=`
       <div class="page-head">
@@ -4242,6 +4316,7 @@ function renderBoard(){
       <div class="board-controls">
         ${storeIds.length>1?storePicker({id:"boardStore",ids:storeIds,selected:curStore,
           allLabel:`All stores (${storeIds.length})`,onChange:"curStore=this.value;render()"}):""}
+        ${curFilter==="closed"?closedRangeSelect():""}
         ${sortSelect()}
         <input class="input search" type="search" inputmode="search" enterkeyhint="search"
         autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"
@@ -4250,6 +4325,7 @@ function renderBoard(){
       ${(curFilter==="dispatched"&&curSort==="priority")?(TECH_LOC
         ? `<div class="loc-note ok">📍 Sorted nearest first from your location</div>`
         : `<button class="loc-note ask" onclick="requestTechLocation(true)">📍 Turn on location to sort nearest jobs first</button>`):""}`;
+    if(curFilter==="closed"&&!CLOSED_LOADED) return techHead+closedLoadPrompt();
     if(!storeIds.length) return techHead+`<div class="empty"><div class="empty-mark">🏪</div><h3>No stores dispatched to you</h3><p>Managed in the master.</p></div>`;
     let trows=allTickets.slice();
     if(curStore!=="all") trows=trows.filter(t=>t.storeId===curStore);
@@ -4274,7 +4350,7 @@ function renderBoard(){
         return (b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0);
       });
     }
-    const tlabel = curFilter==="finished" ? "Finished" : "Dispatched";
+    const tlabel = curFilter==="finished" ? "Finished" : curFilter==="closed" ? "Closed (read only)" : "Dispatched";
     const tlistHead=`<div class="list-head">${tlabel} tickets <span class="lh-n">(${trows.length})</span></div>`;
     const tbody = trows.length
       ? `<div class="rows">${trows.map(ticketRow).join("")}</div>`
@@ -4322,7 +4398,12 @@ function renderBoard(){
         <span class="exp-chevs">⟨ ⟩</span><span class="exp-hint">statuses</span>
       </button>
       <div class="tiles-mid">${midTiles}</div>
-      ${tile("closed",(["admin","director"].includes(SESSION.role)&&!CLOSED_LOADED)?CLOSED_COUNT:cnt("closed"),"CLOSED","No follow-up","var(--s-closed)")}
+      ${SESSION.role==="admin"
+        ? tile("closed",!CLOSED_LOADED?CLOSED_COUNT:cnt("closed"),"CLOSED","No follow-up","var(--s-closed)")
+        /* Everyone else: the server's count is company-wide, so never show it.
+           Once loaded, count only their own scope within the chosen period. */
+        : tile("closed",CLOSED_LOADED?allTickets.filter(t=>t.status==="closed"&&inClosedRange(t)).length:"—",
+            "CLOSED",CLOSED_LOADED?closedRangeLabel()+" · read only":"Tap to load","var(--s-closed)")}
     </div>`;
 
   const head=`
@@ -4336,6 +4417,7 @@ function renderBoard(){
         allLabel:`All stores (${storeIds.length})`,onChange:"curStore=this.value;render()"}):""}
       ${(curFilter==="dispatched"||curFilter==="assigned")?assigneeFilterSelect(allTickets):""}
       ${SESSION.role==="admin"?categoryFilterSelect():""}
+      ${(curFilter==="closed"&&SESSION.role!=="admin")?closedRangeSelect():""}
       ${sortSelect()}
       <input class="input search" type="search" inputmode="search" enterkeyhint="search"
         autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"
@@ -4343,12 +4425,13 @@ function renderBoard(){
     </div>`;
 
   if(!storeIds.length) return head+`<div class="empty"><div class="empty-mark">🏪</div><h3>No stores assigned to you</h3><p>Managed in the master.</p></div>`;
+  if(curFilter==="closed"&&SESSION.role!=="admin"&&!CLOSED_LOADED) return head+closedLoadPrompt();
 
   // flat, sorted list of rows (location-filtered)
   let rows=allTickets.slice();
   if(curStore!=="all") rows=rows.filter(t=>t.storeId===curStore);
   rows=applyFilterSearch(rows);
-  const label=({active:"Open",all:"All",unassigned:"Unassigned",assigned:"Assigned",dispatched:"Dispatched",waiting:"Waiting",in_progress:"In Progress",finished:"Finished",closed:"Closed"})[curFilter]||"";
+  const label=({active:"Open",all:"All",unassigned:"Unassigned",assigned:"Assigned",dispatched:"Dispatched",waiting:"Waiting",in_progress:"In Progress",finished:"Finished",closed:SESSION.role==="admin"?"Closed":"Closed (read only)"})[curFilter]||"";
   // bulk-action bar — admin only, on the finished & closed pages
   /* Building a row is not free — for Overwatch each one carries a full
      assign dropdown — and the archive can run to thousands. Past this many
@@ -4421,15 +4504,15 @@ function releaseClosed(){
   _tkHay={};                       // the search index over those tickets goes too
 }
 /* Fetch the closed-ticket details on demand and cache them for the session.
-   Only Overwatch ever renders closed rows, so everyone else skips the fetch
-   entirely. Re-fetches when the cache is older than CLOSED_TTL_MS so the tab
+   Only the roles canSeeClosed() allows ever fetch it (v9.63: Overwatch,
+   Directors, DMs, GMs and techs — read only for all but Overwatch). Re-fetches when the cache is older than CLOSED_TTL_MS so the tab
    stays honest without ever being polled. */
 let CLOSED_ERR=null;        // last closed-fetch failure message (job-costs panel shows it)
 /* Admins see the whole company; directors and district managers
    get the same report scoped to their own stores. */
 function canSeeClosedReport(){return ["admin","director","coach"].includes(SESSION.role)}
 async function ensureClosedLoaded(force){
-  if(!canSeeClosedReport()) return false;
+  if(!canSeeClosed()) return false;
   if(!force && CLOSED_LOADED && (Date.now()-CLOSED_FETCHED_AT)<CLOSED_TTL_MS) return true;
   showLoader(true);
   try{
@@ -4445,7 +4528,9 @@ async function ensureClosedLoaded(force){
     console.log("[Closed] "+Object.keys(CLOSED_TICKETS).length+" closed tickets loaded");
     render();
     return true;
-  }catch(e){CLOSED_ERR=(e&&e.name==="AbortError")?"Timed out loading closed tickets":(e.message||"Could not load closed tickets");toast(CLOSED_ERR,"err");return false}
+  }catch(e){CLOSED_ERR=(e&&e.name==="AbortError")?"Timed out loading closed tickets":(e.message||"Could not load closed tickets");toast(CLOSED_ERR,"err");
+    try{const o=$("modalOverlay");if(!o||!o.classList.contains("on"))render()}catch(_){}
+    return false}
   finally{showLoader(false)}
 }
 // expand the middle status tiles. Hover toggles on desktop; tap (the ⟨ ⟩ button)
@@ -4518,6 +4603,12 @@ function applyFilterSearch(list){
   }
   if(curCategory!=="all")out=out.filter(t=>t.category===curCategory);
   if(curSearch){const q=curSearch.trim().toLowerCase(); out=out.filter(t=>tkMatches(t,q))}
+  // Closed view for everyone but Overwatch: limited to the chosen period, and
+  // on the default sort, newest close first (priority means nothing once done).
+  if(curFilter==="closed"&&SESSION.role!=="admin"){
+    out=out.filter(inClosedRange);
+    if(curSort==="priority")return sortClosedNewest(out);
+  }
   return sortRows(out);
 }
 // dropdown of the distinct assignees present in the current status, to filter by
@@ -4931,7 +5022,11 @@ function dupAgeKind(t){
 /* Everything at this store that might be the same problem, best first. */
 function dupMatches(sid,cat,sub,desc){
   if(!sid||!String(desc||"").trim())return [];
-  const seen=Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}));
+  /* v9.63: GMs and techs may now hold closed tickets (read only) in TICKETS.
+     Duplicate matching against closed work stays with the roles it always
+     had, so drop closed rows from the live set for everyone else. */
+  const seen=Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}))
+    .filter(t=>t.status!=="closed"||canSeeClosedReport());
   /* Closed tickets live in their own lazily-loaded cache, and only for the
      roles allowed to have it. */
   const pool=canSeeClosedReport()&&CLOSED_LOADED
@@ -5427,6 +5522,7 @@ function askDispatchToTech(id,sid){
 /* One eligible tech -> dispatch straight through. Two or more -> let them
    choose, since only a human knows which specialist the job really needs. */
 function requestInHouse(id){
+  if(roBlocked(id))return;
   const t=TICKETS[id]; if(!t)return;
   const elig=eligibleTechsFor(t);
   if(!elig.length){toast("No in-house tech covers this category","err");return}
@@ -5688,7 +5784,9 @@ function renderGuest(){
       <span class="sbadge" id="guestStatus" style="color:${st.color};background:${st.color}1a"><span class="dot"></span>${st.label}</span>
     </div>
     <div class="sheet-body">
-      <div class="guest-note">You're viewing a shared ticket. You can read the thread and add comments — give your name and email so we know who's writing, and staff at Dossani Paradise are notified when you do.</div>
+      ${t.status==="closed"
+        ? `<div class="ro-banner">🔒 <b>Closed · read only.</b> This ticket has been closed, so it can no longer be commented on. If the problem is back, contact Dossani Paradise.</div>`
+        : `<div class="guest-note">You're viewing a shared ticket. You can read the thread and add comments — give your name and email so we know who's writing, and staff at Dossani Paradise are notified when you do.</div>`}
       <div class="detail-store">
         <div style="font-weight:700;font-size:17px">${esc(storeName(sid))}${storeNum(sid)?` <span style="color:var(--ink-dim);font-weight:500">#${esc(String(storeNum(sid)))}</span>`:""}</div>
         ${storeGeoUrl(sid)?`<a class="btn btn-ghost btn-sm gps-btn" href="${escA(storeGeoUrl(sid))}" target="_blank" rel="noopener">📍 Open GPS</a>`:""}
@@ -5702,7 +5800,7 @@ function renderGuest(){
       ${t.waitingReason?`<div class="detail-row"><span class="k">Waiting on</span><span class="v">${esc(t.waitingReason)}</span></div>`:""}
       <div class="section-label">Comments<span class="ln"></span></div>
       <div class="comments" id="guestComments">${renderComments(t)}</div>
-      <div class="comment-add">
+      ${t.status==="closed"?"":`      <div class="comment-add">
         <div class="guest-id">
           <input class="input" id="gFirst" placeholder="First name" autocomplete="given-name" value="${escA(g.first||"")}">
           <input class="input" id="gLast" placeholder="Last name" autocomplete="family-name" value="${escA(g.last||"")}">
@@ -5716,7 +5814,7 @@ function renderGuest(){
           <button type="button" class="btn btn-ghost btn-sm" onclick="$('cmtFile').click()">📷 Add photo</button>
           <button class="btn btn-primary btn-sm" id="cmtSend" onclick="guestAddComment()">Post comment</button>
         </div>
-      </div>
+      </div>`}
       <div class="section-label">Activity<span class="ln"></span></div>
       <div class="timeline">${activity||'<div style="color:var(--ink-dim);font-size:13px">No activity yet.</div>'}</div>
     </div>
@@ -5725,6 +5823,7 @@ function renderGuest(){
 function validEmail(e){return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)}
 async function guestAddComment(){
   const id=GUEST_ID, t=TICKETS[id];if(!t)return;
+  if(t.status==="closed"){toast("This ticket is closed and read only.","err");renderGuest();return}
   const first=$("gFirst").value.trim(), last=$("gLast").value.trim();
   const email=$("gEmail").value.trim().toLowerCase(), company=$("gCompany").value.trim();
   if(!first||!last){toast("Please enter your first and last name","err");$(first?"gLast":"gFirst").focus();return}
@@ -5798,7 +5897,9 @@ function flashCopied(){
 async function copyTicketLink(id){
   // Older tickets predate link tokens — mint one first so the copied link
   // also works for someone who isn't signed in.
-  if(SESSION&&TICKETS[id]&&!TICKETS[id].shareToken){
+  // A read-only closed ticket is never written to just to copy a link — the
+  // plain signed-in link works for staff.
+  if(SESSION&&TICKETS[id]&&!TICKETS[id].shareToken&&!closedReadOnly(TICKETS[id])){
     if(!(await patchTicket(id,{shareToken:newShareToken()},null)))return;
     openTicket(id); // re-draw the sheet against the ticket that now has a token
   }
@@ -5880,10 +5981,12 @@ async function openTicketFromUrl(){
   const key=decodeURIComponent(m[1]).trim().toUpperCase();
   const find=()=>Object.keys(TICKETS).find(k=>String(TICKETS[k].shortId||"").toUpperCase()===key||k.toUpperCase()===key);
   let id=find();
-  if(!id && canSeeClosedReport()){ if(await ensureClosedLoaded()) id=find(); }
+  if(!id && canSeeClosed()){ if(await ensureClosedLoaded()) id=find(); }
   if(!id){toast("Ticket "+key+" wasn't found","err");clearTicketHash();return false}
   const t=TICKETS[id];
-  const visible=myStoreIds().includes(t.storeId) && ticketsForStore(t.storeId).some(x=>x._id===id);
+  // A tech can be sent to cover a store they aren't listed on; for them the
+  // per-ticket rule in ticketsForStore (assigned or worked) is the whole test.
+  const visible=(SESSION.role==="tech"||myStoreIds().includes(t.storeId)) && ticketsForStore(t.storeId).some(x=>x._id===id);
   if(!visible){toast("You don't have access to ticket "+key,"err");clearTicketHash();return false}
   openTicket(id);
   return true;
@@ -5917,6 +6020,7 @@ function openTicket(id,ret){
       <button class="x-btn" onclick="closeModal()">✕</button>
     </div>
     <div class="sheet-body">
+      ${closedReadOnly(t)?`<div class="ro-banner">🔒 <b>Closed · read only.</b> You can see the notes, photos and history. Only Overwatch can change or reopen it.</div>`:""}
       <div class="detail-store">
         <div style="font-weight:700;font-size:17px">${esc(storeName(sid))}</div>
         ${storeGeoUrl(sid)?`<a class="btn btn-ghost btn-sm gps-btn" href="${escA(storeGeoUrl(sid))}" target="_blank" rel="noopener">📍 Open GPS</a>`:""}
@@ -5950,7 +6054,7 @@ function openTicket(id,ret){
       ${ticketControls(t)}
       <div class="section-label">Comments<span class="ln"></span></div>
       <div class="comments" id="commentList">${renderComments(t)}</div>
-      <div class="comment-add">
+      ${closedReadOnly(t)?"":`<div class="comment-add">
         <textarea class="input" id="cmtInput" placeholder="Add a comment…" style="min-height:64px"></textarea>
         <input type="file" id="cmtFile" accept="image/*" multiple style="display:none" onchange="addCommentPhotos(this)">
         <div class="preview-strip" id="cmtPreview" style="margin-top:0;display:none"></div>
@@ -5958,7 +6062,7 @@ function openTicket(id,ret){
           <button type="button" class="btn btn-ghost btn-sm" onclick="$('cmtFile').click()">📷 Add photo</button>
           <button class="btn btn-primary btn-sm" id="cmtSend" onclick="addComment('${id}')">Post comment</button>
         </div>
-      </div>
+      </div>`}
       <div class="section-label">Activity<span class="ln"></span></div>
       <div class="timeline">${activity||'<div style="color:var(--ink-dim);font-size:13px">No activity yet.</div>'}</div>
     </div>
@@ -5998,6 +6102,7 @@ function linkedTicketRows(t){
 }
 async function clearReopenRequest(id){
   const t=TICKETS[id]||CLOSED_TICKETS[id]; if(!t)return;
+  if(SESSION.role!=="admin"){toast(CLOSED_RO_MSG,"err");return}
   await apiWriteTicket(id,{...t,reopenRequest:{...(t.reopenRequest||{}),done:true,clearedBy:SESSION.name,clearedAt:now()},updatedAt:now()});
   toast("Flag cleared"); openTicket(id);
 }
@@ -6110,6 +6215,7 @@ function renderCmtPreview(){
   applyTags();
 }
 async function addComment(id){
+  if(roBlocked(id))return;
   const inp=$("cmtInput");if(!inp)return;
   const text=inp.value.trim();
   const photos=cmtPhotos.filter(p=>p.url).map(p=>p.url);
@@ -6146,7 +6252,7 @@ function ticketControls(t){
     return h;
   }
 
-  if(isClosed) return `<div class="section-label">Closed<span class="ln"></span></div><div style="color:var(--ink-dim);font-size:13px">Closed. Only Overwatch can reopen.</div>`;
+  if(isClosed) return `<div class="section-label">Closed<span class="ln"></span></div><div style="color:var(--ink-dim);font-size:13px">Read only. Only Overwatch can change or reopen this ticket.</div>`;
 
   // TECH actions — keep it to one decision: where does this job go next?
   if(role==="tech"){
@@ -6273,8 +6379,16 @@ function refreshInBackground(){
     if(!o||!o.classList.contains("on"))render();
   }).catch(()=>{});
 }
+/* The backstop: whatever screen or stale link a click came from, a closed
+   ticket cannot be changed by anyone but Overwatch. Returns true if blocked. */
+function roBlocked(id){
+  const t=TICKETS[id]||CLOSED_TICKETS[id];
+  if(closedReadOnly(t)){toast(CLOSED_RO_MSG,"err");return true}
+  return false;
+}
 async function patchTicket(id,patch,activityEntry){
-  const t=TICKETS[id];if(!t){toast("Ticket not found","err");return}
+  const t=TICKETS[id];if(!t){toast("Ticket not found","err");return false}
+  if(roBlocked(id))return false;
   const prevStatus=t.status;
   const prevAssignee=(t.assignedTechId||"")+"|"+(t.assignedVendorId||"")+"|"+(t.assignedCoachId||"");
   const activity=Array.isArray(t.activity)?t.activity.slice():[];
@@ -6303,6 +6417,7 @@ async function patchTicket(id,patch,activityEntry){
   catch(e){showLoader(false);toast(e.message||"Update failed","err");return false}
 }
 async function setStatus(id,status){
+  if(roBlocked(id))return;
   if(TICKETS[id].status===status){toast("Already in that status");return}
   // Integrity: a ticket can only be "assigned" or "dispatched" if a real person
   // (tech or vendor) is attached. Otherwise it can't hold those statuses.
@@ -6314,6 +6429,7 @@ async function setStatus(id,status){
 /* Close is destructive (removes the ticket from every view except Overwatch),
    so confirm first. Works from the detail sheet or straight from a list row. */
 function confirmClose(id){
+  if(roBlocked(id))return;
   const t=TICKETS[id];if(!t)return;
   modal(`<div class="sheet-head"><h2>Mark this ticket closed?</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
     <div class="sheet-body">
@@ -6343,6 +6459,7 @@ async function doClose(id){
 /* One-click close-out from the Finished list (overwatch). Immediately sets that
    one ticket to Closed and shows a fading confirmation. */
 async function closeOutTicket(id){
+  if(roBlocked(id))return;
   if(await patchTicket(id,{status:"closed"},{action:"status",toStatus:"closed"})){
     toast("Closed out ✓");render();
   }
@@ -6478,6 +6595,7 @@ async function techFinish(id){
 let finishPhotos=[];
 let finishThenStart=null; // ticket id to put in_progress after this finish (chaining)
 function openFinish(id,opts){
+  if(roBlocked(id))return;
   finishPhotos=[];
   const keepNote=(($("finNote")||{}).value||"");
   finishThenStart=(opts&&opts.thenStart)||null;
@@ -6569,6 +6687,7 @@ async function finalizeFinish(id){
 }
 let waitReason=null;
 function openWaiting(id){
+  if(roBlocked(id))return;
   waitReason=null;
   const chips=WAITING_REASONS.map(r=>`<button type="button" class="wait-chip" data-r="${escA(r)}" onclick="pickWaitReason(this)">${esc(r)}</button>`).join("");
   modal(`<div class="sheet-head"><h2>What are you waiting on?</h2><button class="x-btn" onclick="openTicket('${id}')">✕</button></div>
@@ -6611,6 +6730,7 @@ let EDIT_ID=null, EDIT_STORE=null;
    it survive that. */
 function editMoveStore(v){ EDIT_STORE=v||null; openEdit(EDIT_ID,true); }
 function openEdit(id,keepStore){
+  if(roBlocked(id))return;
   EDIT_ID=id;
   if(!keepStore)EDIT_STORE=null;         // a fresh open starts from the ticket
   const t=TICKETS[id];editPhotos=(t.photos||[]).slice();
