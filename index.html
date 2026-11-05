@@ -203,6 +203,15 @@ body.no-reftags .reftag{display:none}
 .login-err{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.35);color:#fca5a5;border-radius:8px;padding:11px 13px;font-size:13px}
 .login-foot{font-size:11px;color:var(--ink-dim);text-align:center;font-family:var(--mono);letter-spacing:.06em;padding-top:4px}
 
+/* closed-view filters (v9.64) */
+.cl-sel{flex:0 0 auto;width:auto}
+.cl-day{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.cl-date{width:auto;min-width:140px}
+.cl-to{font-size:12px;color:var(--ink-dim)}
+.cl-dayhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+  margin:14px 2px 4px;font-weight:700;font-size:13px;color:var(--ink)}
+.cl-dayhead:first-child{margin-top:2px}
+.cl-dayhead span{font-weight:500;font-size:12px;color:var(--ink-dim)}
 /* read-only closed ticket banner (v9.63) */
 .ro-banner{background:var(--panel-2);border:1px solid var(--line);border-left:4px solid var(--s-closed);
   border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:var(--ink-mid);line-height:1.4}
@@ -1505,7 +1514,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.63";
+const APP_VERSION = "9.64";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -3842,26 +3851,150 @@ const CLOSED_RO_MSG="Closed tickets are read only — only Overwatch can change 
 function _nk(v){return String(v||"").trim().replace(/\s+/g," ").toLowerCase()}
 function techWorkedOn(t){
   if(!t||!SESSION)return false;
-  if(t.assignedTechId===SESSION.refId)return true;
-  const me=(MASTER.repairTechnicians||{})[SESSION.refId]||{};
-  const name=_nk(me.name||SESSION.name), email=_nk(SESSION.email);
+  return techWorkedBy(t,SESSION.refId,SESSION.email);
+}
+/* Did this tech work this ticket? Assigned to them, or they moved it (clock in,
+   clock out / finish, status). Used for a tech's own closed list and for the
+   "Tech" filter on everyone else's closed views. */
+function techWorkedBy(t,techId,emailHint){
+  if(!t||!techId)return false;
+  if(t.assignedTechId===techId)return true;
+  const me=(MASTER.repairTechnicians||{})[techId]||{};
+  const name=_nk(me.name), email=_nk(emailHint||me.email);
   if(!name&&!email)return false;
   const shared=Object.entries(MASTER.repairTechnicians||{})
-    .some(([id,x])=>id!==SESSION.refId&&name&&_nk(x&&x.name)===name);
+    .some(([id,x])=>id!==techId&&name&&_nk(x&&x.name)===name);
   const MOVES={clockin:1,clockout:1,status:1};
   return (Array.isArray(t.activity)?t.activity:[]).some(a=>a&&a.role==="tech"&&MOVES[a.action]
     &&((email&&_nk(a.email)===email)||(!shared&&name&&_nk(a.by)===name)));
 }
-/* How far back a non-Overwatch Closed view reaches. Saved per device. */
-let CLOSED_RANGE_DAYS=90;
-try{const v=localStorage.getItem("fixmi_closed_range");if(v!==null&&["30","90","365","0"].includes(v))CLOSED_RANGE_DAYS=Number(v)}catch(e){}
-function inClosedRange(t){return !CLOSED_RANGE_DAYS||closedAt(t)>=Date.now()-CLOSED_RANGE_DAYS*864e5}
-function closedRangeLabel(){return CLOSED_RANGE_DAYS?("Last "+(CLOSED_RANGE_DAYS===365?"year":CLOSED_RANGE_DAYS+" days")):"All time"}
-function setClosedRange(v){CLOSED_RANGE_DAYS=Number(v)||0;try{localStorage.setItem("fixmi_closed_range",String(CLOSED_RANGE_DAYS))}catch(e){}render()}
-function closedRangeSelect(){
-  const o=(v,l)=>`<option value="${v}"${CLOSED_RANGE_DAYS===v?" selected":""}>${l}</option>`;
-  return `<select class="input" style="flex:0 0 auto;width:auto" title="How far back" onchange="setClosedRange(this.value)">
-    ${o(30,"Last 30 days")}${o(90,"Last 90 days")}${o(365,"Last year")}${o(0,"All time")}</select>`;
+/* ---- closed-view filters (v9.64) -------------------------------------------
+   Period (last 30/90 days, last year, all time, ONE specific day, or a date
+   range), a Tech filter for everyone but techs, and search that understands
+   dates: "10/22", "10/22/26" or "oct 22" in the search box finds tickets
+   CLOSED that day, whatever the period is set to. The period is remembered
+   per device and per role; the tech filter is not. Overwatch defaults to
+   All time so its closed view looks exactly as it did. */
+let CL_F=null;
+function clF(){
+  if(CL_F)return CL_F;
+  let saved=null;
+  try{saved=JSON.parse(localStorage.getItem("fixmi_closed_f_"+(SESSION&&SESSION.role))||"null")}catch(e){}
+  CL_F={mode:(SESSION&&SESSION.role==="admin")?"all":"90",from:"",to:"",tech:"all",q:""};
+  if(saved&&typeof saved==="object"&&["30","90","365","all","day","range"].includes(saved.mode))
+    Object.assign(CL_F,{mode:saved.mode,from:saved.from||"",to:saved.to||""});
+  return CL_F;
+}
+function saveClF(){const f=clF();try{localStorage.setItem("fixmi_closed_f_"+SESSION.role,JSON.stringify({mode:f.mode,from:f.from,to:f.to}))}catch(e){}}
+function todayYmd(){return ymdLocal(Date.now())}
+function setClF(k,v){
+  const f=clF(); f[k]=v;
+  if(k==="mode"){
+    // Picking "a specific day" with nothing chosen starts on yesterday — the
+    // day you are most likely checking up on.
+    if(v==="day"&&!f.from)f.from=ymdShift(todayYmd(),-1);
+    if(v==="range"){ if(!f.from)f.from=ymdShift(todayYmd(),-7); if(!f.to)f.to=todayYmd(); }
+  }
+  if(k==="from"&&f.mode==="range"&&f.to&&v>f.to)f.to=v;     // keep the range the right way round
+  if(k==="to"&&f.mode==="range"&&f.from&&v<f.from)f.from=v;
+  saveClF(); render();
+}
+function stepClosedDay(n){const f=clF();if(f.mode!=="day"||!f.from)return;f.from=ymdShift(f.from,n);saveClF();render()}
+function closedBounds(){
+  const f=clF();
+  if(["30","90","365"].includes(f.mode))return [Date.now()-Number(f.mode)*864e5,Infinity];
+  if(f.mode==="day")return f.from?dayBounds(f.from):null;
+  if(f.mode==="range")return [f.from?dayBounds(f.from)[0]:0,f.to?dayBounds(f.to)[1]:Infinity];
+  return null;
+}
+function inClosedRange(t){const b=closedBounds();if(!b)return true;const c=closedAt(t);return c>=b[0]&&c<=b[1]}
+function fmtYmd(ymd,withYear){if(!ymd)return"";const [y,m,d]=ymd.split("-").map(Number);
+  return new Date(y,m-1,d).toLocaleDateString("en-US",{weekday:withYear?undefined:"short",month:"short",day:"numeric",...(withYear?{year:"numeric"}:{})})}
+function closedRangeLabel(){
+  const f=clF();
+  if(f.mode==="30")return"Last 30 days"; if(f.mode==="90")return"Last 90 days"; if(f.mode==="365")return"Last year";
+  if(f.mode==="day")return f.from?fmtYmd(f.from):"Pick a day";
+  if(f.mode==="range")return (f.from?fmtYmd(f.from):"Start")+" – "+(f.to?fmtYmd(f.to):"today");
+  return "All time";
+}
+/* Pull dates out of a search. Returns the days asked for and the rest of the
+   words, which are matched the normal way (store, issue, ticket #...). */
+const MONTHS=["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+function parseDateQuery(q){
+  let rest=" "+String(q||"").toLowerCase()+" ";
+  const days=[];
+  const mk=(y,m,d)=>{
+    if(!(m>=1&&m<=12&&d>=1&&d<=31))return null;
+    const nowD=new Date();
+    if(!y){y=nowD.getFullYear(); if(new Date(y,m-1,d)>nowD)y--;}     // "12/30" in January means last year
+    else if(y<100)y+=2000;
+    const dt=new Date(y,m-1,d); if(dt.getMonth()!==m-1)return null;
+    return ymdLocal(dt.getTime());
+  };
+  rest=rest.replace(/\s(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2}|\d{4}))?(?=\s)/g,(all,m,d,y)=>{
+    const v=mk(y?Number(y):0,Number(m),Number(d)); if(!v)return all; days.push(v); return " ";});
+  rest=rest.replace(/\s(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?(?:\s+(\d{4}))?(?=\s)/g,(all,mo,d,y)=>{
+    const v=mk(y?Number(y):0,MONTHS.indexOf(mo.slice(0,3))+1,Number(d)); if(!v)return all; days.push(v); return " ";});
+  return {days,rest:rest.replace(/\s+/g," ").trim()};
+}
+/* The one filter every closed list goes through: period (or dates typed in
+   the search), tech, and the remaining search words. */
+function filterClosed(rows,q){
+  const f=clF();
+  const {days,rest}=parseDateQuery(q||"");
+  let out=rows.filter(t=>t.status==="closed");
+  if(days.length){const set=new Set(days);out=out.filter(t=>set.has(ymdLocal(closedAt(t))));}
+  else out=out.filter(inClosedRange);
+  if(f.tech!=="all"&&SESSION.role!=="tech")out=out.filter(t=>techWorkedBy(t,f.tech));
+  if(rest)out=out.filter(t=>tkMatches(t,rest));
+  return out;
+}
+/* Techs who appear on these closed tickets — assigned, or moved one. */
+function closedTechOptions(rows){
+  const techs=MASTER.repairTechnicians||{};
+  return Object.keys(techs).filter(id=>rows.some(t=>t.status==="closed"&&techWorkedBy(t,id)))
+    .map(id=>[id,techs[id].name||"Tech"]).sort((a,b)=>a[1].localeCompare(b[1]));
+}
+/* The period / day / range pickers, plus the tech filter where it applies. */
+function closedFilterBar(rowsForTechs){
+  const f=clF();
+  const o=(v,l)=>`<option value="${v}"${f.mode===v?" selected":""}>${l}</option>`;
+  let h=`<select class="input cl-sel" title="Which closed tickets" onchange="setClF('mode',this.value)">
+    ${o("30","Last 30 days")}${o("90","Last 90 days")}${o("365","Last year")}${o("all","All time")}
+    ${o("day","A specific day…")}${o("range","Date range…")}</select>`;
+  const mx=todayYmd();
+  if(f.mode==="day")h+=`<div class="cl-day">
+      <button type="button" class="btn btn-ghost btn-sm" title="Day before" onclick="stepClosedDay(-1)">‹</button>
+      <input class="input cl-date" type="date" max="${mx}" value="${escA(f.from)}" onchange="setClF('from',this.value)" aria-label="Closed on">
+      <button type="button" class="btn btn-ghost btn-sm" title="Day after" ${f.from>=mx?"disabled":""} onclick="stepClosedDay(1)">›</button></div>`;
+  if(f.mode==="range")h+=`<div class="cl-day">
+      <input class="input cl-date" type="date" max="${mx}" value="${escA(f.from)}" onchange="setClF('from',this.value)" aria-label="From">
+      <span class="cl-to">to</span>
+      <input class="input cl-date" type="date" max="${mx}" value="${escA(f.to)}" onchange="setClF('to',this.value)" aria-label="To"></div>`;
+  if(SESSION.role!=="tech"&&rowsForTechs){
+    const opts=closedTechOptions(rowsForTechs);
+    if(f.tech!=="all"&&!opts.some(([id])=>id===f.tech)){const x=(MASTER.repairTechnicians||{})[f.tech];if(x)opts.unshift([f.tech,x.name])}
+    if(opts.length)h+=`<select class="input cl-sel" title="Worked by" onchange="setClF('tech',this.value)">
+      <option value="all"${f.tech==="all"?" selected":""}>All techs</option>
+      ${opts.map(([id,n])=>`<option value="${id}"${f.tech===id?" selected":""}>🔧 ${esc(n)}</option>`).join("")}</select>`;
+  }
+  return h;
+}
+/* Who closed it, from the timeline. */
+function closedBy(t){
+  const acts=Array.isArray(t.activity)?t.activity:[];
+  for(let i=acts.length-1;i>=0;i--){const a=acts[i];if(a&&a.toStatus==="closed")return a.by||"";}
+  return (t.closeNote&&t.closeNote.by)||"";
+}
+/* Rows with a heading for each day closed, so "what got closed on the 22nd"
+   is one glance. Expects rows already sorted newest close first. */
+function closedRowsGrouped(rows){
+  const byDay={};rows.forEach(t=>{const k=ymdLocal(closedAt(t));byDay[k]=(byDay[k]||0)+1});
+  let last="",h="";
+  rows.forEach(t=>{const k=ymdLocal(closedAt(t));
+    if(k!==last){last=k;h+=`<div class="cl-dayhead">${esc(fmtYmd(k,false))}${k.slice(0,4)!==String(new Date().getFullYear())?", "+k.slice(0,4):""}<span>${byDay[k]} closed</span></div>`;}
+    h+=ticketRow(t);});
+  return h;
 }
 /* Newest close first — the order you want when checking what got done. */
 function sortClosedNewest(rows){return rows.slice().sort((a,b)=>closedAt(b)-closedAt(a))}
@@ -3993,6 +4126,7 @@ function enterAppChrome(){
   document.body.classList.toggle("no-reftags",!SHOW_REF_TAGS);
 }
 function enterApp(){
+  CL_F=null;               // closed-view filters are per person
   enterAppChrome();
   loadSortPref();          // now that we know who this is
   if(SESSION.role==="tech" && (curFilter==="active"||curFilter==="all")) curFilter="dispatched";
@@ -4114,7 +4248,7 @@ function boardListHtml(rows,label){
     ? `<div class="cap-note">Showing the first ${shown.length} of ${rows.length}. ${curSearch?"Add another word to narrow it.":"Search, or pick a status, to narrow it."}</div>`
     : "";
   const body = rows.length
-    ? capNote+`<div class="rows">${shown.map(ticketRow).join("")}</div>`
+    ? capNote+`<div class="rows">${(curFilter==="closed"&&curSort==="priority")?closedRowsGrouped(shown):shown.map(ticketRow).join("")}</div>`
     : `<div class="empty"><div class="empty-mark">🗂️</div><h3>Nothing here</h3><p>${curSearch?"No tickets match your search.":"No tickets in this view."}</p></div>`;
   return listHead+body;
 }
@@ -4158,14 +4292,34 @@ function onSearchInput(el){
 function closedSectionHtml(list){
   if(!CLOSED_LOADED){
     return `<button class="btn btn-ghost btn-block" style="margin-top:24px" onclick="ensureClosedLoaded()">🗄️ Show closed tickets${SESSION.role==="admin"?"":" (read only)"}</button>
-      ${CLOSED_ERR?`<div style="font-size:12px;color:var(--ink-dim);margin-top:6px;text-align:center">${esc(CLOSED_ERR)} — tap to try again.</div>`:""}`;
+      ${CLOSED_ERR?`<div style="font-size:12px;color:var(--ink-dim);margin-top:6px;text-align:center">${esc(CLOSED_ERR)} \u2014 tap to try again.</div>`:""}`;
   }
-  const cl=sortClosedNewest(list.filter(t=>t.status==="closed"&&inClosedRange(t)));
-  return `<div class="section-label" style="margin-top:26px">Closed${SESSION.role==="admin"?"":" · read only"} · ${cl.length}<span class="ln"></span></div>
-    <div class="board-controls" style="margin-bottom:10px">${closedRangeSelect()}
+  _clSrc=list;
+  return `<div class="section-label" style="margin-top:26px">Closed${SESSION.role==="admin"?"":" \u00b7 read only"}<span class="ln"></span></div>
+    <div class="board-controls" style="margin-bottom:10px">${closedFilterBar(list)}
+      <input class="input search" type="search" inputmode="search" enterkeyhint="search"
+        autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"
+        placeholder="Search issue, ticket # or a date (10/22)\u2026" value="${escA(clF().q)}" oninput="onClosedSearch(this)">
       <button class="btn btn-ghost btn-sm" onclick="releaseClosed();render()">Hide</button></div>
-    ${cl.length?`<div class="rows">${cl.map(ticketRow).join("")}</div>`
-      :`<div class="empty" style="padding:26px 20px"><h3>Nothing closed</h3><p>No tickets closed here in this period.</p></div>`}`;
+    <div id="clZone">${closedZoneHtml()}</div>`;
+}
+/* The results half of a closed section — repainted on its own while typing,
+   so the search box (and a phone's keyboard) is never rebuilt. */
+let _clSrc=[], _clT=null;
+function closedZoneHtml(){
+  const f=clF();
+  const cl=sortClosedNewest(filterClosed(_clSrc,f.q.trim()));
+  const hint=parseDateQuery(f.q).days.length?"on that date":(f.q.trim()?"matching your search":"in this period");
+  const dq=parseDateQuery(f.q).days;
+  const lbl=dq.length?dq.map(d=>fmtYmd(d,true)).join(", "):closedRangeLabel();
+  return `<div class="list-head">${esc(lbl)} <span class="lh-n">(${cl.length})</span></div>`+
+    (cl.length?`<div class="rows">${closedRowsGrouped(cl.slice(0,ROW_CAP))}</div>`
+      :`<div class="empty" style="padding:26px 20px"><h3>Nothing closed</h3><p>No closed tickets ${hint}.</p></div>`);
+}
+function onClosedSearch(el){
+  clF().q=el.value;
+  clearTimeout(_clT);
+  _clT=setTimeout(()=>{const z=$("clZone");if(z){z.innerHTML=closedZoneHtml();applyTags()}},180);
 }
 function renderManagerHub(){
   const sid=SESSION.storeId, mine=ticketsForStore(sid);
@@ -4316,11 +4470,11 @@ function renderBoard(){
       <div class="board-controls">
         ${storeIds.length>1?storePicker({id:"boardStore",ids:storeIds,selected:curStore,
           allLabel:`All stores (${storeIds.length})`,onChange:"curStore=this.value;render()"}):""}
-        ${curFilter==="closed"?closedRangeSelect():""}
+        ${curFilter==="closed"?closedFilterBar(null):""}
         ${sortSelect()}
         <input class="input search" type="search" inputmode="search" enterkeyhint="search"
         autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"
-        placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="onSearchInput(this)">
+        placeholder="${curFilter==="closed"?"Search store, issue, ticket # or a date (10/22)…":"Search store, issue, ticket #…"}" value="${escA(curSearch)}" oninput="onSearchInput(this)">
       </div>
       ${(curFilter==="dispatched"&&curSort==="priority")?(TECH_LOC
         ? `<div class="loc-note ok">📍 Sorted nearest first from your location</div>`
@@ -4353,7 +4507,7 @@ function renderBoard(){
     const tlabel = curFilter==="finished" ? "Finished" : curFilter==="closed" ? "Closed (read only)" : "Dispatched";
     const tlistHead=`<div class="list-head">${tlabel} tickets <span class="lh-n">(${trows.length})</span></div>`;
     const tbody = trows.length
-      ? `<div class="rows">${trows.map(ticketRow).join("")}</div>`
+      ? `<div class="rows">${(curFilter==="closed"&&curSort==="priority")?closedRowsGrouped(trows):trows.map(ticketRow).join("")}</div>`
       : `<div class="empty"><div class="empty-mark">🗂️</div><h3>Nothing here</h3><p>${curSearch?"No tickets match your search.":"No tickets in this view."}</p></div>`;
     return techHead+tlistHead+tbody;
   }
@@ -4417,11 +4571,11 @@ function renderBoard(){
         allLabel:`All stores (${storeIds.length})`,onChange:"curStore=this.value;render()"}):""}
       ${(curFilter==="dispatched"||curFilter==="assigned")?assigneeFilterSelect(allTickets):""}
       ${SESSION.role==="admin"?categoryFilterSelect():""}
-      ${(curFilter==="closed"&&SESSION.role!=="admin")?closedRangeSelect():""}
+      ${curFilter==="closed"?closedFilterBar(allTickets):""}
       ${sortSelect()}
       <input class="input search" type="search" inputmode="search" enterkeyhint="search"
         autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"
-        placeholder="Search store, issue, ticket #…" value="${escA(curSearch)}" oninput="onSearchInput(this)">
+        placeholder="${curFilter==="closed"?"Search store, issue, ticket # or a date (10/22)…":"Search store, issue, ticket #…"}" value="${escA(curSearch)}" oninput="onSearchInput(this)">
     </div>`;
 
   if(!storeIds.length) return head+`<div class="empty"><div class="empty-mark">🏪</div><h3>No stores assigned to you</h3><p>Managed in the master.</p></div>`;
@@ -4602,13 +4756,13 @@ function applyFilterSearch(list){
     out=out.filter(t=>{const w=ticketAssignee(t);return w&&(w.kind+":"+w.id)===curAssignee});
   }
   if(curCategory!=="all")out=out.filter(t=>t.category===curCategory);
-  if(curSearch){const q=curSearch.trim().toLowerCase(); out=out.filter(t=>tkMatches(t,q))}
-  // Closed view for everyone but Overwatch: limited to the chosen period, and
-  // on the default sort, newest close first (priority means nothing once done).
-  if(curFilter==="closed"&&SESSION.role!=="admin"){
-    out=out.filter(inClosedRange);
-    if(curSort==="priority")return sortClosedNewest(out);
+  // Closed view (every role): period / day / range, tech, and date-aware
+  // search; on the default sort, newest close first, grouped by day.
+  if(curFilter==="closed"){
+    out=filterClosed(out,(curSearch||"").trim());
+    return curSort==="priority"?sortClosedNewest(out):sortRows(out);
   }
+  if(curSearch){const q=curSearch.trim().toLowerCase(); out=out.filter(t=>tkMatches(t,q))}
   return sortRows(out);
 }
 // dropdown of the distinct assignees present in the current status, to filter by
@@ -4825,7 +4979,9 @@ function ticketRow(t){
   const touched=lastTouchAt(t);
   const moved=touched-(t.createdAt||0)>120000;        // 2 min of slack for the write itself
   const fresh=moved && (now()-touched)<86400000;      // something happened today
-  const actChip=moved
+  const actChip=t.status==="closed"
+    ? `<span class="r-act" title="When it was closed">✓ closed ${esc(fmtYmd(ymdLocal(closedAt(t)),true))}${closedBy(t)?" by "+esc(closedBy(t)):""}${nCmt?` · 💬 ${nCmt}`:""}</span>`
+    : moved
     /* No leading separator: the meta row wraps on a phone and a lone "·"
        stranded at the end of the line above looks like a mistake. The chip is
        weighted differently, so it reads as its own thing without one. */
