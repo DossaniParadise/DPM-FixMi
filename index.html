@@ -1517,12 +1517,13 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.66";
+const APP_VERSION = "9.67";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
   admin:"Overwatch@76051", director:"DO@76051", coach:"DM@76051", tech:"Repair@76051",
   support:"76051",
+  viewer:"Grapevine@76051%",
   // manager: no shared password any more — each store's is COMPUTED from FindMi
   // by storePassword(). Add a store with an email there and its login works.
 };
@@ -1569,6 +1570,29 @@ function supportRecord(lc){
   if(SUPPORT_STAFF[lc])return{email:lc,name:SUPPORT_STAFF[lc]};
   return null;
 }
+/* ---- VIEWERS (v9.67) --------------------------------------------------------
+   Read-only oversight. Sees every store and every ticket, open and closed, and
+   every report — and can change nothing at all. No assigning, no status, no
+   closing, no editing, no new tickets, not even a comment. The point is an
+   account that cannot write to the database by any route, so it can be handed
+   to someone who needs the whole picture and no responsibility for it.
+
+   Resolved the same three ways Support is, so it can move into the data later
+   without touching this file: a `viewers` node on the master, an `admins` row
+   whose tier is "viewer", or this list. */
+const VIEWER_STAFF = {
+  "armaan@dossaniparadise.com":"Armaan",
+};
+function viewerRecord(lc){
+  const node=MASTER.viewers||{};
+  const hit=Object.values(node).find(p=>p&&(p.email||"").toLowerCase()===lc);
+  if(hit)return hit;
+  const tiered=Object.values(MASTER.admins||{}).find(a=>a&&(a.email||"").toLowerCase()===lc&&String(a.tier||"").toLowerCase()==="viewer");
+  if(tiered)return tiered;
+  if(VIEWER_STAFF[lc])return{email:lc,name:VIEWER_STAFF[lc]};
+  return null;
+}
+function isViewer(){return !!SESSION&&SESSION.role==="viewer"}
 const TICKETS_NODE = "maintenanceTickets";
 /* ---- EMAIL NOTIFICATIONS (v9.7) --------------------------------------------
    The Director, District Manager(s) and General Manager of a store are emailed
@@ -1810,8 +1834,8 @@ function vendorCatLabel(v){
 }
 const PRIORITIES = {normal:"Normal",urgent:"Urgent",emergency:"Emergency"};
 const WAITING_REASONS = ["Awaiting parts","Awaiting third-party tech","Awaiting approval","Awaiting access","Scheduled — future date","Other"];
-const ROLE_LABEL = {admin:"Overwatch",director:"Director",coach:"District Manager",manager:"Manager",tech:"Repair Tech",support:"Support",guest:"Vendor / guest",email:"via email"};
-const ROLE_PREFIX = {admin:"o",director:"d",coach:"a",tech:"r",manager:"m",support:"s"};
+const ROLE_LABEL = {admin:"Overwatch",director:"Director",coach:"District Manager",manager:"Manager",tech:"Repair Tech",support:"Support",viewer:"Viewer",guest:"Vendor / guest",email:"via email"};
+const ROLE_PREFIX = {admin:"o",director:"d",coach:"a",tech:"r",manager:"m",support:"s",viewer:"v"};
 
 /* ============================================================ STATE */
 let MASTER=null, SESSION=null;
@@ -1925,6 +1949,7 @@ async function refreshPaymiCount(){
 }
 
 function paymiBanner(){
+  if(isViewer())return"";                      // nothing for a viewer to approve
   if(!PAYMI_COUNT&&!PAYMI_COMMENTS)return"";   // nothing to say
   // Deep-link each line to the right place in PayMi. A bare link dropped you on
   // the home screen, where comments are invisible — they can sit on invoices
@@ -2059,7 +2084,7 @@ let coachScreen="hub";   // "hub" (store tiles) or a storeId (drilled into one s
    setting (admins/viewDefaults) that Overwatch can change; these are the
    fallbacks. Tech deliberately defaults to LIST because their list is already
    sorted by priority then distance. */
-const DEFAULT_VIEW_BY_ROLE={admin:"map",tech:"list",director:"tiles",coach:"tiles",manager:"tiles",support:"tiles"};
+const DEFAULT_VIEW_BY_ROLE={admin:"map",tech:"list",director:"tiles",coach:"tiles",manager:"tiles",support:"tiles",viewer:"tiles"};
 let VIEW_DEFAULTS={...DEFAULT_VIEW_BY_ROLE};
 let owView=null;                 // resolved on entry from the role default
 /* ---- connection checker (v9.12) --------------------------------------------
@@ -3363,7 +3388,11 @@ function checkAppVersion(){
     // I'm the newest FixMi build seen so far — publish (once per session).
     // This is also what heals a master whose record got ahead of what is
     // actually deployed, and what seeds the key the first time.
-    if(!_versionPublished){
+    /* A viewer account must not write to the master by ANY route, and this
+       was the one remaining write that fired on its own, with no button
+       behind it. A viewer sits out the publish; every other role still
+       heals the key. */
+    if(!_versionPublished && !isViewer()){
       _versionPublished=true;
       apiWrite("admins/"+APPMETA_KEY,{app:"fixmi",version:APP_VERSION,updatedAt:now()})
         .catch(()=>{_versionPublished=false;});
@@ -3689,6 +3718,14 @@ function resolveSession(email,pw){
   const admins=MASTER.admins||{};
   // Support first: an admins row tiered "support" must not fall into the
   // admin branch below and inherit Overwatch's powers.
+  /* Before the admins branch: a row tiered "viewer" must not fall through and
+     inherit Overwatch. Same trap Support already had. */
+  const vw=viewerRecord(lc);
+  if(vw){
+    /* A record may carry its own password; otherwise the role one. */
+    if(pw!==(vw.password||ROLE_PASSWORDS.viewer))return{error:"That password doesn't match the viewer role."};
+    return{email:lc,role:"viewer",name:vw.name||"Viewer",scope:"all"};
+  }
   const sup=supportRecord(lc);
   if(sup){
     if(pw!==ROLE_PASSWORDS.support)return{error:"That password doesn't match the support role."};
@@ -3842,7 +3879,7 @@ function myStoreIds(){
    users are unchanged: no closed archive.
    The archive is still downloaded lazily (only when someone opens a Closed
    view), so nobody's phone pulls it at sign-in. */
-function canSeeClosed(){return !!SESSION&&["admin","director","coach","manager","tech"].includes(SESSION.role)}
+function canSeeClosed(){return !!SESSION&&["admin","director","coach","manager","tech","viewer"].includes(SESSION.role)}
 function closedReadOnly(t){return !!t&&t.status==="closed"&&(!SESSION||SESSION.role!=="admin")}
 const CLOSED_RO_MSG="Closed tickets are read only — only Overwatch can change or reopen them.";
 /* A tech's closed tickets are the ones assigned to them PLUS any they actually
@@ -4102,7 +4139,8 @@ function eligibleTechsFor(t){
 const NO_TECH_COLOR="#94a3b8";
 
 /* ============================================================ PERMISSIONS */
-function canCreate(){return true}   // techs file tickets for issues they find on site
+function canCreate(){return !isViewer()}   // techs file tickets for issues they find on site; a viewer files none
+function canComment(){return !isViewer()}  // the one write everybody else has
 function canManageVendors(){return SESSION.role==="admin"}
 function canEditContent(){return ["admin","coach","director"].includes(SESSION.role);}
 function canAssign(){return SESSION.role==="admin"}
@@ -4401,10 +4439,10 @@ function renderCoachHub(){
         <div class="page-meta">${esc(SESSION.name)} · ${ids.length} store${ids.length===1?"":"s"} · ${totalOpen} open</div>
       </div>
     </div>
-    <button class="hub-btn accent" style="width:100%;margin-bottom:20px" onclick="openCreate()">
+    ${canCreate()?`<button class="hub-btn accent" style="width:100%;margin-bottom:20px" onclick="openCreate()">
       <div class="hb-ic">📝</div><div class="hb-t">New ticket</div>
       <div class="hb-d">Open a ticket for any of your stores.</div>
-    </button>
+    </button>`:""}
     ${invHubButton()}
     ${paymiBanner()}
     ${ids.length?`<div class="store-grid">${tiles}</div>`
@@ -4436,10 +4474,10 @@ function renderCoachStore(sid){
       ${coach?`<span><b>DM:</b> ${esc(coach.name)}</span>`:""}
       ${tech?`<span><b>Tech:</b> ${esc(tech.name)}</span>`:`<span style="color:var(--ink-dim)">No tech assigned</span>`}
     </div>
-    <button class="hub-btn accent" style="width:100%;margin-bottom:20px" onclick="openCreate('${sid}')">
+    ${canCreate()?`<button class="hub-btn accent" style="width:100%;margin-bottom:20px" onclick="openCreate('${sid}')">
       <div class="hb-ic">📝</div><div class="hb-t">New ticket for this store</div>
       <div class="hb-d">Open a ticket for ${esc(storeName(sid))}.</div>
-    </button>
+    </button>`:""}
     <div class="board-controls" style="margin-bottom:10px">${sortSelect()}</div>
     <div class="section-label" style="margin-top:0">Open tickets · ${open.length}<span class="ln"></span></div>
     ${openCards}
@@ -4685,7 +4723,7 @@ function releaseClosed(){
 let CLOSED_ERR=null;        // last closed-fetch failure message (job-costs panel shows it)
 /* Admins see the whole company; directors and district managers
    get the same report scoped to their own stores. */
-function canSeeClosedReport(){return ["admin","director","coach"].includes(SESSION.role)}
+function canSeeClosedReport(){return ["admin","director","coach","viewer"].includes(SESSION.role)}
 async function ensureClosedLoaded(force){
   if(!canSeeClosed()) return false;
   if(!force && CLOSED_LOADED && (Date.now()-CLOSED_FETCHED_AT)<CLOSED_TTL_MS) return true;
@@ -5567,6 +5605,7 @@ function msToggle(sid,on){ if(on)MS_SEL.add(sid); else MS_SEL.delete(sid); const
 function msAll(on){ msShown().forEach(sid=>on?MS_SEL.add(sid):MS_SEL.delete(sid)); renderMultiStore(); }
 
 async function submitTicket(){
+  if(!canCreate()){toast("Your account is view only.","err");return}
   const sid=$("cStore").value, desc=$("cDesc").value.trim();
   if(!desc){toast("Add a short description","err");return}
   if(!sid&&!(canBroadcast()&&$("cMulti")&&$("cMulti").checked)){toast("Pick a store","err");return}
@@ -6263,7 +6302,7 @@ function openTicket(id,ret){
       ${ticketControls(t)}
       <div class="section-label">Comments<span class="ln"></span></div>
       <div class="comments" id="commentList">${renderComments(t)}</div>
-      ${closedReadOnly(t)?"":`<div class="comment-add">
+      ${(closedReadOnly(t)||!canComment())?"":`<div class="comment-add">
         <textarea class="input" id="cmtInput" placeholder="Add a comment…" style="min-height:64px"></textarea>
         <input type="file" id="cmtFile" accept="image/*" multiple style="display:none" onchange="addCommentPhotos(this)">
         <div class="preview-strip" id="cmtPreview" style="margin-top:0;display:none"></div>
@@ -6424,6 +6463,7 @@ function renderCmtPreview(){
   applyTags();
 }
 async function addComment(id){
+  if(!canComment()){toast("Your account is view only.","err");return}
   if(roBlocked(id))return;
   const inp=$("cmtInput");if(!inp)return;
   const text=inp.value.trim();
@@ -6452,6 +6492,12 @@ async function addComment(id){
 function hasStoreAccess(){return ["manager","coach","director","admin"].includes(SESSION.role)}
 function ticketControls(t){
   let h="";const role=SESSION.role, isClosed=t.status==="closed";
+
+  /* VIEWER: deliberately no controls of any kind — not even a comment box.
+     Says so plainly, so nobody wastes time hunting for a button that was
+     never rendered. */
+  if(role==="viewer")
+    return `<div class="section-label">View only<span class="ln"></span></div><div style="color:var(--ink-dim);font-size:13px">Your account can read every ticket, open and closed, and both reports. It cannot change anything — no comments, no dispatching, no status changes.</div>`;
 
   // ADMIN: full assign + status grid + edit + reopen
   if(role==="admin"){
