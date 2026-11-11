@@ -990,7 +990,20 @@ html[data-theme="dark"] .leaflet-tooltip-top:before{border-top-color:var(--panel
 .cr-tix-store{font-weight:700;font-size:12.5px}
 .cr-tix-when{font-size:11px;color:var(--ink-dim);margin-left:auto}
 .cr-tix-desc{font-size:13.5px;color:var(--ink);line-height:1.45;overflow-wrap:anywhere}
-.cr-tix-meta{font-size:10.5px;color:var(--ink-dim);margin-top:4px}
+.cr-tix-meta{font-size:10.5px;color:var(--ink-dim);margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cr-recat{font-family:var(--sans,inherit);font-size:11px;font-weight:600;color:var(--amber-deep);background:none;
+  border:1px solid var(--line);border-radius:99px;padding:3px 9px;cursor:pointer;margin-left:auto}
+.cr-recat:hover{border-color:var(--amber-deep)}
+.cr-recat-box{margin-top:8px;padding:10px;border:1px dashed var(--line);border-radius:8px;background:var(--panel);
+  display:flex;flex-direction:column;gap:8px}
+.cr-recat-box .input{font-size:14px}
+.cr-recat-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.cr-recat-hint{font-size:11px;color:var(--ink-dim);flex:1;min-width:120px}
+.cr-tix-st{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:99px;padding:2px 7px;color:var(--ink-mid)}
+.cr-row.cr-tech{grid-template-columns:120px 1fr 64px}
+.cr-row.cr-tech .cr-n{text-align:right;white-space:nowrap}
+.cr-row.cr-tech .cr-n i{font-style:normal;font-weight:500;color:var(--ink-dim)}
 .cr-tix-note{font-size:12px;color:var(--ink-mid);font-style:italic;margin-top:6px;
   border-left:3px solid var(--line);padding-left:8px;overflow-wrap:anywhere}
 .cr-click{width:100%;text-align:left;background:none;border:none;padding:0;cursor:pointer}
@@ -1517,7 +1530,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.69";
+const APP_VERSION = "9.70";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -8902,11 +8915,11 @@ function closedAt(t){
   return t.updatedAt||t.finishedAt||t.createdAt||0;
 }
 async function openClosedReport(days){
-  if(days){CR_DAYS=days;CR_PATH=[];CR_LIST=false;CR_CLUSTER=null;}
+  if(days){CR_DAYS=days;CR_PATH=[];CR_LIST=false;CR_CLUSTER=null;CR_RECAT=null;}
   await ensureClosedLoaded();      // closed tickets aren't in the default payload
   renderClosedReport();
 }
-function crSetMode(m){CR_MODE=m;CR_LIST=false;CR_CLUSTER=null;renderClosedReport()}
+function crSetMode(m){CR_MODE=m;CR_LIST=false;CR_CLUSTER=null;CR_RECAT=null;renderClosedReport()}
 /* Reading the tickets behind one repeat. Held as a list of ids rather than a
    filter, because a cluster is not a category — it is a specific set. */
 function crOpenCluster(kind,i){
@@ -8918,17 +8931,30 @@ function crOpenCluster(kind,i){
 }
 function crCloseCluster(){CR_CLUSTER=null;renderClosedReport()}
 function crDrill(dim,key){CR_PATH.push({dim,key,label:crLabel(dim,key)});CR_LIST=false;renderClosedReport()}
-function crBack(){ if(CR_CLUSTER){CR_CLUSTER=null;} else if(CR_LIST){CR_LIST=false;} else {CR_PATH.pop();} renderClosedReport(); }
+function crBack(){ CR_RECAT=null; if(CR_CLUSTER){CR_CLUSTER=null;} else if(CR_LIST){CR_LIST=false;} else {CR_PATH.pop();} renderClosedReport(); }
 function crShowList(){CR_LIST=true;renderClosedReport()}
 
 function crKey(t,dim){
   if(dim==="cat")   return t.category||"__none";
   if(dim==="store") return t.storeId||"__none";
+  if(dim==="tech")  return t.assignedTechId||"__none";
   return t.subcategory||"__nosub";
 }
+/* When a ticket became its CURRENT technician's. Dispatching stamps
+   dispatchedAt (and re-stamps it on a hand-over); imports and older records
+   fall back to the last assignment in the trail, then to when it was raised. */
+function techAssignedAt(t){
+  if(Number(t.dispatchedAt))return Number(t.dispatchedAt);
+  const acts=arr_(t.activity);
+  for(let i=acts.length-1;i>=0;i--){const a=acts[i];
+    if(a&&a.ts&&(a.action==="assign"||a.toStatus==="dispatched"))return a.ts;}
+  return Number(t.createdAt)||0;
+}
+function crTechFilter(){return CR_PATH.find(f=>f.dim==="tech")||null}
 function crLabel(dim,key){
   if(dim==="cat")   return key==="__none"?"Uncategorised":(ALL_CATEGORIES[key]||key);
   if(dim==="store") return key==="__none"?"Unknown store":storeName(key);
+  if(dim==="tech")  return key==="__none"?"Nobody assigned":(techName(key)||"Tech (removed)");
   if(key==="__nosub")return "(no item set)";
   const parent=(SUBCATEGORIES[key]||{}).parent;
   return (subLabel(key)||key)+(parent?` · ${ALL_CATEGORIES[parent]||parent}`:"");
@@ -8946,10 +8972,42 @@ function crRows(){
    This is the denominator: closed is measured against what actually came in. */
 function crOpenedRows(){
   const since=now()-CR_DAYS*86400000;
+  /* For a technician the fair comparison is not what was RAISED in the window
+     but what was put on THEM in it — a job raised in March and handed over
+     last week is last week's work. */
+  const byTech=!!crTechFilter();
   return Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]})).filter(t=>{
-    if((t.createdAt||0)<since)return false;
+    if((byTech?techAssignedAt(t):(t.createdAt||0))<since)return false;
     return CR_PATH.every(f=>crKey(t,f.dim)===f.key);
   });
+}
+/* ---- BY TECHNICIAN: what each one was given vs what they closed -----------
+   Counted for whoever holds the ticket NOW. A job handed from one tech to
+   another belongs to the second — the first neither has it nor closed it. */
+function crTechStats(){
+  const since=now()-CR_DAYS*86400000;
+  const by={};
+  const slot=id=>(by[id]=by[id]||{key:id,label:techName(id)||"Tech (removed)",closed:0,assigned:0,open:0});
+  Object.keys(MASTER.repairTechnicians||{}).forEach(slot);     // a zero is information too
+  Object.keys(TICKETS).forEach(k=>{
+    const t=TICKETS[k]; if(!t||!t.assignedTechId)return;
+    const g=slot(t.assignedTechId);
+    if(t.status==="closed"&&closedAt(t)>=since)g.closed++;
+    if(techAssignedAt(t)>=since){g.assigned++; if(t.status!=="closed")g.open++;}
+  });
+  return Object.values(by).sort((a,b)=>b.closed-a.closed||b.assigned-a.assigned||a.label.localeCompare(b.label));
+}
+function crTechPanel(){
+  const list=crTechStats();
+  if(!list.length)return `<div class="rp-empty" style="padding:14px">No in-house technicians in the directory.</div>`;
+  const max=Math.max(1,...list.map(g=>Math.max(g.closed,g.assigned)));
+  return `<p class="cr-hint">Closed <b>/</b> assigned to them in the last ${CR_DAYS} days. A ticket counts for whoever holds it now. Tap a name to read their tickets.</p>
+    <div class="cr-chart">${list.map(g=>{
+      const w=g.closed?Math.max(2,Math.round(g.closed/max*100)):0;
+      return `<button class="cr-row cr-tech cr-click" onclick="crDrill('tech','${escA(g.key)}')">
+        <div class="cr-label">${esc(g.label)}</div>
+        <div class="cr-track"><div class="cr-bar" style="width:${w}%"></div></div>
+        <div class="cr-n">${g.closed} <i>/ ${g.assigned}</i></div></button>`;}).join("")}</div>`;
 }
 /* ================================================== REPEATS AND TRENDS
    Counting by category tells you where the volume is. It does not tell you
@@ -9282,20 +9340,111 @@ function crBars(list,dim,clickable){
    tell you nothing, so this is where you read what actually happened. */
 function crTicketList(rows){
   if(!rows.length)return `<div class="rp-empty">No tickets here.</div>`;
-  const sorted=rows.slice().sort((a,b)=>closedAt(b)-closedAt(a));
-  return `<div class="cr-tix">${sorted.map(t=>{
-    const note=(t.closeNote&&t.closeNote.text)?t.closeNote.text:"";
-    const pri=t.priority==="emergency"?"e":(t.priority==="urgent"?"u":"");
-    return `<div class="cr-tix-row">
+  const when=t=>t.status==="closed"?closedAt(t):techAssignedAt(t);
+  const sorted=rows.slice().sort((a,b)=>when(b)-when(a));
+  return `<div class="cr-tix">${sorted.map(crTixRow).join("")}</div>`;
+}
+/* ---- change a ticket's category from the list it is being read in ---------
+   Reading the closed list is where a wrong category gets noticed, so that is
+   where it gets fixed: tap, pick, done. It writes the ticket itself — the same
+   two fields the edit sheet writes — so every list, search, report and email
+   reads the new category from then on. The ticket NUMBER does not change: it
+   is the handle people have already been sent, and re-issuing it would break
+   every link and email that quotes it.
+   Closed tickets stay Overwatch-only, as everywhere else. */
+let CR_RECAT=null;       // id of the row whose category picker is open
+function crCanRecat(t){
+  if(!t||!SESSION)return false;
+  if(SESSION.role==="admin")return true;
+  return t.status!=="closed"&&canEditContent();
+}
+function crTixRow(t){
+  const note=(t.closeNote&&t.closeNote.text)?t.closeNote.text:"";
+  const pri=t.priority==="emergency"?"e":(t.priority==="urgent"?"u":"");
+  const closed=t.status==="closed";
+  const id=t._id, editing=CR_RECAT===id;
+  return `<div class="cr-tix-row" id="crt_${escA(id)}">
       <div class="cr-tix-top">
         <span class="cr-tix-store">${esc(storeName(t.storeId))}</span>
         <span class="r-pri ${pri}">${esc(PRIORITIES[t.priority]||"Normal")}</span>
-        <span class="cr-tix-when mono">${esc(fmtDateShort(closedAt(t)))}</span>
+        ${closed?"":`<span class="cr-tix-st">${esc((STATUSES[t.status]||{}).label||t.status||"")}</span>`}
+        <span class="cr-tix-when mono">${esc(fmtDateShort(closed?closedAt(t):techAssignedAt(t)))}</span>
       </div>
       <div class="cr-tix-desc">${esc(t.description||"(no description)")}</div>
-      <div class="cr-tix-meta mono">${esc(t.shortId||"")} · ${esc(catPath(t))}</div>
+      <div class="cr-tix-meta mono"><span>${esc(t.shortId||"")} · ${esc(catPath(t))}</span>
+        ${crCanRecat(t)&&!editing?`<button type="button" class="cr-recat" onclick="crRecatOpen('${escA(id)}')">✎ Change category</button>`:""}</div>
+      ${editing?crRecatBox(t):""}
       ${note?`<div class="cr-tix-note">“${esc(note)}”</div>`:""}
-    </div>`;}).join("")}</div>`;
+    </div>`;
+}
+function crRecatBox(t,pickedCat){
+  const tree=catsForStore(t.storeId);
+  const cur=pickedCat||t.category||"";
+  const known=tree.some(c=>c.key===cur);
+  const catOpts=(known?"":`<option value="" selected disabled>${esc(ALL_CATEGORIES[cur]||cur||"No category")} (current)</option>`)
+    +tree.map(c=>`<option value="${escA(c.key)}"${c.key===cur?" selected":""}>${esc(c.label)}</option>`).join("");
+  const subs=((tree.find(c=>c.key===cur)||{}).subs)||[];
+  const curSub=(cur===t.category)?(t.subcategory||""):"";
+  const subSel=subs.length?`<select class="input" id="crRecatSub" onchange="crRecatSave()">
+      <option value=""${curSub?"":" selected"}>— which item? —</option>
+      ${subs.map(x=>`<option value="${escA(x.key)}"${x.key===curSub?" selected":""}>${esc(x.label)}</option>`).join("")}
+    </select>`:"";
+  return `<div class="cr-recat-box" onclick="event.stopPropagation()">
+      <select class="input" id="crRecatCat" onchange="crRecatPick()">${catOpts}</select>
+      ${subSel}
+      <div class="cr-recat-foot">
+        <span class="cr-recat-hint">${subs.length?"Pick the item and it saves.":"Pick a category and it saves."}</span>
+        ${subs.length&&cur!==t.category?`<button type="button" class="btn btn-ghost btn-sm" onclick="crRecatSave(true)">Save without an item</button>`:""}
+        <button type="button" class="btn btn-ghost btn-sm" onclick="crRecatCancel()">Cancel</button>
+      </div>
+    </div>`;
+}
+function crRecatTicket(id){const t=TICKETS[id]||CLOSED_TICKETS[id];return t?{...t,_id:id}:null}
+/* Repaint one row in place — re-rendering the whole sheet would throw the
+   reader back to the top of a long list. */
+function crRowRepaint(id){
+  const el=document.getElementById("crt_"+id), t=crRecatTicket(id);
+  if(el&&t)el.outerHTML=crTixRow(t);
+}
+function crRecatOpen(id){
+  const prev=CR_RECAT; CR_RECAT=id;
+  if(prev&&prev!==id)crRowRepaint(prev);       // one picker at a time
+  crRowRepaint(id);
+  const sel=$("crRecatCat"); if(sel)sel.focus();
+}
+function crRecatCancel(){const id=CR_RECAT; CR_RECAT=null; if(id)crRowRepaint(id)}
+/* A category with no items saves the moment it is picked. One with items
+   shows them first — the item is the more useful half of the answer. */
+function crRecatPick(){
+  const id=CR_RECAT, t=crRecatTicket(id), sel=$("crRecatCat"); if(!t||!sel)return;
+  const cat=sel.value; if(!cat)return;
+  const subs=((catsForStore(t.storeId).find(c=>c.key===cat)||{}).subs)||[];
+  if(!subs.length){crRecatSave();return}
+  const box=sel.closest(".cr-recat-box");
+  if(box){box.outerHTML=crRecatBox(t,cat); const s2=$("crRecatSub"); if(s2)s2.focus();}
+}
+async function crRecatSave(noItem){
+  const id=CR_RECAT, t=crRecatTicket(id), sel=$("crRecatCat"); if(!t||!sel)return;
+  const cat=sel.value; if(!cat)return;
+  const subEl=$("crRecatSub");
+  const sub=noItem?"":((subEl&&subEl.value)||"");
+  if(subEl&&!sub&&!noItem)return;                       // still on "which item?"
+  if(cat===(t.category||"")&&sub===(t.subcategory||"")){crRecatCancel();return}
+  if(!TICKETS[id]){toast("That ticket isn't loaded — reopen the report","err");return}
+  const from=catPath(t), to=catPath({category:cat,subcategory:sub});
+  /* Which element scrolls depends on the sheet: the sheet itself normally,
+     its body in the tall layout. Remember both rather than guess. */
+  const scrollers=()=>[...document.querySelectorAll("#modalOverlay .sheet, #modalOverlay .sheet-body")];
+  const tops=scrollers().map(e=>e.scrollTop);
+  CR_RECAT=null;
+  if(await patchTicket(id,{category:cat,subcategory:sub},{action:"edit",note:"Category: "+from+" → "+to})){
+    toast((t.shortId||"Ticket")+" → "+to);
+    /* The counts and bars above the list just changed, and under a category
+       drill the ticket no longer belongs here at all — so redraw, but put the
+       reader back where they were. */
+    renderClosedReport();
+    scrollers().forEach((e,i)=>{e.scrollTop=tops[i]||0});
+  }else{CR_RECAT=id;crRowRepaint(id)}
 }
 
 function renderClosedReport(){
@@ -9320,7 +9469,7 @@ function renderClosedReport(){
     heroSub=`${crumb?`in <b>${crumb}</b><br>`:""}<span class="mono">last ${CR_DAYS} days · ${esc(from)} – ${esc(to)}</span>`;
     body=`<div class="section-label" style="margin-top:16px">Tickets<span class="ln"></span></div>${crTicketList(rows)}`;
   }else if(CR_PATH.length){
-    heroSub=`closed / raised in <b>${crumb}</b><br><span class="mono">last ${CR_DAYS} days · ${esc(from)} – ${esc(to)}</span>`;
+    heroSub=`closed / ${crTechFilter()?"assigned to":"raised in"} <b>${crumb}</b><br><span class="mono">last ${CR_DAYS} days · ${esc(from)} – ${esc(to)}</span>`;
     const used=new Set(CR_PATH.map(f=>f.dim));
     const rest=[["cat","By category"],["store","By store"],["item","By item"]].filter(([d])=>!used.has(d));
     body=rest.map(([d,t])=>{
@@ -9329,9 +9478,15 @@ function renderClosedReport(){
       if(list.length<2)return "";
       return `<div class="section-label" style="margin-top:16px">${t}<span class="ln"></span></div>${crBars(list,d,true)}`;
     }).join("")
-    + `<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="crShowList()">📋 Read these ${total} ticket${total===1?"":"s"}</button>`;
+    + (crTechFilter()
+        /* A technician's page is the two lists side by side in meaning: what
+           they closed, and what they were given that is still open. */
+        ? (()=>{const mine=crOpenedRows().filter(t=>t.status!=="closed");
+            return `<div class="section-label" style="margin-top:16px">Closed in this window · ${total}<span class="ln"></span></div>${crTicketList(rows)}
+              <div class="section-label" style="margin-top:18px">Assigned in this window, still open · ${mine.length}<span class="ln"></span></div>${crTicketList(mine)}`})()
+        : `<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="crShowList()">📋 Read these ${total} ticket${total===1?"":"s"}</button>`);
   }else{
-    const modes=[["cat","Category"],["store","Store"],["item","Item"],["trend","Repeats"],["speed","Speed"]];
+    const modes=[["cat","Category"],["store","Store"],["item","Item"],["tech","Technician"],["trend","Repeats"],["speed","Speed"]];
     const tabs=modes.map(([k,l])=>`<button class="ce-tab${CR_MODE===k?" on":""}" onclick="crSetMode('${k}')">${l}</button>`).join("");
     const list=crGroup(rows,CR_MODE), top=list[0];
     heroSub=`closed / raised in the last ${CR_DAYS} days<br><span class="mono">${esc(from)} – ${esc(to)}</span>`;
@@ -9339,6 +9494,8 @@ function renderClosedReport(){
       body=`<div class="ce-tabs" style="margin-bottom:6px">${tabs}</div>${crTrendPanel(rows)}`;
     }else if(CR_MODE==="speed"){
       body=`<div class="ce-tabs" style="margin-bottom:6px">${tabs}</div>${crSpeedPanel()}`;
+    }else if(CR_MODE==="tech"){
+      body=`<div class="ce-tabs" style="margin-top:16px">${tabs}</div>${crTechPanel()}`;
     }else{
     const hint=CR_MODE==="item"
       ? `<p class="cr-hint">Items repeating across the window are your persistent problems.</p>`
@@ -9374,16 +9531,16 @@ function renderClosedReport(){
       </div>
       <div class="cr-ratio">
         <div class="cr-ratio-bar"><div class="cr-ratio-fill" style="width:${pct}%"></div></div>
-        <div class="cr-ratio-txt">${opened?`<b>${pct}%</b> of the ${opened} raised ${CR_PATH.length?"here ":""}in this window ${closedMore?"— and older work cleared too":"are closed"}`
-          :`No tickets were raised in this window`}</div>
+        <div class="cr-ratio-txt">${opened?`<b>${pct}%</b> of the ${opened} ${crTechFilter()?"assigned to them":"raised "+(CR_PATH.length?"here ":"")}in this window ${closedMore?"— and older work cleared too":"are closed"}`
+          :(crTechFilter()?`Nothing was assigned to them in this window`:`No tickets were raised in this window`)}</div>
       </div>
       <div class="imp-summary" style="margin:14px 0 4px">
-        <div class="rp-stat"><div class="rp-n">${opened}</div><div class="rp-l">raised</div></div>
+        <div class="rp-stat"><div class="rp-n">${opened}</div><div class="rp-l">${crTechFilter()?"assigned":"raised"}</div></div>
         <div class="rp-stat"><div class="rp-n">${stillOpen}</div><div class="rp-l">still open</div></div>
         <div class="rp-stat"><div class="rp-n">${emerg}</div><div class="rp-l">emergencies</div></div>
         <div class="rp-stat"><div class="rp-n">${medDays}</div><div class="rp-l">median days</div></div>
       </div>
-      ${total?body:`<div class="rp-empty">No tickets were closed in this window.</div>`}
+      ${(total||crTechFilter()||(CR_MODE==="tech"&&!CR_PATH.length&&!CR_LIST&&!CR_CLUSTER))?body:`<div class="rp-empty">No tickets were closed in this window.</div>`}
     </div>
     <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="closeModal()">Done</button></div>`);
 }
