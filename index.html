@@ -1517,7 +1517,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.68";
+const APP_VERSION = "9.69";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -4947,6 +4947,7 @@ function ticketRow(t){
         <option value="">Assign to…</option>
         <optgroup label="In-house tech for this store">${techOpt}</optgroup>
         ${coachOpt?`<optgroup label="District Manager for this store">${coachOpt}</optgroup>`:""}
+        ${gmAssignOption(t)}
         ${match.length?`<optgroup label="Vendors — ${esc(catLabel)}">${match.map(vOpt).join("")}</optgroup>`:""}
         ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
         <option value="__add__">＋ Add new vendor…</option>
@@ -5173,6 +5174,8 @@ async function rowAssign(id){
   }else if(val.startsWith("coach:")){
     // Straight to the instructions sheet; the row dropdown resets itself.
     sel.value=""; promptAssignCoach(id,val.slice(6)); return;
+  }else if(val.startsWith("manager:")){
+    sel.value=""; promptAssignManager(id); return;
   }else{toast("Pick a person to assign to","err");return}
   if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status}))toast((patch.status==="dispatched"?"Dispatched · ":"Assigned · ")+note);
 }
@@ -5938,6 +5941,8 @@ function lastAssignEvent(t){
 function currentAssigneeName(t){
   if(t.assignedTechId){const x=(MASTER.repairTechnicians||{})[t.assignedTechId];return x?x.name:"a technician"}
   if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];return v?v.name:"a third-party tech"}
+  if(t.assignedCoachId){const c=(MASTER.areaCoaches||{})[t.assignedCoachId];return c?c.name:"a District Manager"}
+  if(t.assignedManagerStoreId)return storeGmLabel(t.assignedManagerStoreId);
   return null;
 }
 /* Changing someone else's routing decision is confirmed, never silent. */
