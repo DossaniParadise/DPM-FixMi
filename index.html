@@ -1517,7 +1517,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.67";
+const APP_VERSION = "9.68";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -1620,6 +1620,14 @@ function assigneeLabelFor(t){
   if(t.assignedTechId){const n=techName(t.assignedTechId);return n?("🔧 "+n+" (in-house)"):"Tech (removed)"}
   if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];return v?("🏢 "+v.name):"Vendor (removed)"}
   if(t.assignedCoachId){const c=(MASTER.areaCoaches||{})[t.assignedCoachId];return c?("👤 "+c.name+" (District Manager)"):"District Manager (removed)"}
+  /* The suffix is what the notifier's plainAssignee() leaves in place, so it
+     has to read as a sentence in an email too: "assigned to Marco Diaz
+     (General Manager)." and "assigned to Store Leadership." Naming the role
+     after "Store Leadership" would just stutter. */
+  if(t.assignedManagerStoreId){
+    const g=storeGmRecord(t.assignedManagerStoreId);
+    return "🏪 "+(g.named?g.name+" (General Manager)":GM_FALLBACK_LABEL);
+  }
   return "";
 }
 function notifyTicket(event,id,ticket,extra){
@@ -1641,6 +1649,7 @@ function notifyTicket(event,id,ticket,extra){
              master: that copy can be up to a minute stale, and an assignment
              made two seconds ago is exactly what this email is about. */
           assignedCoachId:ticket.assignedCoachId,
+          assignedManagerStoreId:ticket.assignedManagerStoreId,
           assigneeLabel:assigneeLabelFor(ticket),
           closeNote:ticket.closeNote, assignNote:ticket.assignNote, waitingReason:ticket.waitingReason,
         },
@@ -3592,6 +3601,23 @@ function storeManagerFirst(rid){
   const n=storeManagerName(rid);
   return n.trim().split(/\s+/)[0]||"";
 }
+/* A job can be handed to the store's own GM — "you deal with this one". The
+   store is the anchor, never a frozen name: FindMi's manager list changes and
+   a ticket filed last month must still point at whoever runs that store today.
+   Plenty of stores have nobody listed, and the job still has to go somewhere,
+   so those read as Store Leadership — the shift lead, whoever that is this
+   week — rather than a blank. */
+const GM_FALLBACK_LABEL="Store Leadership";
+function storeGmLabel(rid){return storeManagerName(rid)||GM_FALLBACK_LABEL}
+function storeGmRecord(rid){
+  const l=storeManagers(rid);
+  const gm=l.find(m=>(m.title||"").toUpperCase()==="GM")||l[0]||null;
+  const s=store(rid)||{};
+  return {name:(gm&&gm.name)||GM_FALLBACK_LABEL,
+          email:(gm&&gm.email)||s.email||"",      // the store mailbox is the GM's login
+          phone:(gm&&gm.phone)||s.managerCell||"",
+          named:!!(gm&&gm.name)};
+}
 /* ---- GPS link for a store. Coordinates are most precise; if a store has none
    (a handful don't), fall back to its street address, then its name. Returns a
    universal maps URL that opens the native maps/GPS app on phones (Google Maps
@@ -4782,7 +4808,7 @@ function ticketHaystack(t){
     who?who.name:"",who?who.email:"",
     /* Raw ids too: when a directory record has gone, the id is the only handle
        left on the job. */
-    t.assignedTechId,t.assignedVendorId,t.assignedCoachId,
+    t.assignedTechId,t.assignedVendorId,t.assignedCoachId,t.assignedManagerStoreId,
     t.waitingReason,(t.closeNote||{}).text,(t.assignNote||{}).text,
     ...arr_(t.comments).map(c=>[c&&c.by,c&&c.text].filter(Boolean).join(" ")),
     sh.text].filter(Boolean).join(" ").toLowerCase();
@@ -4873,6 +4899,13 @@ function ticketAssignee(t){
   if(t.assignedCoachId){const x=(MASTER.areaCoaches||{})[t.assignedCoachId];
     return x?{kind:"coach",id:t.assignedCoachId,name:x.name,email:x.email||"",phone:x.phone||""}
             :gone("coach",t.assignedCoachId,"District Manager (removed)")}
+  /* The store's own GM. Resolved from the store every time it is read, so it
+     is never stale and never "(removed)" — a store always exists, even when
+     nobody is listed as running it. */
+  if(t.assignedManagerStoreId){
+    const sid=t.assignedManagerStoreId, g=storeGmRecord(sid);
+    return {kind:"manager",id:sid,name:g.name,email:g.email,phone:g.phone,unnamed:!g.named};
+  }
   return null;
 }
 // elapsed since a timestamp as "Xh Ym" (no seconds)
@@ -5132,11 +5165,11 @@ async function rowAssign(id){
     // In-house techs see dispatched jobs in their own app, so there is nobody to
     // phone first — skip "assigned" and dispatch immediately. Vendors still go
     // to "assigned" because someone has to actually contact them.
-    patch={assignedTechId:tid,assignedVendorId:null,assignedCoachId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
+    patch={assignedTechId:tid,assignedVendorId:null,assignedCoachId:null,assignedManagerStoreId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
   }else if(val.startsWith("vendor:")){
     const vid=val.slice(7); const v=VENDORS[vid];
     if(!v){toast("That vendor no longer exists — left unassigned","err");return}
-    patch={assignedVendorId:vid,assignedTechId:null,assignedCoachId:null,status:"assigned"};note="🏢 "+v.name;
+    patch={assignedVendorId:vid,assignedTechId:null,assignedCoachId:null,assignedManagerStoreId:null,status:"assigned"};note="🏢 "+v.name;
   }else if(val.startsWith("coach:")){
     // Straight to the instructions sheet; the row dropdown resets itself.
     sel.value=""; promptAssignCoach(id,val.slice(6)); return;
@@ -5152,7 +5185,7 @@ async function confirmContact(id){
     toast("Dispatched");
 }
 async function rowUnassign(id){
-  if(await patchTicket(id,{status:"unassigned",assignedTechId:null,assignedVendorId:null,assignedCoachId:null},{action:"assign",note:"unassigned (pool)",toStatus:"unassigned"}))
+  if(await patchTicket(id,{status:"unassigned",assignedTechId:null,assignedVendorId:null,assignedCoachId:null,assignedManagerStoreId:null},{action:"assign",note:"unassigned (pool)",toStatus:"unassigned"}))
     toast("Back to unassigned");
 }
 
@@ -5317,7 +5350,7 @@ function openCreate(preStore){
         <input type="checkbox" id="cMine" checked>
         <span>Assign this job to me<br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Untick to leave it for dispatch to route.</span></span></label>`:""}
       <div class="field" id="cSubWrap" style="margin-top:14px;display:none">
-        <label class="label">Subcategory <span style="font-weight:400;color:var(--ink-dim)">(required)</span></label>
+        <label class="label">Subcategory <span id="cSubReq" style="font-weight:400;color:var(--ink-dim)">(required)</span></label>
         <select class="input" id="cSub"></select></div>
       <div class="field" style="margin-top:14px"><label class="label">What's the issue?</label>
         <textarea class="input" id="cDesc" placeholder="Describe the problem and location." oninput="dupCheckLater()"></textarea></div>
@@ -5477,7 +5510,7 @@ async function dupReopen(i){
     const newPri=$("cPri").value;
     const pri=(priRankOf({priority:newPri})<priRankOf(t))?newPri:t.priority;
     const updated={...t,comments,activity,priority:pri,status:"unassigned",
-      assignedTechId:null,assignedVendorId:null,assignedCoachId:null,
+      assignedTechId:null,assignedVendorId:null,assignedCoachId:null,assignedManagerStoreId:null,
       reopenedAt:now(),reopenedBy:SESSION.name,
       previousClosedAt:Number(t.closedAt||t.finishedAt||0)||null,
       reopenCount:(Number(t.reopenCount)||0)+1,
@@ -5543,20 +5576,70 @@ function renderDraftPreview(){const el=$("cPreview");if(!el)return;
   el.innerHTML=draftPhotos.map((p,i)=>`<div class="pv"><img src="${p.localUrl}" alt=""><button class="pv-x" onclick="draftPhotos.splice(${i},1);renderDraftPreview()">✕</button></div>`).join("");applyTags()}
 /* The picker follows the selected store's division: Burger King gets the
    two-level tree (subcategory required), everyone else the flat list. */
+/* Is the broadcast ("several stores at once") switch on right now? */
+function createIsMulti(){return !!($("cMulti")&&$("cMulti").checked)}
+/* Which stores the ticket being drafted will land on. In broadcast mode that
+   is the tick list (or, before anything is ticked, every store the person can
+   reach — so the category list is never blank). */
+function createScopeStores(){
+  if(createIsMulti())return MS_SEL.size?[...MS_SEL]:myStoreIds();
+  const sid=$("cStore")&&$("cStore").value;
+  return sid?[sid]:[];
+}
+/* The category tree differs by division, so a broadcast across a Burger King
+   and a car wash has two trees. Merge them, remembering how many of the
+   chosen stores actually list each category, so the picker can say so. */
+function createCatUnion(sids){
+  const byKey=new Map();
+  (sids||[]).forEach(sid=>{
+    catsForStore(sid).forEach(c=>{
+      if(!byKey.has(c.key))byKey.set(c.key,{key:c.key,label:c.label,subs:new Map(),nStores:0});
+      const e=byKey.get(c.key); e.nStores++;
+      (c.subs||[]).forEach(sb=>{if(!e.subs.has(sb.key))e.subs.set(sb.key,{key:sb.key,label:sb.label})});
+    });
+  });
+  return [...byKey.values()].map(e=>({key:e.key,label:e.label,nStores:e.nStores,subs:[...e.subs.values()]}));
+}
+/* A <select> silently selects its first option. That is how a broadcast with
+   an EMPTY category list still filed forty tickets: nothing was chosen, so
+   submit read "" and each store fell back to whatever sorted last in its own
+   tree. The list is never empty now, and "nothing chosen" is a state the form
+   can see and refuse. */
 function syncCreateCats(){
-  const sid=$("cStore")&&$("cStore").value; if(!sid)return;
-  const list=catsForStore(sid), sel=$("cCat");
-  sel.innerHTML=list.map(c=>`<option value="${c.key}">${esc(c.label)}</option>`).join("");
+  const sel=$("cCat"); if(!sel)return;
+  const sids=createScopeStores();
+  const want=sel.value;                      // keep the pick across a re-render
+  const list=createCatUnion(sids);
+  const n=sids.length;
+  const blank=`<option value=""${want?"":" selected"}>— choose a category —</option>`;
+  sel.innerHTML=blank+list.map(c=>{
+    const partial=n>1&&c.nStores<n?` · at ${c.nStores} of ${n}`:"";
+    return `<option value="${c.key}"${c.key===want?" selected":""}>${esc(c.label)}${partial}</option>`;
+  }).join("");
+  if(want&&!list.some(c=>c.key===want))sel.value="";   // the pick no longer applies
   syncCreateSubs();
 }
+/* True when the chosen category's subcategories do not apply at every store
+   the ticket is going to — a broadcast across a Burger King and a car wash,
+   say. Forcing a Burger King subcategory onto a car wash ticket would be
+   worse than leaving it off, so there it becomes optional. */
+let CREATE_SUB_OPTIONAL=false;
 function syncCreateSubs(){
-  const sid=$("cStore")&&$("cStore").value, wrap=$("cSubWrap"), sub=$("cSub");
-  if(!sid||!wrap||!sub)return;
-  const cat=(catsForStore(sid).find(c=>c.key===$("cCat").value))||{subs:[]};
+  const wrap=$("cSubWrap"), sub=$("cSub"), sel=$("cCat");
+  if(!wrap||!sub||!sel)return;
+  const sids=createScopeStores();
+  const cat=createCatUnion(sids).find(c=>c.key===sel.value)||{subs:[]};
   const subs=cat.subs||[];
+  CREATE_SUB_OPTIONAL = sids.length>1 && sids.some(sid=>{
+    const c=catsForStore(sid).find(x=>x.key===sel.value);
+    return !c||!(c.subs||[]).length;
+  });
+  const req=$("cSubReq");
+  if(req)req.textContent=CREATE_SUB_OPTIONAL?"(optional — it won't apply at every store)":"(required)";
   if(!subs.length){wrap.style.display="none";sub.innerHTML="";return}
   wrap.style.display="";
-  sub.innerHTML=`<option value="">— choose —</option>`+subs.map(x=>`<option value="${x.key}">${esc(x.label)}</option>`).join("");
+  const want=sub.value;
+  sub.innerHTML=`<option value="">— choose —</option>`+subs.map(x=>`<option value="${x.key}"${x.key===want?" selected":""}>${esc(x.label)}</option>`).join("");
   sub.onchange=dupCheckLater;        // the subcategory is the strongest match signal
 }
 /* ---- multi-store broadcast (Overwatch) --------------------------------------
@@ -5575,6 +5658,7 @@ function toggleMultiStore(on){
   w.style.display=on?"":"none";
   const single=$("cStore_q"); if(single)single.disabled=on;   // single picker steps aside
   if(on)renderMultiStore();
+  syncCreateCats();   // switching modes changes which stores the categories come from
 }
 function msScope(){
   const v=($("msDir")||{}).value||"";
@@ -5601,8 +5685,12 @@ function renderMultiStore(){
     :`<div class="rp-empty" style="padding:14px">No stores match.</div>`;
   const c=$("msCount"); if(c)c.textContent=`${MS_SEL.size} selected`;
 }
-function msToggle(sid,on){ if(on)MS_SEL.add(sid); else MS_SEL.delete(sid); const c=$("msCount"); if(c)c.textContent=`${MS_SEL.size} selected`; }
-function msAll(on){ msShown().forEach(sid=>on?MS_SEL.add(sid):MS_SEL.delete(sid)); renderMultiStore(); }
+function msToggle(sid,on){
+  if(on)MS_SEL.add(sid); else MS_SEL.delete(sid);
+  const c=$("msCount"); if(c)c.textContent=`${MS_SEL.size} selected`;
+  syncCreateCats();            // the union of categories just changed
+}
+function msAll(on){ msShown().forEach(sid=>on?MS_SEL.add(sid):MS_SEL.delete(sid)); renderMultiStore(); syncCreateCats(); }
 
 async function submitTicket(){
   if(!canCreate()){toast("Your account is view only.","err");return}
@@ -5610,9 +5698,12 @@ async function submitTicket(){
   if(!desc){toast("Add a short description","err");return}
   if(!sid&&!(canBroadcast()&&$("cMulti")&&$("cMulti").checked)){toast("Pick a store","err");return}
   const cat=$("cCat").value;
+  /* The guard that would have saved the forty: an unchosen category is a
+     refusal, never a silent default. */
+  if(!cat){toast("Pick a category","err");const cs=$("cCat");if(cs)cs.focus();return}
   const subEl=$("cSub"), needSub=$("cSubWrap")&&$("cSubWrap").style.display!=="none";
   const sub=needSub?(subEl.value||""):"";
-  if(needSub&&!sub){toast("Pick a subcategory","err");return}
+  if(needSub&&!sub&&!CREATE_SUB_OPTIONAL){toast("Pick a subcategory","err");return}
   // A tech filing an on-site issue keeps the job unless they untick the box.
   // Read it BEFORE the awaits below, while the form is still on screen.
   const mine = SESSION.role==="tech" && !!$("cMine") && $("cMine").checked;
@@ -5623,7 +5714,21 @@ async function submitTicket(){
   // there — otherwise it falls back to that division's "Other".
   if(multi){
     const targets=[...MS_SEL];
-    if(!confirm(`Create ${targets.length} separate ticket${targets.length===1?"":"s"} — one at each selected store?`))return;
+    /* The old code quietly remapped a category a store did not list onto
+       whatever sorted LAST in that store's own tree — which is how a
+       broadcast ended up as "POS" at the Burger Kings. The chosen category
+       is now filed as chosen; the only thing that changes is that the
+       confirm says where it is unusual. */
+    const odd=targets.filter(sid=>!catsForStore(sid).some(c=>c.key===cat));
+    const catTxt=ALL_CATEGORIES[cat]||cat;
+    const subTxt=sub?(" › "+((SUBCATEGORIES[sub]||{}).label||sub)):"";
+    if(!confirm(
+      `Create ${targets.length} separate ticket${targets.length===1?"":"s"} — one at each selected store?\n\n`+
+      `Category: ${catTxt}${subTxt}`+
+      (odd.length?`\n\nNote: ${odd.length} of these store${odd.length===1?"":"s"} `+
+        `(${odd.slice(0,3).map(storeName).join(", ")}${odd.length>3?", …":""}) `+
+        `do not normally list that category. They will still be filed under it.`:"")
+    ))return;
     const btn=$("cSubmit");btn.disabled=true;
     try{
       const urls=[];for(const p of draftPhotos)urls.push(await uploadPhoto(p.file));
@@ -5633,15 +5738,15 @@ async function submitTicket(){
       for(const tsid of targets){
         btn.innerHTML=`<span class="inline-spin"></span> ${done+1} / ${targets.length}…`;
         const tree=catsForStore(tsid);
-        const hasCat=tree.some(c=>c.key===cat);
-        const tcat=hasCat?cat:(tree.find(c=>c.key==="other")||tree[tree.length-1]||{key:cat}).key;
-        const tsub=(hasCat&&sub&&(tree.find(c=>c.key===cat).subs||[]).some(x=>x.key===sub))?sub:"";
+        const hit=tree.find(c=>c.key===cat);
+        const tcat=cat;                       // as chosen, at every store
+        const tsub=(sub&&hit&&(hit.subs||[]).some(x=>x.key===sub))?sub:"";
         let shortId=nextShortId(tsid,tcat), guard=0;
         while(taken.has(shortId)&&guard++<50){const m=shortId.match(/-(\d+)$/);shortId=shortId.replace(/-\d+$/,"-"+String(parseInt(m[1],10)+1).padStart(4,"0"));}
         taken.add(shortId);
         const id=uid();
         const ticket={shortId,shareToken:newShareToken(),storeId:tsid,category:tcat,subcategory:tsub,priority:$("cPri").value,description:desc,photos:urls,
-          status:(mine?"dispatched":"unassigned"),assignedVendorId:null,assignedCoachId:null,assignedTechId:(mine?SESSION.refId:null),
+          status:(mine?"dispatched":"unassigned"),assignedVendorId:null,assignedCoachId:null,assignedManagerStoreId:null,assignedTechId:(mine?SESSION.refId:null),
           ...(mine?{dispatchedAt:now()}:{}),
           createdBy:SESSION.email,createdByRole:SESSION.role,createdByName:SESSION.name,
           createdAt:now(),updatedAt:now(),broadcast:true,
@@ -5674,7 +5779,7 @@ async function submitTicket(){
     const ticket={
       shortId, shareToken:newShareToken(), storeId:sid,
       category:cat, subcategory:sub, priority:$("cPri").value, description:desc, photos:urls,
-      status:(mine?"dispatched":"unassigned"), assignedVendorId:null, assignedCoachId:null, assignedTechId:(mine?SESSION.refId:null),
+      status:(mine?"dispatched":"unassigned"), assignedVendorId:null, assignedCoachId:null,assignedManagerStoreId:null, assignedTechId:(mine?SESSION.refId:null),
       ...(mine?{dispatchedAt:now()}:{}),
       createdBy:SESSION.email, createdByRole:SESSION.role, createdByName:SESSION.name,
       createdAt:now(), updatedAt:now(),
@@ -5781,9 +5886,15 @@ function requestInHouse(id){
    Overwatch sees — the store's own techs, then vendors whose categories match
    this job, then the rest that cover the store — minus "add a new vendor",
    which stays with Overwatch so the roster has one gatekeeper. */
+/* One option, built the same way for both dropdowns. */
+function gmAssignOption(t){
+  const sid=t.storeId, g=storeGmRecord(sid);
+  const sel=t.assignedManagerStoreId===sid?" selected":"";
+  return `<optgroup label="Store leadership"><option value="manager:${sid}"${sel}>🏪 ${esc(g.name)}${g.named?"":" · nobody listed"}</option></optgroup>`;
+}
 function directorAssignOptions(t){
   const techs=storeTechIds(t.storeId).map(id=>[id,(MASTER.repairTechnicians||{})[id]]).filter(([,x])=>x);
-  const none=!t.assignedTechId&&!t.assignedVendorId&&!t.assignedCoachId;
+  const none=!t.assignedTechId&&!t.assignedVendorId&&!t.assignedCoachId&&!t.assignedManagerStoreId;
   let html=`<option value=""${none?" selected":""}>— Unassigned —</option>`;
   if(techs.length)
     html+=`<optgroup label="In-house tech for this store">`
@@ -5797,6 +5908,7 @@ function directorAssignOptions(t){
     html+=`<optgroup label="District Manager for this store">`
       +coaches.map(([id,c])=>`<option value="coach:${id}"${t.assignedCoachId===id?" selected":""}>👤 ${esc(c.name)}</option>`).join("")
       +`</optgroup>`;
+  html+=gmAssignOption(t);
   const mayVendor=canSeeVendors();
   const {match,rest}=mayVendor?vendorGroupsFor(t):{match:[],rest:[]};
   const vOpt=([id,v])=>`<option value="vendor:${id}"${t.assignedVendorId===id?" selected":""}>🏢 ${esc(v.name)}</option>`;
@@ -5867,15 +5979,15 @@ async function applyDirectorAssign(id,val,fromDetail,confirmed){
   const t0=TICKETS[id];
   // If this ticket is already assigned and the change wasn't made by whoever
   // set it, confirm first — naming who assigned it and when.
-  if(!confirmed && t0 && (t0.assignedTechId||t0.assignedVendorId||t0.assignedCoachId)){
-    const same=(val==="tech:"+t0.assignedTechId)||(val==="vendor:"+t0.assignedVendorId)||(val==="coach:"+t0.assignedCoachId);
+  if(!confirmed && t0 && (t0.assignedTechId||t0.assignedVendorId||t0.assignedCoachId||t0.assignedManagerStoreId)){
+    const same=(val==="tech:"+t0.assignedTechId)||(val==="vendor:"+t0.assignedVendorId)||(val==="coach:"+t0.assignedCoachId)||(val==="manager:"+t0.assignedManagerStoreId);
     if(!same){const ev=lastAssignEvent(t0);
       if(!ev||ev.by!==SESSION.name){confirmReassign(id,val,fromDetail);return}}
   }
   let patch,note;
   if(!val){
     // Blank = put it back in the pool.
-    if(await patchTicket(id,{assignedTechId:null,assignedVendorId:null,assignedCoachId:null,status:"unassigned"},
+    if(await patchTicket(id,{assignedTechId:null,assignedVendorId:null,assignedCoachId:null,assignedManagerStoreId:null,status:"unassigned"},
         {action:"assign",note:"unassigned (pool)",toStatus:"unassigned"}))
       {toast("Back to unassigned");if(fromDetail)openTicket(id)}
     return;
@@ -5883,10 +5995,12 @@ async function applyDirectorAssign(id,val,fromDetail,confirmed){
   if(val.startsWith("tech:")){
     const tid=val.slice(5), x=(MASTER.repairTechnicians||{})[tid];
     if(!x){toast("That tech no longer exists","err");return}
-    patch={assignedTechId:tid,assignedVendorId:null,assignedCoachId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
+    patch={assignedTechId:tid,assignedVendorId:null,assignedCoachId:null,assignedManagerStoreId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
   }else if(val.startsWith("coach:")){
     // Same instructions sheet the Overwatch dropdown uses.
     promptAssignCoach(id,val.slice(6)); return;
+  }else if(val.startsWith("manager:")){
+    promptAssignManager(id); return;
   }else{
     const vid=val.slice(7);
     if(vid===TICKETS[id].assignedVendorId){toast("No change");return}   // unchanged
@@ -5895,14 +6009,14 @@ async function applyDirectorAssign(id,val,fromDetail,confirmed){
     if(!canSeeVendors()){toast("Vendor routing isn't switched on for your account","err");return}
     /* Identical to the Overwatch path: "assigned", not "dispatched", because
        an outside firm has not accepted the job merely by being chosen. */
-    patch={assignedVendorId:vid,assignedTechId:null,assignedCoachId:null,status:"assigned"};note="🏢 "+v.name;
+    patch={assignedVendorId:vid,assignedTechId:null,assignedCoachId:null,assignedManagerStoreId:null,status:"assigned"};note="🏢 "+v.name;
   }
   if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status}))
     toast((patch.status==="dispatched"?"Dispatched · ":"Assigned · ")+note);
 }
 /* DM asks for an outside vendor: stays unassigned so Overwatch chooses who. */
 async function requestThirdParty(id){
-  if(await patchTicket(id,{status:"unassigned",assignedTechId:null,assignedVendorId:null,assignedCoachId:null},
+  if(await patchTicket(id,{status:"unassigned",assignedTechId:null,assignedVendorId:null,assignedCoachId:null,assignedManagerStoreId:null},
       {action:"status",toStatus:"unassigned",note:"Third-party tech requested by "+SESSION.name}))
     {toast("Flagged for Overwatch");openTicket(id)}
 }
@@ -5919,7 +6033,7 @@ async function _doDispatchToStoreTech(id,techId){
   if(!tech){toast("That tech no longer exists — left unassigned","err");closeModal();return}
   const btn=$("reqTechBtn");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span>'}
   if(await patchTicket(id,
-      {assignedTechId:techId,assignedVendorId:null,assignedCoachId:null,status:"dispatched",dispatchedAt:now()},
+      {assignedTechId:techId,assignedVendorId:null,assignedCoachId:null,assignedManagerStoreId:null,status:"dispatched",dispatchedAt:now()},
       {action:"status",toStatus:"dispatched",note:"District Manager requested "+tech.name})){
     toast("Dispatched to "+tech.name);closeModal();render();
   }else if(btn){btn.disabled=false;btn.textContent="Yes, request tech"}
@@ -6018,9 +6132,9 @@ async function guestRefresh(){
 function renderGuest(){
   const id=GUEST_ID, t={_id:id,...TICKETS[id]}, st=STATUSES[t.status]||STATUSES.open, sid=t.storeId;
   const g=guestIdentity()||{};
-  let assignee=null;
-  if(t.assignedTechId){const n=techName(t.assignedTechId);assignee=n?("🔧 "+n+" (in-house)"):null}
-  else if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];assignee=v?("🏢 "+v.name):null}
+  /* Same label, minus the "(removed)" wording — a guest has no use for it. */
+  let assignee=assigneeLabelFor(t)||null;
+  if(/removed/i.test(assignee||""))assignee=null;
   const activity=(t.activity||[]).slice().reverse().map(a=>`
     <div class="tl-item"><div class="tl-dot" style="background:${(STATUSES[a.toStatus]||{}).color||'var(--amber)'}"></div>
       <div class="tl-c"><div class="tl-act">${esc(actionText(a))}</div>
@@ -6251,9 +6365,10 @@ function openTicket(id,ret){
   // assignee reflects ONLY what's actually on the ticket. An unassigned ticket
   // shows nothing here — we do NOT fall back to the store's default tech, or an
   // unassigned ticket would look assigned.
-  let assignee=null;
-  if(t.assignedTechId){const n=techName(t.assignedTechId);assignee=n?("🔧 "+n+" (in-house)"):"Tech (removed)"}
-  else if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];assignee=v?("🏢 "+v.name):"Tech (removed)"}
+  /* assigneeLabelFor covers techs, vendors, District Managers and the store's
+     own GM. Spelling two of those four out here is what made a DM-assigned
+     ticket read "Unassigned" on its own detail sheet. */
+  let assignee=assigneeLabelFor(t)||null;
   const activity=(t.activity||[]).slice().reverse().map(a=>`
     <div class="tl-item"><div class="tl-dot" style="background:${(STATUSES[a.toStatus]||{}).color||'var(--amber)'}"></div>
       <div class="tl-c"><div class="tl-act">${esc(actionText(a))}</div>
@@ -6567,8 +6682,8 @@ function ticketControls(t){
       h+=`<div class="field">
           <select class="input" id="doAssign" onchange="doDirectorAssign('${t._id}')">${directorAssignOptions(t)}</select>
           <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">${
-            techs.length?"An in-house tech is dispatched straight away; a vendor is marked assigned until they accept."
-                        :"No in-house tech is assigned to this store."}${
+            techs.length?"An in-house tech is dispatched straight away; a vendor is marked assigned until they accept. Store leadership is for jobs the store itself should handle."
+                        :"No in-house tech is assigned to this store. Store leadership is for jobs the store itself should handle."}${
             !mayVendor?" Vendor routing isn't switched on for your account."
             :nVend?` ${nVend} vendor${nVend===1?"":"s"} cover${nVend===1?"s":""} this store.`
                  :" No vendor covers this store yet — Overwatch adds those."}</div>
@@ -6621,6 +6736,7 @@ function assignControls(t){
       <option value="">— Unassigned (pool) —</option>
       <optgroup label="In-house tech for this store">${techOpts||'<option disabled>None assigned to this store</option>'}</optgroup>
       ${coachOpts?`<optgroup label="District Manager for this store">${coachOpts}</optgroup>`:""}
+      ${gmAssignOption(t)}
       ${match.length?`<optgroup label="Vendors — ${esc(catLabel)}">${match.map(vOpt).join("")}</optgroup>`:""}
       ${rest.length?`<optgroup label="${match.length?"All other vendors":"Third-party vendors"}">${rest.map(vOpt).join("")}</optgroup>`:""}
       ${!match.length&&!rest.length?`<optgroup label="Third-party vendors"><option disabled>No vendors added</option></optgroup>`:""}
@@ -6649,7 +6765,7 @@ async function patchTicket(id,patch,activityEntry){
   const t=TICKETS[id];if(!t){toast("Ticket not found","err");return false}
   if(roBlocked(id))return false;
   const prevStatus=t.status;
-  const prevAssignee=(t.assignedTechId||"")+"|"+(t.assignedVendorId||"")+"|"+(t.assignedCoachId||"");
+  const prevAssignee=(t.assignedTechId||"")+"|"+(t.assignedVendorId||"")+"|"+(t.assignedCoachId||"")+"|"+(t.assignedManagerStoreId||"");
   const activity=Array.isArray(t.activity)?t.activity.slice():[];
   if(activityEntry)activity.push({ts:now(),by:SESSION.name,role:SESSION.role,...activityEntry});
   const updated={...t,...patch,activity,updatedAt:now()};
@@ -6666,7 +6782,7 @@ async function patchTicket(id,patch,activityEntry){
     /* News is a real status move OR a change of who the ticket is on. Handing a
        job from one tech to another keeps the status at "dispatched", so on the
        status test alone that reassignment went out silently. */
-    const nowAssignee=(updated.assignedTechId||"")+"|"+(updated.assignedVendorId||"")+"|"+(updated.assignedCoachId||"");
+    const nowAssignee=(updated.assignedTechId||"")+"|"+(updated.assignedVendorId||"")+"|"+(updated.assignedCoachId||"")+"|"+(updated.assignedManagerStoreId||"");
     const assigneeChanged=nowAssignee!==prevAssignee;
     const statusMoved=!!(patch&&patch.status&&patch.status!==prevStatus);
     if(statusMoved||assigneeChanged)
@@ -6763,14 +6879,63 @@ function assignSelValue(t){
   if(t.assignedTechId)return "tech:"+t.assignedTechId;
   if(t.assignedVendorId)return "vendor:"+t.assignedVendorId;
   if(t.assignedCoachId)return "coach:"+t.assignedCoachId;
+  if(t.assignedManagerStoreId)return "manager:"+t.assignedManagerStoreId;
   return "";
+}
+/* Handing a ticket to the store. The GM is read live from the store record,
+   so this works whether FindMi lists a manager, lists three, or lists none —
+   in the last case the job goes to "Store Leadership" and the store mailbox,
+   which is the login the store already uses. */
+function promptAssignManager(id){
+  const t=TICKETS[id];
+  ["assignSel","doAssign"].forEach(k=>{const sel=$(k); if(sel) sel.value=assignSelValue(t)});
+  if(!t){toast("Ticket not found","err");return}
+  const g=storeGmRecord(t.storeId);
+  const who=g.named?g.name:GM_FALLBACK_LABEL;
+  const first=g.named?(who.split(" ")[0]||"them"):"the store";
+  modal(`<div class="sheet-head"><h2>Assign to ${esc(who)}</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body">
+      <p style="margin:0;color:var(--ink-mid);font-size:14px">${esc(storeName(t.storeId))} · ${esc(t.shortId||"")}</p>
+      <p style="margin:10px 0 0;font-size:14px">${esc(t.description||"")}</p>
+      ${g.named?"":`<div class="tk-reopenreq" style="margin-top:12px">
+        <b>No manager is listed for this store in FindMi.</b>
+        The job goes to <b>${esc(GM_FALLBACK_LABEL)}</b> and reaches the store mailbox${g.email?" ("+esc(g.email)+")":""}.
+        Add a GM in FindMi and this will name them automatically.</div>`}
+      <div class="field" style="margin-top:14px"><label class="label" for="gmNote">Instructions for ${esc(first)}
+        <span style="font-weight:400;color:var(--red)">· required</span></label>
+        <textarea class="input" id="gmNote" rows="3" oninput="gmNoteCheck()"
+          placeholder="What do you need them to do? e.g. Check the freezer gasket and send a photo before close."></textarea>
+        <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">This goes on the ticket and into the email the store receives.</div>
+      </div>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-ghost" style="flex:1" onclick="openTicket('${id}')">Cancel</button>
+      <button class="btn btn-primary" style="flex:1" id="gmConfirm" disabled onclick="doAssignManager('${id}')">Assign &amp; send</button>
+    </div>`);
+  setTimeout(()=>{const b=$("gmNote");if(b)b.focus()},80);
+}
+function gmNoteCheck(){
+  const b=$("gmConfirm"), v=(($("gmNote")||{}).value||"").trim();
+  if(b)b.disabled=!v;
+}
+async function doAssignManager(id){
+  const t=TICKETS[id]; if(!t){toast("Ticket not found","err");return}
+  const text=(($("gmNote")||{}).value||"").trim();
+  if(!text){toast("Write the instructions first","err");return}
+  const who=storeGmLabel(t.storeId);
+  const btn=$("gmConfirm");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Assigning…'}
+  const patch={assignedManagerStoreId:t.storeId,assignedCoachId:null,assignedTechId:null,assignedVendorId:null,
+    status:"assigned",assignNote:{text,by:SESSION.name,at:now(),to:who}};
+  if(await patchTicket(id,patch,{action:"assign",note:"🏪 "+who+" — "+text,toStatus:"assigned"})){
+    toast("Assigned to "+who); closeModal(); openTicket(id);
+  }else if(btn){btn.disabled=false;btn.textContent="Assign & send"}
 }
 async function doAssignCoach(id,cid){
   const c=(MASTER.areaCoaches||{})[cid]; if(!c){toast("That District Manager no longer exists","err");return}
   const text=(($("coachNote")||{}).value||"").trim();
   if(!text){toast("Write the instructions first","err");return}
   const btn=$("coachConfirm");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Assigning…'}
-  const patch={assignedCoachId:cid,assignedTechId:null,assignedVendorId:null,status:"assigned",
+  const patch={assignedCoachId:cid,assignedManagerStoreId:null,assignedTechId:null,assignedVendorId:null,status:"assigned",
     assignNote:{text,by:SESSION.name,at:now(),to:c.name}};
   if(await patchTicket(id,patch,{action:"assign",note:"👤 "+c.name+" — "+text,toStatus:"assigned"})){
     toast("Assigned to "+c.name); closeModal(); openTicket(id);
@@ -6785,19 +6950,22 @@ async function doAssign(id){
     // In-house techs see dispatched jobs in their own app, so there is nobody to
     // phone first — skip "assigned" and dispatch immediately. Vendors still go
     // to "assigned" because someone has to actually contact them.
-    patch={assignedTechId:tid,assignedVendorId:null,assignedCoachId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
+    patch={assignedTechId:tid,assignedVendorId:null,assignedCoachId:null,assignedManagerStoreId:null,status:"dispatched",dispatchedAt:now()};note="🔧 "+x.name;
   }
   else if(val.startsWith("vendor:")){
     const vid=val.slice(7); const v=VENDORS[vid];
     if(!v){toast("That vendor no longer exists — left unassigned","err");return}
-    patch={assignedVendorId:vid,assignedTechId:null,assignedCoachId:null,status:"assigned"};note="🏢 "+v.name;
+    patch={assignedVendorId:vid,assignedTechId:null,assignedCoachId:null,assignedManagerStoreId:null,status:"assigned"};note="🏢 "+v.name;
   }
   /* Handing it to a DM is the one assignment that cannot be silent — they are
      being asked to do something, and the something has to be written down. So
      this branch stops here and opens the instructions sheet; nothing is saved
      until that is filled in. The dropdown is put back if they cancel. */
   else if(val.startsWith("coach:")){ promptAssignCoach(id,val.slice(6)); return }
-  else{patch={assignedVendorId:null,assignedTechId:null,assignedCoachId:null,status:"unassigned"};note="unassigned (pool)"}
+  /* Same for the store's GM: they are being handed a job, so they get told
+     what the job is. */
+  else if(val.startsWith("manager:")){ promptAssignManager(id); return }
+  else{patch={assignedVendorId:null,assignedTechId:null,assignedCoachId:null,assignedManagerStoreId:null,status:"unassigned"};note="unassigned (pool)"}
   if(await patchTicket(id,patch,{action:"assign",note,toStatus:patch.status})){toast(patch.status==="dispatched"?"Dispatched · "+note:"Assignment updated");openTicket(id)}
 }
 async function techClockIn(id){
