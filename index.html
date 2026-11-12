@@ -1530,7 +1530,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.70";
+const APP_VERSION = "9.71";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -6920,33 +6920,33 @@ function promptAssignManager(id){
         The job goes to <b>${esc(GM_FALLBACK_LABEL)}</b> and reaches the store mailbox${g.email?" ("+esc(g.email)+")":""}.
         Add a GM in FindMi and this will name them automatically.</div>`}
       <div class="field" style="margin-top:14px"><label class="label" for="gmNote">Instructions for ${esc(first)}
-        <span style="font-weight:400;color:var(--red)">· required</span></label>
-        <textarea class="input" id="gmNote" rows="3" oninput="gmNoteCheck()"
-          placeholder="What do you need them to do? e.g. Check the freezer gasket and send a photo before close."></textarea>
-        <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">This goes on the ticket and into the email the store receives.</div>
+        <span style="font-weight:400;color:var(--ink-dim)">· optional</span></label>
+        <textarea class="input" id="gmNote" rows="3"
+          placeholder="Anything they should know? e.g. Check the freezer gasket and send a photo before close."></textarea>
+        <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">If you write something, it goes on the ticket and into the email the store receives. Leave it blank to just assign.</div>
       </div>
     </div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="openTicket('${id}')">Cancel</button>
-      <button class="btn btn-primary" style="flex:1" id="gmConfirm" disabled onclick="doAssignManager('${id}')">Assign &amp; send</button>
+      <button class="btn btn-primary" style="flex:1" id="gmConfirm" onclick="doAssignManager('${id}')">Assign</button>
     </div>`);
   setTimeout(()=>{const b=$("gmNote");if(b)b.focus()},80);
 }
-function gmNoteCheck(){
-  const b=$("gmConfirm"), v=(($("gmNote")||{}).value||"").trim();
-  if(b)b.disabled=!v;
-}
 async function doAssignManager(id){
   const t=TICKETS[id]; if(!t){toast("Ticket not found","err");return}
+  /* Instructions are optional for the store: most of these are "this one is
+     yours", and the ticket already says what is wrong. */
   const text=(($("gmNote")||{}).value||"").trim();
-  if(!text){toast("Write the instructions first","err");return}
   const who=storeGmLabel(t.storeId);
   const btn=$("gmConfirm");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Assigning…'}
   const patch={assignedManagerStoreId:t.storeId,assignedCoachId:null,assignedTechId:null,assignedVendorId:null,
-    status:"assigned",assignNote:{text,by:SESSION.name,at:now(),to:who}};
-  if(await patchTicket(id,patch,{action:"assign",note:"🏪 "+who+" — "+text,toStatus:"assigned"})){
+    status:"assigned",
+    /* With nothing written, clear any note left from an earlier hand-over —
+       otherwise the ticket would still show "Instructions for <the DM>". */
+    assignNote:text?{text,by:SESSION.name,at:now(),to:who}:null};
+  if(await patchTicket(id,patch,{action:"assign",note:"🏪 "+who+(text?" — "+text:""),toStatus:"assigned"})){
     toast("Assigned to "+who); closeModal(); openTicket(id);
-  }else if(btn){btn.disabled=false;btn.textContent="Assign & send"}
+  }else if(btn){btn.disabled=false;btn.textContent="Assign"}
 }
 async function doAssignCoach(id,cid){
   const c=(MASTER.areaCoaches||{})[cid]; if(!c){toast("That District Manager no longer exists","err");return}
