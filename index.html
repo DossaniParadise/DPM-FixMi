@@ -875,6 +875,12 @@ html[data-theme="dark"] .leaflet-tooltip-top:before{border-top-color:var(--panel
 .wk-table tr:last-child td{border-bottom:0}
 .wk-btns{text-align:right;white-space:nowrap;padding-left:10px}
 .wk-btns .btn{margin-left:6px}
+.tc-list{margin-top:10px}
+.tc-row{padding:11px 0;border-bottom:1px solid var(--line)}
+.tc-row:last-child{border-bottom:0}
+.tc-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:7px}
+.tc-name{font-size:14px}
+.tc-row .input{font-size:13.5px}
 @media(max-width:560px){.wk-table td{display:block;border-bottom:0;padding:8px 0}
   .wk-table tr{display:block;border-bottom:1px solid var(--line);padding:6px 0}
   .wk-btns{text-align:left;padding-left:0}.wk-btns .btn{margin:0 6px 0 0}}
@@ -1530,7 +1536,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.71";
+const APP_VERSION = "9.72";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2911,6 +2917,113 @@ async function summarySendTest(kind){
     wkMsg("wkOut","bad","Postmark wouldn't take it",esc(typeof d==="string"?d:JSON.stringify(d)));
   }
 }
+/* ---- technician completion report -----------------------------------------
+   Sunday night, one email per technician: what they finished or closed in the
+   last 7 days, by store and category, every line a no-login link to the
+   ticket. Each technician's report has its own list of readers, typed here.
+   The notifier reads those lists from the SAVED settings, so every send
+   button below insists on a Save first. */
+function tcEmails(v){return [...new Set(String(v||"").split(/[,;\s]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.includes("@")))]}
+function tcTechs(){
+  return Object.entries(MASTER.repairTechnicians||{}).filter(([,t])=>t)
+    .sort((a,b)=>String(a[1].name||"").localeCompare(String(b[1].name||"")));
+}
+/** What the form says right now, in the shape it is saved in. */
+function tcReadForm(){
+  const to={};
+  tcTechs().forEach(([id])=>{const el=$("tc_to_"+id); const list=el?tcEmails(el.value):[]; if(list.length)to[id]=list});
+  return {on:!!($("tcOn")&&$("tcOn").checked),to};
+}
+/** What is saved, limited to technicians who still exist so the two compare. */
+function tcSaved(){
+  const c=NOTIFY_PREFS.completion||{on:false,to:{}}, to={};
+  tcTechs().forEach(([id])=>{const l=(c.to||{})[id]; if(l&&l.length)to[id]=l.slice()});
+  return {on:!!c.on,to};
+}
+function tcSection(np){
+  const c=np.completion||{on:false,to:{}};
+  const stt=(MASTER.admins||{}).completionReportState||{};
+  const techs=tcTechs();
+  /* The address box gets a full-width line of its own: a list of three or
+     four addresses has to be readable while it is being typed. */
+  const rows=techs.map(([id,t])=>`
+      <div class="tc-row">
+        <div class="tc-head">
+          <b class="tc-name">${esc(t.name||"(no name)")}</b>
+          <span class="wk-btns">
+            <button type="button" class="btn btn-ghost btn-sm" id="tcp_${escA(id)}" onclick="tcPreview('${escA(id)}')">Preview</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="tcs_${escA(id)}" onclick="tcSendTest('${escA(id)}')">Email it to me</button>
+          </span>
+        </div>
+        <input class="input" id="tc_to_${escA(id)}" value="${escA(((c.to||{})[id]||[]).join(", "))}"
+              placeholder="Who gets ${escA(String(t.name||"this").split(" ")[0])}\u2019s report \u2014 email addresses, separated by commas"
+              autocapitalize="off" spellcheck="false" oninput="sendSettingsHint()">
+      </div>`).join("");
+  return `
+      <div class="section-label" style="margin-top:24px">Technician completion report<span class="ln"></span></div>
+      <p class="set-hint">One email per technician, every Sunday night: each job they marked finished or closed in the last 7 days, with the store and the category. Tapping a job opens the full ticket \u2014 no FixMi login needed. Type who should read each technician\u2019s report; a technician with nobody listed is not sent. While Test mode is on, the real sends go to your test addresses instead.</p>
+      ${techs.length?`<div class="tc-list">${rows}</div>`
+        :`<div class="rp-empty" style="padding:14px">No technicians in FindMi yet.</div>`}
+      <label class="cat-chk" style="margin-top:14px"><input type="checkbox" id="tcOn"${c.on?" checked":""} onchange="sendSettingsHint()">
+        <span><b>Send it automatically every Sunday night</b><br><span style="font-weight:400;color:var(--ink-dim);font-size:12px">Around 8pm Central in winter, 9pm in summer.${stt.lastSentAt?" Last sent "+esc(new Date(stt.lastSentAt).toLocaleString())+".":""} Nothing goes out on its own while this is unticked.</span></span></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        <button type="button" class="btn btn-primary btn-sm" id="tcNow" onclick="tcRunNow()">Send them all now</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="tcAllMe" onclick="tcSendTest('')">Email me every technician\u2019s</button>
+      </div>
+      <div id="tcOut"></div>
+      <iframe id="tcFrame" class="wk-frame hidden" title="Completion report preview"></iframe>`;
+}
+function tcErr(r){
+  const d=(r.body&&(r.body.reason||r.body.error))||r.error||("HTTP "+r.status);
+  return esc(typeof d==="string"?d:JSON.stringify(d))+
+    (r.status===400&&/event must be/.test(String(d))?" \u2014 your deployed notify.js is an older copy that doesn\u2019t know about this report yet.":"");
+}
+async function tcPreview(id){
+  const btn=$("tcp_"+id); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Building\u2026';
+  const r=await chkPost({event:"completion",mode:"preview",techId:id},25000);
+  btn.disabled=false;btn.textContent="Preview";
+  const f=$("tcFrame");
+  if(r.status!==200||!r.body||!r.body.ok){f.classList.add("hidden");return wkMsg("tcOut","bad","Couldn\u2019t build the report",tcErr(r))}
+  f.srcdoc=r.body.html; f.classList.remove("hidden");
+  const to=r.body.to||[];
+  wkMsg("tcOut","ok","Preview \u2014 "+esc(r.body.subject),
+    (to.length?"On a real send this goes to: "+esc(to.join(", "))+".":"Nobody is saved as a reader for this technician yet, so a real send would skip it.")+" Nothing was sent.");
+  f.scrollIntoView({block:"nearest",behavior:"smooth"});
+}
+/* To you alone. It never reads the recipient lists, so trying one out cannot
+   email anybody else. An empty id means every technician's report. */
+async function tcSendTest(id){
+  const to=(SESSION&&SESSION.email)||"";
+  if(!to)return toast("No email on your session","err");
+  const btn=$(id?"tcs_"+id:"tcAllMe"), label=btn.textContent;
+  btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Sending\u2026';
+  const r=await chkPost({event:"completion",mode:"test",to:[to],...(id?{techId:id}:{})},40000);
+  btn.disabled=false;btn.textContent=label;
+  if(r.status===200&&r.body&&r.body.ok)
+    wkMsg("tcOut","ok","Sent to "+esc(to),
+      (r.body.reports===1?esc(r.body.forName||"That technician")+"\u2019s report":r.body.reports+" reports, one per technician")+
+      " \u2014 the subject starts with [Sample]. It went to you only; nobody on the lists above was emailed.");
+  else wkMsg("tcOut","bad","Nothing went out",tcErr(r));
+}
+async function tcRunNow(){
+  if(!sendGuard("tcOut"))return;
+  const saved=tcSaved(), ids=Object.keys(saved.to);
+  if(!ids.length){wkMsg("tcOut","bad","Nobody to send to","No technician has a reader listed. Type at least one address against a technician, press Save, then send.");return}
+  const nAddr=ids.reduce((n,id)=>n+saved.to[id].length,0);
+  const live=!NOTIFY_PREFS.testMode;
+  if(!confirm(live
+      ?`This sends ${ids.length} completion report${ids.length===1?"":"s"} to the ${nAddr} address${nAddr===1?"":"es"} listed.\n\nTest mode is OFF, so these go to the real people. Continue?`
+      :`This builds ${ids.length} completion report${ids.length===1?"":"s"} and sends them to your test addresses. Nobody on the lists is emailed. Continue?`))return;
+  const btn=$("tcNow"); btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Sending\u2026';
+  const r=await chkPost({event:"completion",mode:"run"},60000);
+  btn.disabled=false;btn.textContent="Send them all now";
+  if(r.status===200&&r.body&&r.body.sent){
+    const m=r.body.manifest||[];
+    wkMsg("tcOut",r.body.ok?"ok":"warn","Sent "+r.body.sent+" email"+(r.body.sent===1?"":"s"),
+      (r.body.testMode?"Test mode was on, so they all went to your test addresses. ":"")+
+      m.map(x=>esc(x.name)+" ("+x.jobs+" job"+(x.jobs===1?"":"s")+") \u2192 "+esc((x.to||[]).join(", "))+(x.ok?"":" \u2014 FAILED")).join("<br>"));
+  }else wkMsg("tcOut","bad","Nothing went out",tcErr(r));
+}
 async function summaryRunNow(){
   const kinds=SUMMARY_KINDS.map(k=>k.key).filter(k=>$("wk_"+k)&&$("wk_"+k).checked);
   if(!kinds.length)return toast("Tick at least one group above","err");
@@ -2948,7 +3061,10 @@ function unsavedSendSettings(){
     out.push("The test addresses have changed");
   const v=$("wkVpTo");
   const g=$("wkDigestTo");
-  if(g&&emails_(g.value).join(",")!==(NOTIFY_PREFS.digestTo||[]).join(","))return true;
+  if(g&&emails_(g.value).join(",")!==(NOTIFY_PREFS.digestTo||[]).join(","))
+    out.push("The receipt address list has changed");
+  if($("tcOn")&&JSON.stringify(tcReadForm())!==JSON.stringify(tcSaved()))
+    out.push("The technician completion report settings have changed");
   if(v&&emails_(v.value).join(",")!==(NOTIFY_PREFS.vpTo||[]).join(","))
     out.push("The VP address list has changed");
   return out;
@@ -3043,6 +3159,10 @@ const NOTIFY_DEFAULTS={
   /* One named person's own settings, beating their role's. Keyed by email. */
   people:{},
   weekly:{on:false, day:"monday", kinds:["gm","dm","do","vp","ow","tech"]},
+  /* The Sunday-night technician completion report: one email per technician,
+     each to its own typed list. Keyed by technician id, never by an address —
+     the database refuses a key with a dot in it. */
+  completion:{on:false, to:{}},
   /* Nudges for tickets that are waiting on the store, not on a technician.
      The headset one is here because it is the case that prompted this; every
      field on it is editable and more can be added. */
@@ -3121,6 +3241,14 @@ function loadNotifyPrefs(){
         kinds:Array.isArray(st.weekly.kinds)?st.weekly.kinds.filter(k=>SUMMARY_KINDS.some(x=>x.key===k)):SUMMARY_KINDS.map(k=>k.key),
         lastSentYmd:st.weekly.lastSentYmd||"", lastSentAt:st.weekly.lastSentAt||0,
       };
+    }
+    if(st.completion&&typeof st.completion==="object"){
+      out.completion={on:!!st.completion.on,to:{}};
+      const to=st.completion.to;
+      if(to&&typeof to==="object")Object.entries(to).forEach(([tid,v])=>{
+        const list=tcEmails(Array.isArray(v)?v.join(","):(v&&typeof v==="object"?Object.values(v).join(","):v));
+        if(tid&&list.length)out.completion.to[tid]=list;
+      });
     }
     if(st.cutLines!==undefined)
       out.cutLines=(Array.isArray(st.cutLines)?st.cutLines:String(st.cutLines||"").split("\n"))
@@ -10757,6 +10885,7 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
       </div>
       <button type="button" class="btn btn-ghost btn-sm" id="wkNow" onclick="summaryRunNow()" style="margin-top:12px">Send this week\u2019s summaries now</button>
       <div id="wkNowOut"></div>
+      ${tcSection(np)}
       <div class="section-label" style="margin-top:24px">Reminders<span class="ln"></span></div>
       <p class="set-hint">For tickets that are waiting on the store rather than on a technician \u2014 an exchange where the old units have to go back, say. Nothing is broken, so nothing prompts anyone, and the first sign of trouble is an invoice. A rule watches for the wording, waits, then nudges whoever can act. Replies to a reminder land on the ticket as a comment, so a tracking number can just be replied back.</p>
       <div id="remList">${(np.reminders||[]).map(remCard).join("")}</div>
@@ -10957,6 +11086,8 @@ async function saveSettings(){
       prefs.weekly={on:$("wkOn").checked, day:$("wkDay").value,
         kinds:SUMMARY_KINDS.map(k=>k.key).filter(k=>$("wk_"+k)&&$("wk_"+k).checked),
         lastSentYmd:wkWas.lastSentYmd||"", lastSentAt:wkWas.lastSentAt||0};
+      // The completion report's on/off and per-technician reader lists.
+      prefs.completion=$("tcOn")?tcReadForm():(NOTIFY_PREFS.completion||{on:false,to:{}});
       if(prefs.testMode&&!prefs.testTo.length){
         showLoader(false);btn.disabled=false;btn.textContent="Save";
         setSettingsTab("email");
