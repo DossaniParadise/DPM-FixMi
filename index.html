@@ -1536,7 +1536,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.72";
+const APP_VERSION = "9.73";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -2919,7 +2919,7 @@ async function summarySendTest(kind){
 }
 /* ---- technician completion report -----------------------------------------
    Sunday night, one email per technician: what they finished or closed in the
-   last 7 days, by store and category, every line a no-login link to the
+   week just ended (Sunday to Saturday), by store and category, every line a no-login link to the
    ticket. Each technician's report has its own list of readers, typed here.
    The notifier reads those lists from the SAVED settings, so every send
    button below insists on a Save first. */
@@ -2961,7 +2961,7 @@ function tcSection(np){
       </div>`).join("");
   return `
       <div class="section-label" style="margin-top:24px">Technician completion report<span class="ln"></span></div>
-      <p class="set-hint">One email per technician, every Sunday night: each job they marked finished or closed in the last 7 days, with the store and the category. Tapping a job opens the full ticket \u2014 no FixMi login needed. Type who should read each technician\u2019s report; a technician with nobody listed is not sent. While Test mode is on, the real sends go to your test addresses instead.</p>
+      <p class="set-hint">One email per technician, every Sunday night: each job they finished in the week just ended (Sunday to Saturday), day by day, with the store and the category. Tapping a job opens the full ticket \u2014 no FixMi login needed. Type who should read each technician\u2019s report; a technician with nobody listed is not sent. While Test mode is on, the real sends go to your test addresses instead.</p>
       ${techs.length?`<div class="tc-list">${rows}</div>`
         :`<div class="rp-empty" style="padding:14px">No technicians in FindMi yet.</div>`}
       <label class="cat-chk" style="margin-top:14px"><input type="checkbox" id="tcOn"${c.on?" checked":""} onchange="sendSettingsHint()">
