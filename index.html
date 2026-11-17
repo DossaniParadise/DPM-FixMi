@@ -1536,7 +1536,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.73";
+const APP_VERSION = "9.74";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -11144,8 +11144,85 @@ function openVendors(){
       <div id="vendorRows">${rows||'<div class="rp-empty">No third-party vendors yet.</div>'}</div>
       <button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="editVendor(null)">＋ Add vendor</button>
       <button class="btn btn-ghost btn-block" style="margin-top:8px" onclick="openVendorMap()">🗺 Vendor coverage map</button>
+      <button class="btn btn-ghost btn-block" style="margin-top:8px" id="tvExportBtn" onclick="exportTechsVendors()">⬇ Export this list (.csv)</button>
+      <div style="font-size:11.5px;color:var(--ink-dim);margin-top:6px">Every tech and vendor with name, email, phone, ZIP, and how many jobs each was given in the last 90 days. Opens in Excel.</div>
     </div>
     <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="closeModal()">Done</button></div>`);
+}
+/* ---- export: techs and vendors, with how much each was used ----------------
+   One row per in-house tech and per vendor. "Used" means a ticket that is on
+   them and was put on them inside the window — open or closed, so the closed
+   archive has to be in memory before anything is counted. A job since handed
+   to somebody else counts for whoever holds it now, the same rule the
+   Technician tab of the closed report uses. */
+const TV_EXPORT_DAYS=90;
+/* When a ticket was put on whoever holds it now: the later of the last
+   "assign" on its trail and its dispatch stamp; when it was raised, failing
+   both (imports). */
+function ticketGivenAt(t){
+  let last=0;
+  const acts=arr_(t.activity);
+  for(let i=acts.length-1;i>=0;i--){const a=acts[i]; if(a&&a.ts&&a.action==="assign"){last=Number(a.ts)||0;break}}
+  return Math.max(last,Number(t.dispatchedAt)||0)||Number(t.createdAt)||0;
+}
+/* A tech's home ZIP is not a FixMi field — it belongs on the tech's record in
+   FindMi. Read it under the names it is most likely to arrive as, so the
+   column fills itself in the day FindMi starts carrying it. */
+function techZip(id,t){
+  const m=((MASTER.admins||{}).techMeta||{})[id]||{};
+  return String(t.homeZip||t.zip||t.zipCode||t.homeZipCode||t.zipcode||m.homeZip||m.zip||"").trim();
+}
+function techsVendorsRows(nowTs){
+  const to=nowTs||now(), from=to-TV_EXPORT_DAYS*86400000;
+  const use={};                                   // "tech:<id>" / "vendor:<id>" → {n,last}
+  const bump=(k,at)=>{const u=(use[k]=use[k]||{n:0,last:0}); u.n++; if(at>u.last)u.last=at};
+  const seen=new Set();
+  [TICKETS,CLOSED_TICKETS].forEach(pool=>Object.keys(pool||{}).forEach(id=>{
+    if(seen.has(id))return; seen.add(id);
+    const t=pool[id]; if(!t)return;
+    const at=ticketGivenAt(t); if(at<from||at>to)return;
+    if(t.assignedTechId)bump("tech:"+t.assignedTechId,at);
+    else if(t.assignedVendorId)bump("vendor:"+t.assignedVendorId,at);
+  }));
+  const day=ts=>ts?new Date(ts).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}):"";
+  const row=(type,key,name,email,phone,zip)=>{const u=use[key]||{n:0,last:0};
+    /* Written the usual way for a spreadsheet — and as text with punctuation,
+       so Excel does not turn a ten-digit phone into a number. */
+    const dg=String(phone||"").replace(/\D/g,""), ten=dg.length===11&&dg[0]==="1"?dg.slice(1):dg;
+    const ph=ten.length===10?`(${ten.slice(0,3)}) ${ten.slice(3,6)}-${ten.slice(6)}`:String(phone||"").trim();
+    return {type,name:String(name||"").trim(),email:String(email||"").trim(),phone:ph,
+            zip:String(zip||"").trim(),jobs:u.n,last:day(u.last)}};
+  const byName=(a,b)=>a.name.localeCompare(b.name);
+  const techs=Object.entries(MASTER.repairTechnicians||{}).filter(([,t])=>t)
+    .map(([id,t])=>row("In-house tech","tech:"+id,t.name,t.email,t.phone,techZip(id,t))).sort(byName);
+  const vendors=Object.entries(VENDORS||{}).filter(([,v])=>v)
+    .map(([id,v])=>row("Vendor","vendor:"+id,v.name,v.email,v.phone,v.svcZip)).sort(byName);
+  return {rows:techs.concat(vendors),from,to,techs:techs.length,vendors:vendors.length};
+}
+async function exportTechsVendors(){
+  const btn=$("tvExportBtn"), label=btn?btn.textContent:"";
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Counting jobs\u2026'}
+  /* Most of ninety days of work is closed, and closed tickets are not loaded
+     until asked for. Counting without them would under-report everyone, so if
+     they cannot be fetched the export stops rather than hand over wrong numbers. */
+  const okClosed=await ensureClosedLoaded();
+  if(btn){btn.disabled=false;btn.textContent=label}
+  if(!okClosed){toast("Couldn't load the closed tickets, so the job counts would be wrong \u2014 try again","err");return}
+  const {rows,from,to,techs,vendors}=techsVendorsRows();
+  const d=ts=>new Date(ts).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+  /* The dates go IN the heading: a count of "last 90 days" means nothing once
+     the file has sat in a folder for a month. */
+  const cols=[["type","Type"],["name","Name"],["email","Email"],["phone","Phone"],["zip","ZIP code"],
+              ["jobs",`Jobs in last ${TV_EXPORT_DAYS} days (${d(from)} \u2013 ${d(to)})`],["last","Most recent job"]];
+  const q=v=>{const x=String(v??"");return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;};
+  const csv=[cols.map(c=>q(c[1])).join(",")].concat(rows.map(r=>cols.map(([k])=>q(r[k])).join(","))).join("\r\n");
+  const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="FixMi-Techs-Vendors-"+new Date(to).toLocaleDateString("en-CA")+".csv";
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  toast(`Exported ${techs} tech${techs===1?"":"s"} and ${vendors} vendor${vendors===1?"":"s"}`);
 }
 /* Edit an in-house tech's specialties + colour. Identity stays in FindMi. */
 function editTechMeta(id){
