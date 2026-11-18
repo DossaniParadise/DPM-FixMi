@@ -1367,6 +1367,62 @@ body.simulating .wrap{padding-bottom:40px}
 .jc-total .n{font-family:var(--disp);font-weight:800;font-size:34px;color:var(--amber-deep);line-height:1}
 .jc-total .l{font-size:12.5px;color:var(--ink-mid)}
 .cost-links{display:flex;flex-direction:column;gap:5px;margin:6px 0 4px}
+/* ===== INSIGHTS (spend · time in status · open backlog) ===== */
+.in-main{margin-bottom:6px}
+.in-seg{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:12px 0 4px}
+.in-lab{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);margin-right:2px}
+.in-select{width:auto;max-width:220px;padding:6px 10px;font-size:12.5px;margin-left:auto}
+.in-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0 6px}
+.in-kpis .rp-n{font-size:20px;overflow-wrap:anywhere}
+.in-note{font-size:12px;color:var(--ink-mid);background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:10px 0;line-height:1.5}
+.in-note.warn{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-fg)}
+.in-link{background:none;border:none;padding:0;font:inherit;font-weight:700;color:var(--amber);cursor:pointer;white-space:nowrap}
+.in-note.warn .in-link{color:inherit;text-decoration:underline}
+.in-row{display:grid;grid-template-columns:150px 1fr 150px;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;padding:0;cursor:pointer;color:inherit;font:inherit}
+.in-row.static{cursor:default}
+.in-row:not(.static):hover .cr-label{color:var(--amber-deep);font-weight:600}
+.in-row:not(.static):hover .cr-bar,.in-row:hover .in-stack{filter:brightness(1.12)}
+.in-row.thin{opacity:.55}
+.in-val{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--ink-mid);text-align:right;white-space:nowrap}
+.in-val i{font-style:normal;font-weight:500;color:var(--ink-dim)}
+.in-track{height:22px}
+.in-stack{display:flex;height:22px;border-radius:6px;overflow:hidden;background:var(--panel-2);border:1px solid var(--line)}
+.in-stack span{display:block;height:100%}
+.in-stack.big{height:30px;margin-bottom:8px}
+.in-legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:11.5px;color:var(--ink-mid);margin:8px 0 10px}
+.in-sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.in-b0{background:var(--amber-fill);opacity:.3}
+.in-b1{background:var(--amber-fill);opacity:.6}
+.in-b2{background:var(--amber-fill)}
+.in-b3{background:var(--red)}
+.in-opened{background:var(--amber-fill)}
+.in-closed{background:var(--green)}
+.in-stages{display:flex;flex-direction:column;gap:2px}
+.in-stage{display:grid;grid-template-columns:minmax(0,1.5fr) 1fr 56px 64px 44px;gap:10px;align-items:center;width:100%;text-align:left;background:none;border:1px solid transparent;border-radius:8px;padding:7px 8px;cursor:pointer;color:inherit;font:inherit}
+.in-stage.on{background:var(--tint);border-color:var(--tint-line)}
+.in-stage b{font-size:13px}
+.in-stage small{display:block;font-size:11px;color:var(--ink-dim);margin-left:16px}
+.in-stage-h{cursor:default;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);padding-bottom:2px}
+.in-stage-h div:nth-child(n+3){text-align:right}
+.in-tix{display:block;width:100%;text-align:left;cursor:pointer;color:inherit;font:inherit}
+.in-tix:hover{border-color:var(--amber)}
+.in-right{margin-left:auto;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--amber-deep);white-space:nowrap}
+.in-wk{display:grid;grid-template-columns:70px 1fr 48px;gap:10px;align-items:center;margin-bottom:8px}
+.in-wk-l{font-size:11.5px;color:var(--ink-mid);text-align:right;line-height:1.25}
+.in-wk-l i{font-style:normal;font-size:10px;color:var(--ink-dim)}
+.in-wk-b{display:flex;flex-direction:column;gap:2px}
+.in-wk-b div{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--ink-mid)}
+.in-wk-b span{display:block;height:9px;border-radius:3px;min-width:2px}
+.in-wk-net{font-family:var(--mono);font-size:12.5px;font-weight:700;text-align:right;color:var(--ink-dim)}
+.in-wk-net.up{color:var(--s-waiting-ink)}
+.in-wk-net.down{color:var(--s-finished-ink)}
+@media(max-width:600px){
+  .in-kpis{grid-template-columns:repeat(2,1fr)}
+  .in-row{grid-template-columns:92px 1fr 104px;gap:8px}
+  .in-select{margin-left:0;max-width:none;flex:1 1 100%}
+  .in-stage{grid-template-columns:minmax(0,1fr) 48px 56px}
+  .in-stage>div:nth-child(2),.in-stage>div:nth-child(5){display:none}
+}
 </style>
 </head>
 <body>
@@ -1417,6 +1473,7 @@ body.simulating .wrap{padding-bottom:40px}
     <button class="icon-btn hidden" id="techReportBtn" title="Tech report" onclick="openTechReport()">📊</button>
     <button class="icon-btn hidden" id="closedRptBtn" title="Closed ticket report" onclick="openClosedReport()">📈</button>
     <button class="icon-btn hidden cost-btn" id="costBtn" title="Job costs — match PayMi invoices to jobs" onclick="openJobCosts()">$</button>
+    <button class="icon-btn hidden" id="insightsBtn" title="Insights — spend, time in status, open backlog" aria-label="Insights" onclick="openInsights()">💡</button>
     <button class="icon-btn hidden" id="vendorTopBtn" title="Techs &amp; vendors" onclick="openVendors()">🏢</button>
     <button class="icon-btn hidden" id="settingsBtn" title="Settings" onclick="openSettings()">⚙</button>
     <button class="icon-btn" title="Sign out" onclick="logout()">⏻</button>
@@ -4348,6 +4405,7 @@ function enterAppChrome(){
   $("techReportBtn").classList.toggle("hidden",SESSION.role!=="admin");
   $("closedRptBtn").classList.toggle("hidden",!canSeeClosedReport());
   $("costBtn").classList.toggle("hidden",SESSION.role!=="admin");
+  $("insightsBtn").classList.toggle("hidden",SESSION.role!=="admin");
   $("settingsBtn").classList.toggle("hidden",!realAdmin);
   document.body.classList.toggle("no-reftags",!SHOW_REF_TAGS);
 }
@@ -6523,6 +6581,7 @@ function openTicket(id,ret){
   modal(`
     <div class="sheet-head">
       ${_modalReturn==="techreport"?`<button class="x-btn" title="Back to the tech report" onclick="backToTechReport()">‹</button>`:""}
+      ${_modalReturn==="insights"?`<button class="x-btn" title="Back to Insights" onclick="backToInsights()">‹</button>`:""}
       <h2>#${esc(t.shortId||id.slice(0,6).toUpperCase())}</h2>
       <span class="sbadge" style="color:${st.color};background:${st.color}1a"><span class="dot"></span>${st.label}</span>
       <button type="button" id="lnkBtn" class="btn btn-ghost btn-sm" title="Copy a link to this ticket" onclick="copyTicketLink('${id}')">🔗 Link</button>
@@ -10151,6 +10210,412 @@ function costDetail(id){
     ${list}`;
 }
 
+
+/* ============================================================ INSIGHTS (overwatch)
+   Three questions the other reports do not answer, in one panel:
+
+     SPEND    — what the repairs cost. Job Costs already links PayMi invoices
+                to tickets; this adds them up by category, item, store, DM,
+                Director and who was paid. Only MATCHED invoices count, so the
+                panel says how much of the closed work has a cost on it.
+     TIME     — where a closed job's days actually went. The Speed tab measures
+                raised → closed as one number; this walks the activity trail
+                and splits it by status, so "slow" becomes "slow to route",
+                "waiting on parts" or "finished but nobody closed it".
+     BACKLOG  — what is open right now and how old it is, plus raised vs
+                closed week by week, which is whether the pile is growing.
+
+   Read-only. Nothing here writes to the master. */
+let IN={tab:"spend",days:90,sDim:"cat",tCat:"all",tStage:"finished",tDim:"store",bDim:"store"};
+let IN_GROUPS=[];        // the rows on screen, so a tap can name one by index
+let IN_SEL=null;         // {title,sub,items:[{id,right,storeId}]} — the tickets behind one row
+const IN_LIST_MAX=200;
+const IN_MIN_N=3;        // same floor the Speed tab uses: below it a ranking is noise
+const IN_STAGES=[
+  ["unassigned","Unassigned","waiting for someone to route it"],
+  ["assigned","Assigned","handed over, not yet confirmed"],
+  ["dispatched","Dispatched","confirmed, work not started"],
+  ["waiting","Waiting","on parts, a quote or an approval"],
+  ["in_progress","In progress","being worked on"],
+  ["finished","Finished","done, waiting to be closed out"]
+];
+const IN_BANDS=[["b0","0–3 days",3],["b1","4–7 days",7],["b2","8–30 days",30],["b3","31+ days",Infinity]];
+
+async function openInsights(tab){
+  if(!SESSION||SESSION.role!=="admin")return;
+  if(tab){IN.tab=tab;IN_SEL=null}
+  await ensureClosedLoaded();      // spend, time and the weekly flow all need closed work
+  inRender();
+}
+function backToInsights(){_modalReturn=null;clearTicketHash();openInsights()}
+function inSet(k,v){IN[k]=v;IN_SEL=null;inRender()}
+function inPick(i){const g=IN_GROUPS[i];if(!g||!g.items||!g.items.length)return;IN_SEL={title:g.title||g.label,sub:g.sub||"",items:g.items};inRender()}
+function inBack(){IN_SEL=null;inRender()}
+
+/* ---- shared pieces ---- */
+/* Invoice dates come from PayMi and have arrived as milliseconds, seconds and
+   ISO strings at different times. Read all three rather than trust one. */
+function inTs(v){
+  if(!v)return 0;
+  const n=Number(v);
+  if(isFinite(n)&&n>0)return n<1e11?n*1000:n;
+  const p=Date.parse(v);return isNaN(p)?0:p;
+}
+function inTicket(id){const t=TICKETS[id]||CLOSED_TICKETS[id];return t?{...t,_id:id}:null}
+function inAllTickets(){
+  const all={...CLOSED_TICKETS,...TICKETS};
+  return Object.keys(all).filter(k=>all[k]).map(k=>({...all[k],_id:k}));
+}
+function inMoney0(n){return (n<0?"-":"")+"$"+Math.abs(Math.round(Number(n)||0)).toLocaleString("en-US")}
+function inWhoKey(t){
+  if(t.assignedTechId)return "tech:"+t.assignedTechId;
+  if(t.assignedVendorId)return "vendor:"+t.assignedVendorId;
+  if(t.assignedCoachId)return "coach:"+t.assignedCoachId;
+  if(t.assignedManagerStoreId)return "gm:"+t.assignedManagerStoreId;
+  return "__none";
+}
+/* The Director's id: on the store if set, otherwise through whichever DM
+   covers it — the same order storeDirectorFor() uses, but returning the key. */
+function inDirectorId(sid){
+  if(!sid)return "";
+  const dirs=MASTER.directors||{}, own=store(sid).assignedDirectorId;
+  if(own&&dirs[own])return own;
+  for(const cid of (storeCoachIds(sid)||[])){
+    const c=(MASTER.areaCoaches||{})[cid];
+    if(c&&c.assignedDirectorId&&dirs[c.assignedDirectorId])return c.assignedDirectorId;
+  }
+  return "";
+}
+/* A store with two DMs counts under each, the same rule the Speed tab uses. */
+function inKeys(t,dim){
+  if(dim==="cat")   return [t.category||"__none"];
+  if(dim==="item")  return [t.subcategory||"__nosub"];
+  if(dim==="store") return [t.storeId||"__none"];
+  if(dim==="dm"){const c=t.storeId?(storeCoachIds(t.storeId)||[]):[];return c.length?c:["__none"]}
+  if(dim==="do")    return [inDirectorId(t.storeId)||"__none"];
+  if(dim==="who")   return [inWhoKey(t)];
+  if(dim==="status")return [t.status||"__none"];
+  return ["__none"];
+}
+function inLabel(dim,key,t){
+  if(dim==="cat"||dim==="store")return crLabel(dim,key);
+  if(dim==="item")return crLabel("item",key);
+  if(dim==="dm"||dim==="do")return crSpeedKeyLabel(dim,key);
+  if(dim==="status")return (STATUSES[key]||{}).label||key;
+  if(dim==="who"){
+    if(key==="__none")return "Nobody assigned";
+    return String(assigneeLabelFor(t)||"Unknown").replace(/^[^A-Za-z0-9(]+/,"")||"Unknown";
+  }
+  return key;
+}
+function inDimTabs(stateKey,dims){
+  return dims.map(([k,l])=>`<button class="ce-tab${IN[stateKey]===k?" on":""}" onclick="inSet('${stateKey}','${k}')">${l}</button>`).join("");
+}
+function inPeriodTabs(){
+  return [30,90,180,365].map(d=>`<button class="ce-tab${IN.days===d?" on":""}" onclick="inSet('days',${d})">${d===365?"1 year":d+"d"}</button>`).join("");
+}
+function inWindowLabel(){
+  const from=new Date(now()-IN.days*86400000).toLocaleDateString("en-US",{month:"short",day:"numeric"});
+  const to=new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+  return from+" – "+to;
+}
+function inKpis(list){
+  return `<div class="in-kpis">${list.map(([n,l])=>`<div class="rp-stat"><div class="rp-n">${esc(n)}</div><div class="rp-l">${esc(l)}</div></div>`).join("")}</div>`;
+}
+function inTixRow(t,right){
+  if(t._missing){
+    return `<div class="cr-tix-row"><div class="cr-tix-top">
+        <span class="cr-tix-store">${esc(t.storeId?storeName(t.storeId):"Unknown store")}</span>
+        <span class="in-right">${esc(right||"")}</span></div>
+      <div class="cr-tix-desc">This ticket is no longer in FixMi.</div></div>`;
+  }
+  const pri=t.priority==="emergency"?"e":(t.priority==="urgent"?"u":"");
+  return `<button type="button" class="cr-tix-row in-tix" onclick="openTicket('${escA(t._id)}','insights')">
+      <div class="cr-tix-top">
+        <span class="cr-tix-store">${esc(storeName(t.storeId))}</span>
+        <span class="r-pri ${pri}">${esc(PRIORITIES[t.priority]||"Normal")}</span>
+        <span class="cr-tix-st">${esc((STATUSES[t.status]||{}).label||t.status||"")}</span>
+        <span class="in-right">${esc(right||"")}</span>
+      </div>
+      <div class="cr-tix-desc">${esc(t.description||"(no description)")}</div>
+      <div class="cr-tix-meta mono"><span>${esc(t.shortId||"")} · ${esc(catPath(t))}</span>
+        <span>${esc(String(assigneeLabelFor(t)||"Nobody assigned"))}</span></div>
+    </button>`;
+}
+function inListBody(){
+  const items=IN_SEL.items, shown=items.slice(0,IN_LIST_MAX);
+  return `<button class="cr-back" onclick="inBack()">‹ Back</button>
+    <div class="cr-top"><b>${esc(IN_SEL.title)}</b>${IN_SEL.sub?" · "+esc(IN_SEL.sub):""} · ${items.length} ticket${items.length===1?"":"s"}</div>
+    ${items.length>shown.length?`<p class="cr-hint">Showing the first ${shown.length}.</p>`:""}
+    <div class="cr-tix" style="margin-top:10px">${shown.map(it=>inTixRow(inTicket(it.id)||{_id:it.id,_missing:true,storeId:it.storeId},it.right)).join("")}</div>`;
+}
+/* One ranked row: label, a bar, a value. `segs` draws a split bar instead. */
+function inBarRow(i,g,pct,val,segs){
+  const bar=segs
+    ?`<div class="in-stack" style="width:${Math.max(3,pct)}%">${segs.map(([cls,w])=>w>0?`<span class="${cls}" style="width:${w}%"></span>`:"").join("")}</div>`
+    :`<div class="cr-bar" style="width:${pct>0?Math.max(2,pct):0}%"></div>`;
+  return `<button type="button" class="in-row${g.thin?" thin":""}" onclick="inPick(${i})">
+      <div class="cr-label">${esc(g.label)}</div>
+      <div class="${segs?"in-track":"cr-track"}">${bar}</div>
+      <div class="in-val">${val}</div></button>`;
+}
+
+/* ---- 1. SPEND -------------------------------------------------------------
+   A link is counted by its INVOICE date (when the money was billed), falling
+   back to when it was matched. "Not a repair" dismissals carry no ticket and
+   are left out. */
+function inSpendLinks(){
+  const since=now()-IN.days*86400000;
+  return Object.values(costLinks()).filter(l=>l&&l.ticketId&&!l.skip&&(Number(l.amount)||0)!==0).map(l=>({
+    l, amt:Number(l.amount)||0,
+    at:inTs(l.inv&&l.inv.createdAt)||inTs(l.at),
+    t:inTicket(l.ticketId)||{_id:l.ticketId,storeId:l.storeId,_missing:true}
+  })).filter(x=>x.at>=since);
+}
+function inSpendGroups(links,dim){
+  const by={};
+  links.forEach(x=>{
+    const vendor=String((x.l.inv&&x.l.inv.vendor)||"").trim();
+    const keys=dim==="paid"?[vendor.toLowerCase()||"__none"]:inKeys(x.t,dim);
+    keys.forEach(k=>{
+      const g=by[k]=by[k]||{key:k,amt:0,per:{},sid:{},
+        label:dim==="paid"?(vendor||"Vendor not on the invoice"):inLabel(dim,k,x.t)};
+      g.amt+=x.amt; g.per[x.l.ticketId]=(g.per[x.l.ticketId]||0)+x.amt; g.sid[x.l.ticketId]=x.l.storeId;
+    });
+  });
+  return Object.values(by).map(g=>{
+    const ids=Object.keys(g.per).sort((a,b)=>g.per[b]-g.per[a]);
+    return {key:g.key,label:g.label,amt:g.amt,n:ids.length,
+      sub:inMoney0(g.amt)+" in the last "+IN.days+" days",
+      items:ids.map(id=>({id,storeId:g.sid[id],right:fmtMoney(g.per[id])}))};
+  }).sort((a,b)=>b.amt-a.amt||a.label.localeCompare(b.label));
+}
+function inSpendBody(){
+  const links=inSpendLinks(), since=now()-IN.days*86400000;
+  const per={}; links.forEach(x=>{per[x.l.ticketId]=(per[x.l.ticketId]||0)+x.amt});
+  const vals=Object.values(per), total=vals.reduce((s,v)=>s+v,0);
+  const closedIn=inAllTickets().filter(t=>t.status==="closed"&&closedAt(t)>=since);
+  const costed=closedIn.filter(t=>ticketCost(t._id)>0).length;
+  const cover=closedIn.length?Math.round(costed/closedIn.length*100):0;
+  const dims=[["cat","Category"],["item","Item"],["store","Store"],["dm","DM"],["do","Director"],["paid","Paid to"]];
+  const head=`<div class="in-seg"><span class="in-lab">Invoiced in</span>${inPeriodTabs()}</div>
+    ${inKpis([[inMoney0(total),"matched spend"],[String(vals.length),"jobs with a cost"],
+              [vals.length?inMoney0(total/vals.length):"—","average per job"],[vals.length?inMoney0(median(vals)):"—","median per job"]])}
+    <div class="in-note${cover<50&&closedIn.length?" warn":""}"><b>${costed} of ${closedIn.length}</b> tickets closed in this window have an invoice matched${closedIn.length?` (${cover}%)`:""}.
+      Spend here is only what has been matched in Job Costs, so it is a floor, not the full bill.
+      <button type="button" class="in-link" onclick="openJobCosts()">Match more invoices ›</button></div>`;
+  if(!links.length)return head+`<div class="rp-empty">No matched invoices are dated inside this window.</div>`;
+  const list=IN_GROUPS=inSpendGroups(links,IN.sDim);
+  const max=Math.max(1,...list.map(g=>g.amt));
+  return head+`<div class="section-label">Spend by<span class="ln"></span></div>
+    <div class="ce-tabs" style="margin-bottom:10px">${inDimTabs("sDim",dims)}</div>
+    ${IN.sDim==="dm"?`<p class="cr-hint">A store with two DMs counts under each, so these rows can add up to more than the total.</p>`:""}
+    <div class="cr-chart">${list.map((g,i)=>inBarRow(i,g,Math.round(Math.max(0,g.amt)/max*100),
+      `${inMoney0(g.amt)} <i>· ${g.n} job${g.n===1?"":"s"}</i>`)).join("")}</div>
+    <p class="cr-hint" style="margin-top:10px">${esc(inWindowLabel())} · tap a row to read the jobs behind it, most expensive first.</p>`;
+}
+
+/* ---- 2. TIME IN STATUS ----------------------------------------------------
+   Walk the trail in time order. The ticket starts Unassigned when it is
+   raised; every entry carrying a toStatus ends one stretch and starts the
+   next. Time spent Closed (before a reopen) is not counted against anybody.
+
+   Tickets imported from OwlOps are left out: their trail is "created" and
+   "closed" with nothing between, so every day of the job would be blamed on
+   Unassigned. Returns null for a ticket that cannot be read honestly. */
+function inStageTimes(t){
+  const acts=arr_(t.activity).filter(a=>a&&Number(a.ts)).slice().sort((a,b)=>a.ts-b.ts);
+  if(acts.some(a=>/^Imported from OwlOps/.test(String(a.note||""))))return null;
+  const start=Number(t.createdAt)||(acts[0]&&Number(acts[0].ts))||0;
+  const end=t.status==="closed"?closedAt(t):now();
+  if(!start||!(end>start))return null;
+  const ms={},wait={};
+  let cur="unassigned",at=start,reason="";
+  const add=to=>{
+    const d=Math.min(to,end)-at;
+    if(d>0&&cur!=="closed"){
+      ms[cur]=(ms[cur]||0)+d;
+      if(cur==="waiting"){const r=reason||"No reason given";wait[r]=(wait[r]||0)+d}
+    }
+  };
+  for(const a of acts){
+    if(!a.toStatus||!STATUSES[a.toStatus])continue;
+    const ts=Math.max(Number(a.ts),at);
+    if(ts>end)break;
+    add(ts); at=ts; cur=a.toStatus;
+    if(cur==="waiting")reason=String(a.note||"").split(" — ")[0].trim();
+  }
+  add(end);
+  const total=Object.values(ms).reduce((s,v)=>s+v,0);
+  return total>0?{ms,wait,total}:null;
+}
+function inTimeRows(){
+  const since=now()-IN.days*86400000;
+  const closed=inAllTickets().filter(t=>t.status==="closed"&&closedAt(t)>=since
+    &&(IN.tCat==="all"||t.category===IN.tCat));
+  const rows=[];
+  closed.forEach(t=>{const st=inStageTimes(t);if(st)rows.push({t,st})});
+  return {rows,skipped:closed.length-rows.length};
+}
+function inTimeBody(){
+  const {rows,skipped}=inTimeRows();
+  /* Only categories that actually closed something in the window — a filter
+     offering forty empty choices is a filter nobody uses. */
+  const since=now()-IN.days*86400000, seen=new Set();
+  inAllTickets().forEach(t=>{if(t.status==="closed"&&t.category&&closedAt(t)>=since)seen.add(t.category)});
+  if(IN.tCat!=="all")seen.add(IN.tCat);
+  const cats=[...seen].sort((a,b)=>String(ALL_CATEGORIES[a]||a).localeCompare(String(ALL_CATEGORIES[b]||b)));
+  const head=`<div class="in-seg"><span class="in-lab">Closed in</span>${inPeriodTabs()}
+      <select class="input in-select" onchange="inSet('tCat',this.value)">
+        <option value="all">All categories</option>
+        ${cats.map(k=>`<option value="${escA(k)}"${IN.tCat===k?" selected":""}>${esc(ALL_CATEGORIES[k]||k)}</option>`).join("")}
+      </select></div>`;
+  if(!rows.length)return head+`<div class="rp-empty">No closed tickets with a readable history in this window${skipped?` (${skipped} imported from OwlOps were left out)`:""}.</div>`;
+  const DAY=86400000, n=rows.length;
+  const grand=rows.reduce((s,r)=>s+r.st.total,0);
+  const stages=IN_STAGES.map(([k,label,what])=>{
+    const hit=rows.filter(r=>r.st.ms[k]>0);
+    const sum=hit.reduce((s,r)=>s+r.st.ms[k],0);
+    return {k,label,what,sum,share:grand?sum/grand*100:0,avg:sum/n/DAY,
+      med:median(hit.map(r=>r.st.ms[k]/DAY)),hits:hit.length};
+  });
+  if(!stages.some(s=>s.k===IN.tStage))IN.tStage="finished";
+  const cur=stages.find(s=>s.k===IN.tStage);
+  const top=stages.slice().sort((a,b)=>b.sum-a.sum)[0];
+  const stack=`<div class="in-stack big">${stages.map(s=>s.share>0?`<span title="${escA(s.label)} ${Math.round(s.share)}%" style="width:${s.share}%;background:${STATUSES[s.k].color}"></span>`:"").join("")}</div>`;
+  const table=`<div class="in-stage in-stage-h"><div>Status</div><div></div><div>Share</div><div>Typical</div><div>Jobs</div></div>`
+    +stages.map(s=>`<button type="button" class="in-stage${s.k===IN.tStage?" on":""}" onclick="inSet('tStage','${s.k}')">
+        <div><span class="in-sw" style="background:${STATUSES[s.k].color}"></span><b>${esc(s.label)}</b><small>${esc(s.what)}</small></div>
+        <div class="cr-track"><div class="cr-bar" style="width:${s.share>0?Math.max(2,Math.round(s.share)):0}%;background:${STATUSES[s.k].color}"></div></div>
+        <div class="in-val">${Math.round(s.share)}%</div>
+        <div class="in-val">${s.hits?fmtDays(s.med):"—"}</div>
+        <div class="in-val"><i>${s.hits}</i></div></button>`).join("");
+  /* What the waiting was for — the reason is the first half of the note the
+     tech wrote when they parked the job. */
+  const wait={}; rows.forEach(r=>Object.entries(r.st.wait).forEach(([k,v])=>{wait[k]=(wait[k]||0)+v}));
+  const wl=Object.entries(wait).sort((a,b)=>b[1]-a[1]).slice(0,8), wmax=wl.length?wl[0][1]:1;
+  const waitHtml=(IN.tStage==="waiting"&&wl.length)?`<div class="section-label">What the waiting was for<span class="ln"></span></div>
+    <div class="cr-chart">${wl.map(([k,v])=>`<div class="in-row static"><div class="cr-label">${esc(k)}</div>
+      <div class="cr-track"><div class="cr-bar" style="width:${Math.max(2,Math.round(v/wmax*100))}%"></div></div>
+      <div class="in-val">${fmtDays(v/DAY)} <i>total</i></div></div>`).join("")}</div>`:"";
+  // Where is the chosen status slowest?
+  const dims=[["store","Store"],["dm","DM"],["do","Director"],["who","Assigned to"],["cat","Category"]];
+  const by={};
+  rows.forEach(r=>{const v=r.st.ms[IN.tStage];if(!(v>0))return;
+    inKeys(r.t,IN.tDim).forEach(k=>{
+      const g=by[k]=by[k]||{key:k,label:inLabel(IN.tDim,k,r.t),days:[],tix:[]};
+      g.days.push(v/DAY); g.tix.push({id:r.t._id,d:v/DAY});
+    });});
+  const list=IN_GROUPS=Object.values(by).map(g=>({key:g.key,label:g.label,n:g.days.length,med:median(g.days),
+    thin:g.days.length<IN_MIN_N,title:g.label,sub:"time in "+cur.label,
+    items:g.tix.sort((a,b)=>b.d-a.d).map(x=>({id:x.id,right:fmtDays(x.d)+" "+cur.label.toLowerCase()}))}))
+    .sort((a,b)=>(a.thin-b.thin)||(b.med-a.med)||a.label.localeCompare(b.label));
+  const max=Math.max(0.0001,...list.map(g=>g.med));
+  const medTotal=median(rows.map(r=>r.st.total/DAY));
+  return head+inKpis([[String(n),"closed jobs read"],[fmtDays(medTotal),"typical job, open time"],
+      [top?top.label:"—","biggest share"],[top?Math.round(top.share)+"%":"—","of all open time"]])
+    +(skipped?`<div class="in-note">${skipped} ticket${skipped===1?" was":"s were"} left out: imported from OwlOps, so the steps between raised and closed were never recorded here.</div>`:"")
+    +`<div class="section-label">Where the time went<span class="ln"></span></div>${stack}
+    <div class="in-stages">${table}</div>
+    <p class="cr-hint">Share is of all the days these jobs were open. Typical is the median for jobs that passed through that status. Tap a status to rank it below.</p>
+    ${waitHtml}
+    <div class="section-label">Slowest in ${esc(cur.label)}<span class="ln"></span></div>
+    <div class="ce-tabs" style="margin-bottom:10px">${inDimTabs("tDim",dims)}</div>
+    ${list.length?`<div class="cr-chart">${list.map((g,i)=>inBarRow(i,g,Math.round(g.med/max*100),
+        `${fmtDays(g.med)} <i>· ${g.n} job${g.n===1?"":"s"}</i>`)).join("")}</div>
+      <p class="cr-hint" style="margin-top:10px">Median time in ${esc(cur.label)}, slowest first. Faded rows have fewer than ${IN_MIN_N} jobs and are listed, not ranked.</p>`
+      :`<div class="rp-empty">No job in this window spent time in ${esc(cur.label)}.</div>`}`;
+}
+
+/* ---- 3. OPEN BACKLOG ------------------------------------------------------
+   Age is from when the ticket was raised, whatever has happened since: a job
+   reopened last week is still as old as the problem is. */
+function inBand(days){const d=Math.floor(days);for(const [k,,max] of IN_BANDS){if(d<=max)return k}return "b3"}
+function inWeekStart(ts){const d=new Date(ts);d.setHours(0,0,0,0);d.setDate(d.getDate()-d.getDay());return d.getTime()}
+function inWeeks(count){
+  const out=[]; const d=new Date(inWeekStart(now()));
+  d.setDate(d.getDate()-7*(count-1));
+  for(let i=0;i<count;i++){
+    const s=d.getTime(); d.setDate(d.getDate()+7);
+    out.push({s,e:d.getTime(),opened:0,closed:0});
+  }
+  return out;
+}
+function inBacklogBody(){
+  const DAY=86400000, all=inAllTickets();
+  const open=all.filter(t=>t.status!=="closed"&&Number(t.createdAt)).map(t=>{
+    const age=(now()-Number(t.createdAt))/DAY; return {t,age,band:inBand(age)}});
+  const ages=open.map(o=>o.age);
+  const bandRows=IN_BANDS.map(([k,label])=>{
+    const m=open.filter(o=>o.band===k).sort((a,b)=>b.age-a.age);
+    return {k,label,n:m.length,title:"Open "+label,items:m.map(o=>({id:o.t._id,right:fmtDays(o.age)+" old"}))};
+  });
+  const dims=[["store","Store"],["dm","DM"],["do","Director"],["who","Assigned to"],["cat","Category"],["status","Status"]];
+  const by={};
+  open.forEach(o=>inKeys(o.t,IN.bDim).forEach(k=>{
+    const g=by[k]=by[k]||{key:k,label:inLabel(IN.bDim,k,o.t),n:0,b0:0,b1:0,b2:0,b3:0,oldest:0,tix:[]};
+    g.n++; g[o.band]++; g.oldest=Math.max(g.oldest,o.age); g.tix.push(o);
+  }));
+  const groups=Object.values(by).map(g=>({...g,sub:"open now",
+    items:g.tix.sort((a,b)=>b.age-a.age).map(o=>({id:o.t._id,right:fmtDays(o.age)+" old"}))}))
+    .sort((a,b)=>b.b3-a.b3||b.n-a.n||a.label.localeCompare(b.label));
+  IN_GROUPS=bandRows.concat(groups);            // bands are 0-3, groups follow
+  const bmax=Math.max(1,...bandRows.map(b=>b.n)), gmax=Math.max(1,...groups.map(g=>g.n));
+  const bands=`<div class="cr-chart">${bandRows.map((b,i)=>`<button type="button" class="in-row" onclick="inPick(${i})">
+      <div class="cr-label"><span class="in-sw in-${b.k}"></span>${esc(b.label)}</div>
+      <div class="in-track"><div class="in-stack" style="width:${b.n?Math.max(3,Math.round(b.n/bmax*100)):0}%"><span class="in-${b.k}" style="width:100%"></span></div></div>
+      <div class="in-val">${b.n} <i>· ${open.length?Math.round(b.n/open.length*100):0}%</i></div></button>`).join("")}</div>`;
+  const rowsHtml=groups.length?`<div class="cr-chart">${groups.map((g,i)=>inBarRow(i+bandRows.length,g,Math.round(g.n/gmax*100),
+      `${g.n} <i>· oldest ${fmtDays(g.oldest)}</i>`,
+      IN_BANDS.map(([k])=>["in-"+k,g[k]/g.n*100]))).join("")}</div>`
+    :`<div class="rp-empty">Nothing is open.</div>`;
+  // Raised vs closed, week by week (Sunday to Saturday, like the tech reports).
+  const weeks=inWeeks(12), w0=weeks[0].s;
+  const slot=ts=>{if(!(ts>=w0))return null;return weeks[Math.floor((inWeekStart(ts)-w0)/(7*DAY)+0.5)]||null};
+  all.forEach(t=>{
+    const o=slot(Number(t.createdAt)||0); if(o)o.opened++;
+    if(t.status==="closed"){const c=slot(closedAt(t)); if(c)c.closed++}
+  });
+  const wmax=Math.max(1,...weeks.map(w=>Math.max(w.opened,w.closed)));
+  const net=weeks.reduce((s,w)=>s+w.opened-w.closed,0);
+  const flow=CLOSED_LOADED?`<div class="in-legend"><span><span class="in-sw in-opened"></span>Raised</span><span><span class="in-sw in-closed"></span>Closed</span><span>Right-hand number: change in the pile that week</span></div>
+    ${weeks.map((w,i)=>{const d=w.opened-w.closed, last=i===weeks.length-1;
+      return `<div class="in-wk"><div class="in-wk-l">${esc(new Date(w.s).toLocaleDateString("en-US",{month:"short",day:"numeric"}))}${last?"<br><i>so far</i>":""}</div>
+        <div class="in-wk-b"><div><span class="in-opened" style="width:${Math.round(w.opened/wmax*82)}%"></span>${w.opened}</div>
+          <div><span class="in-closed" style="width:${Math.round(w.closed/wmax*82)}%"></span>${w.closed}</div></div>
+        <div class="in-wk-net ${d>0?"up":(d<0?"down":"")}">${d>0?"+"+d:(d<0?"−"+Math.abs(d):"0")}</div></div>`}).join("")}
+    <div class="in-note">Over these 12 weeks the pile ${net>0?`<b>grew by ${net}</b>`:(net<0?`<b>shrank by ${Math.abs(net)}</b>`:"<b>stayed level</b>")}: more ${net>0?"raised than closed":(net<0?"closed than raised":"or less one closed for each raised")}.</div>`
+    :`<div class="in-note warn">Closed tickets did not load, so closed-per-week cannot be counted. <button type="button" class="in-link" onclick="openInsights()">Try again ›</button></div>`;
+  return inKpis([[String(open.length),"open now"],[open.length?fmtDays(median(ages)):"—","typical age"],
+      [open.length?fmtDays(Math.max(...ages)):"—","oldest"],[String(bandRows[3].n),"older than 30 days"]])
+    +`<div class="section-label">How old the open work is<span class="ln"></span></div>${bands}
+    <div class="section-label">Open by<span class="ln"></span></div>
+    <div class="ce-tabs" style="margin-bottom:8px">${inDimTabs("bDim",dims)}</div>
+    <div class="in-legend">${IN_BANDS.map(([k,l])=>`<span><span class="in-sw in-${k}"></span>${esc(l)}</span>`).join("")}</div>
+    ${rowsHtml}
+    <p class="cr-hint" style="margin-top:10px">Most 31+ day tickets first. Tap a row to read them, oldest first.</p>
+    <div class="section-label">Raised vs closed, last 12 weeks<span class="ln"></span></div>${flow}`;
+}
+
+function inRender(){
+  IN_GROUPS=IN_SEL?IN_GROUPS:[];
+  const tabs=[["spend","Spend"],["time","Time in status"],["backlog","Open backlog"]]
+    .map(([k,l])=>`<button class="ce-tab${IN.tab===k?" on":""}" onclick="inSet('tab','${k}')">${l}</button>`).join("");
+  let body;
+  if(IN_SEL)body=inListBody();
+  else{
+    const missing=(IN.tab!=="backlog"&&!CLOSED_LOADED)
+      ?`<div class="in-note warn">Closed tickets did not load, so this tab is incomplete. <button type="button" class="in-link" onclick="openInsights()">Try again ›</button></div>`:"";
+    body=missing+(IN.tab==="time"?inTimeBody():(IN.tab==="backlog"?inBacklogBody():inSpendBody()));
+  }
+  modal(`<div class="sheet-head"><h2>Insights</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body">
+      <div class="ce-tabs in-main">${tabs}</div>
+      ${body}
+    </div>
+    <div class="sheet-foot"><button class="btn btn-ghost btn-block" onclick="closeModal()">Done</button></div>`);
+  const o=$("modalOverlay"); if(o)o.classList.add("wide");
+}
 
 /* ============================================================ SEARCHABLE STORE PICKER
    A native <select> is unusable past ~50 stores — you scroll and read. This
