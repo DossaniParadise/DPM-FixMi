@@ -216,6 +216,10 @@ body.no-reftags .reftag{display:none}
 .ro-banner{background:var(--panel-2);border:1px solid var(--line);border-left:4px solid var(--s-closed);
   border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:var(--ink-mid);line-height:1.4}
 .ro-banner b{color:var(--ink)}
+.reopen-q{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-left:4px solid var(--amber-deep);border-radius:9px;background:var(--panel-2);font-size:14px;line-height:1.5}
+.reopen-q>div{margin-top:4px}
+.reopen-hint{font-size:12px;color:var(--ink-dim)}
+.reopen-hint b{color:var(--ink-mid)}
 /* ===== PAGE HEAD / STATS / FILTERS ===== */
 .page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap}
 .page-title{font-family:var(--disp);font-weight:900;font-size:26px;letter-spacing:-.01em;line-height:1.05}
@@ -1593,7 +1597,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.74";
+const APP_VERSION = "9.75";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -4105,7 +4109,19 @@ function myStoreIds(){
    view), so nobody's phone pulls it at sign-in. */
 function canSeeClosed(){return !!SESSION&&["admin","director","coach","manager","tech","viewer"].includes(SESSION.role)}
 function closedReadOnly(t){return !!t&&t.status==="closed"&&(!SESSION||SESSION.role!=="admin")}
-const CLOSED_RO_MSG="Closed tickets are read only — only Overwatch can change or reopen them.";
+const CLOSED_RO_MSG="Closed tickets are read only — reopen it first to change anything.";
+/* WHO MAY CLOSE. A store's own GM reports that a job is done ("Finished");
+   deciding it is done-and-dusted ("Closed") belongs to the people above the
+   store — the District Manager, the Director, Overwatch. Techs never could. */
+function canCloseTickets(){return !!SESSION&&["admin","director","coach"].includes(SESSION.role)}
+/* WHO MAY REOPEN. The same three. A reopen is the one change a closed ticket
+   allows for anyone other than Overwatch, and it goes through its own door
+   (openReopen) rather than loosening the read-only rule for everything else. */
+function canReopen(t){
+  if(!t||!SESSION||!["admin","director","coach"].includes(SESSION.role))return false;
+  if(!["closed","finished"].includes(t.status))return false;
+  return SESSION.role==="admin"||myStoreIds().includes(t.storeId);
+}
 /* A tech's closed tickets are the ones assigned to them PLUS any they actually
    worked — clocked in, clocked out / finished, or moved — even if someone
    else was assigned at close, or a DM closed it after they finished. Activity
@@ -5205,6 +5221,7 @@ function ticketRow(t){
       below=`<div class="row-bar" onclick="event.stopPropagation()">
         <span><b>Closed</b> — reopen to?</span>
         <div class="rb-btns">
+          <button class="btn btn-ghost btn-sm" onclick="openReopen('${t._id}')">↩ Reopen…</button>
           <button class="btn btn-ghost btn-sm" onclick="setStatus('${t._id}','finished')">→ Finished</button>
           <button class="btn btn-ghost btn-sm" onclick="setStatus('${t._id}','unassigned')">→ Unassigned</button>
         </div></div>`;
@@ -5256,8 +5273,18 @@ function ticketRow(t){
       <div class="rb-btns">
         ${reqBtn}
         ${canProgress?`<button class="btn btn-ghost btn-sm" onclick="setStatus('${t._id}','in_progress')">▶ In progress</button>`:""}
-        <button class="btn btn-danger btn-sm" onclick="confirmClose('${t._id}')">✕ Mark closed</button>
+        ${canReopen(t)?`<button class="btn btn-ghost btn-sm" onclick="openReopen('${t._id}')">↩ Reopen</button>`:""}
+        ${canCloseTickets()
+          ? `<button class="btn btn-danger btn-sm" onclick="confirmClose('${t._id}')">✕ Mark closed</button>`
+          : (t.status!=="finished"?`<button class="btn btn-primary btn-sm fin" onclick="confirmGmFinish('${t._id}')">✓ Mark finished</button>`:"")}
       </div></div>`;
+  }
+  /* A closed row, for the District Manager or Director reading the archive:
+     the one thing they can do to it. (Overwatch has its own bar above.) */
+  if(t.status==="closed" && SESSION.role!=="admin" && canReopen(t)){
+    below+=`<div class="row-bar" onclick="event.stopPropagation()">
+      <span><b>Closed</b> — not actually fixed?</span>
+      <div class="rb-btns"><button class="btn btn-ghost btn-sm" onclick="openReopen('${t._id}')">↩ Reopen</button></div></div>`;
   }
   const chk = "";
   const rowClick = `openTicket('${t._id}')`;
@@ -5628,14 +5655,14 @@ function dupPanelHtml(){
     const when=t.status==="closed"
       ? ("closed "+timeAgo(Number(t.closedAt||t.finishedAt||t.updatedAt||0)))
       : ("opened "+timeAgo(t.createdAt));
-    /* Only Overwatch may reopen a close-out. Everyone else asks for one, so a
-       GM or DM can still say "this is back" without being able to reverse
-       somebody's close or quietly change last week's finished count. */
+    /* Overwatch, Directors and District Managers may reopen a close-out. A GM
+       or a tech asks for one instead, so they can still say "this is back"
+       without being able to reverse somebody's close. */
     let action;
     if(h.kind==="open")
       action=`<button type="button" class="btn btn-primary btn-sm" onclick="dupMerge(${i})">Add to this one</button>`;
     else if(h.kind==="closed-recent")
-      action=SESSION.role==="admin"
+      action=["admin","director","coach"].includes(SESSION.role)
         ? `<button type="button" class="btn btn-primary btn-sm" onclick="dupReopen(${i})">Reopen it</button>`
         : `<button type="button" class="btn btn-primary btn-sm" onclick="dupRequestReopen(${i})">It's back \u2014 tell Overwatch</button>`;
     else
@@ -5725,7 +5752,7 @@ async function dupReopen(i){
   }catch(e){ toast(e.message||"Could not reopen","err");
     if(btn){btn.disabled=false;btn.textContent="File as a separate ticket"} }
 }
-/* A DM or Director cannot reverse a close-out, so their report lands on the
+/* A GM or a tech cannot reverse a close-out, so their report lands on the
    ticket and flags it for Overwatch rather than being lost. */
 async function dupRequestReopen(i){
   const h=DUP_HITS[i]; if(!h)return;
@@ -6588,7 +6615,7 @@ function openTicket(id,ret){
       <button class="x-btn" onclick="closeModal()">✕</button>
     </div>
     <div class="sheet-body">
-      ${closedReadOnly(t)?`<div class="ro-banner">🔒 <b>Closed · read only.</b> You can see the notes, photos and history. Only Overwatch can change or reopen it.</div>`:""}
+      ${closedReadOnly(t)?`<div class="ro-banner">🔒 <b>Closed · read only.</b> You can see the notes, photos and history. ${canReopen(t)?"If it is not actually fixed, reopen it below.":"A District Manager, Director or Overwatch can reopen it."}</div>`:""}
       <div class="detail-store">
         <div style="font-weight:700;font-size:17px">${esc(storeName(sid))}</div>
         ${storeGeoUrl(sid)?`<a class="btn btn-ghost btn-sm gps-btn" href="${escA(storeGeoUrl(sid))}" target="_blank" rel="noopener">📍 Open GPS</a>`:""}
@@ -6823,11 +6850,14 @@ function ticketControls(t){
   if(role==="admin"){
     h+=`<div class="section-label">Assign<span class="ln"></span></div>${assignControls(t)}`;
     h+=`<div class="section-label">Set status<span class="ln"></span></div>${statusGrid(t,STATUS_ORDER)}`;
+    if(canReopen(t))h+=reopenButton(t);
     h+=`<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="openEdit('${t._id}')">✎ Edit all details</button>`;
     return h;
   }
 
-  if(isClosed) return `<div class="section-label">Closed<span class="ln"></span></div><div style="color:var(--ink-dim);font-size:13px">Read only. Only Overwatch can change or reopen this ticket.</div>`;
+  if(isClosed) return `<div class="section-label">Closed<span class="ln"></span></div>`+(canReopen(t)
+    ? `<div style="color:var(--ink-dim);font-size:13px">Read only while it is closed.</div>${reopenButton(t)}`
+    : `<div style="color:var(--ink-dim);font-size:13px">Read only. A District Manager, Director or Overwatch can reopen this ticket.</div>`);
 
   // TECH actions — keep it to one decision: where does this job go next?
   if(role==="tech"){
@@ -6902,8 +6932,17 @@ function ticketControls(t){
     h+=`<div class="section-label">Update job<span class="ln"></span></div><div style="display:flex;flex-direction:column;gap:9px">`;
     if(t.status!=="in_progress" && t.status!=="finished")
       h+=`<button class="btn btn-ghost btn-block" onclick="setStatus('${t._id}','in_progress')">▶ Mark in progress</button>`;
-    h+=`<button class="btn btn-danger btn-block" onclick="confirmClose('${t._id}')">✕ Mark closed</button>`;
-    h+=`</div><div style="font-size:11px;color:var(--ink-dim);margin-top:8px">Closing removes the ticket from all views except Overwatch.</div>`;
+    if(canCloseTickets()){
+      if(canReopen(t))h+=reopenButton(t,true);
+      h+=`<button class="btn btn-danger btn-block" onclick="confirmClose('${t._id}')">✕ Mark closed</button>`;
+      h+=`</div><div style="font-size:11px;color:var(--ink-dim);margin-top:8px">Closing takes the ticket off the open lists. You can reopen it later if the problem comes back.</div>`;
+    }else{
+      /* A GM: Finished, never Closed. */
+      h+=t.status==="finished"
+        ? `<div style="color:var(--ink-dim);font-size:13px">Marked finished. Your District Manager closes it out.</div>`
+        : `<button class="btn btn-primary fin btn-block" onclick="confirmGmFinish('${t._id}')">✓ Mark finished</button>`;
+      h+=`</div><div style="font-size:11px;color:var(--ink-dim);margin-top:8px">Finished tells your District Manager the job is done. They check it and close it.</div>`;
+    }
     // Overwatch, Directors and District Managers can correct a ticket's details.
     if(canEditContent())
       h+=`<button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="openEdit('${t._id}')">✎ ${role==="director"?"Edit all details":"Edit details &amp; urgency"}</button>`;
@@ -6968,6 +7007,7 @@ function roBlocked(id){
 }
 async function patchTicket(id,patch,activityEntry){
   const t=TICKETS[id];if(!t){toast("Ticket not found","err");return false}
+  if(patch&&patch.status==="closed"&&t.status!=="closed"&&!canCloseTickets()){toast(NO_CLOSE_MSG,"err");return false}
   if(roBlocked(id))return false;
   const prevStatus=t.status;
   const prevAssignee=(t.assignedTechId||"")+"|"+(t.assignedVendorId||"")+"|"+(t.assignedCoachId||"")+"|"+(t.assignedManagerStoreId||"");
@@ -7008,7 +7048,9 @@ async function setStatus(id,status){
 }
 /* Close is destructive (removes the ticket from every view except Overwatch),
    so confirm first. Works from the detail sheet or straight from a list row. */
+const NO_CLOSE_MSG="Store managers mark a job Finished — your District Manager closes it.";
 function confirmClose(id){
+  if(!canCloseTickets()){toast(NO_CLOSE_MSG,"err");return}
   if(roBlocked(id))return;
   const t=TICKETS[id];if(!t)return;
   modal(`<div class="sheet-head"><h2>Mark this ticket closed?</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
@@ -7019,7 +7061,7 @@ function confirmClose(id){
         <span style="font-weight:400;color:var(--ink-dim)">· optional</span></label>
         <textarea class="input" id="closeNote" rows="2" placeholder="What was done, or why this is being closed…"></textarea>
       </div>
-      <p style="margin:12px 0 0;color:var(--ink-dim);font-size:13px">Once closed, this ticket disappears from all dashboards except Overwatch. Only Overwatch can reopen it.</p>
+      <p style="margin:12px 0 0;color:var(--ink-dim);font-size:13px">Once closed, this ticket comes off the open lists. A District Manager, Director or Overwatch can reopen it if the problem comes back.</p>
     </div>
     <div class="sheet-foot">
       <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
@@ -7027,6 +7069,7 @@ function confirmClose(id){
     </div>`);
 }
 async function doClose(id){
+  if(!canCloseTickets()){toast(NO_CLOSE_MSG,"err");return}
   const btn=$("closeConfirm");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Closing…'}
   // Notes are optional — an empty box closes exactly as before.
   const note=(($("closeNote")||{}).value||"").trim();
@@ -7035,6 +7078,145 @@ async function doClose(id){
   if(await patchTicket(id,patch,{action:"status",toStatus:"closed",note:note||""})){
     toast(note?"Closed with notes":"Ticket closed");closeModal();render();
   }else if(btn){btn.disabled=false;btn.innerHTML="✕ Mark closed"}
+}
+/* ---- a GM marks a job finished ----------------------------------------------
+   One confirm, an optional note. Deliberately not the technician's finish
+   screen: that one asks for a completion photo and stops a clock, and neither
+   means anything for a manager saying "this is sorted". */
+function confirmGmFinish(id){
+  if(roBlocked(id))return;
+  const t=TICKETS[id];if(!t)return;
+  modal(`<div class="sheet-head"><h2>Mark this job finished?</h2><button class="x-btn" onclick="closeModal()">✕</button></div>
+    <div class="sheet-body">
+      <p style="margin:0;color:var(--ink-mid);font-size:14px">${esc(storeName(t.storeId))} · ${esc(t.shortId||"")}</p>
+      <p style="margin:10px 0 0;font-size:14px">${esc(t.description||"")}</p>
+      <div class="field" style="margin-top:14px"><label class="label">Note
+        <span style="font-weight:400;color:var(--ink-dim)">· optional</span></label>
+        <textarea class="input" id="gmFinNote" rows="2" placeholder="What was done, or how you know it is fixed…"></textarea>
+      </div>
+      <p style="margin:12px 0 0;color:var(--ink-dim);font-size:13px">This moves the ticket to Finished. Your District Manager checks it and closes it out.</p>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary fin" style="flex:1" id="gmFinConfirm" onclick="doGmFinish('${id}')">✓ Mark finished</button>
+    </div>`);
+}
+async function doGmFinish(id){
+  const btn=$("gmFinConfirm");if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Saving…'}
+  const note=(($("gmFinNote")||{}).value||"").trim();
+  const patch={status:"finished",finishedAt:now()};
+  if(note)patch.closeNote={text:note,by:SESSION.name,at:now()};
+  if(await patchTicket(id,patch,{action:"status",toStatus:"finished",note:note||"Marked finished by the store"})){
+    toast("Marked finished");closeModal();render();
+  }else if(btn){btn.disabled=false;btn.innerHTML="✓ Mark finished"}
+}
+
+/* ---- reopening -------------------------------------------------------------
+   For a District Manager, a Director or Overwatch, on a ticket that is Closed
+   or Finished and turns out not to be fixed. The one question that matters is
+   who goes back: the same person who did it, or somebody else.
+
+     same in-house tech  →  Dispatched to them again (they see it at once)
+     same outside vendor →  Assigned to them (a vendor still has to be rung)
+     somebody else       →  Unassigned, back in the pool
+
+   A ticket that was never on a tech or vendor — or was on one FindMi no
+   longer lists — has nobody to send back, so it simply reopens Unassigned. */
+function reopenButton(t,inList){
+  return `<button class="btn btn-ghost btn-block" ${inList?"":'style="margin-top:12px"'} onclick="openReopen('${t._id}')">↩ ${t.status==="closed"?"Reopen this ticket":"Not fixed — reopen it"}</button>`;
+}
+function reopenTicketRec(id){return TICKETS[id]||CLOSED_TICKETS[id]||null}
+/** Who did the job last time, if they can be sent back. */
+function reopenLastHolder(t){
+  if(t.assignedTechId){const x=(MASTER.repairTechnicians||{})[t.assignedTechId];
+    return x?{kind:"tech",id:t.assignedTechId,name:x.name||"the technician",word:"technician"}:{gone:"The technician who did this job is no longer in FindMi."}}
+  if(t.assignedVendorId){const v=VENDORS[t.assignedVendorId];
+    return v?{kind:"vendor",id:t.assignedVendorId,name:v.name||"the vendor",word:"vendor"}:{gone:"The vendor who did this job is no longer on the vendor list."}}
+  return {gone:""};
+}
+function openReopen(id){
+  const t=reopenTicketRec(id);
+  if(!t){toast("Ticket not found","err");return}
+  if(!canReopen({...t,_id:id})){toast("Only a District Manager, Director or Overwatch can reopen a ticket","err");return}
+  const h=reopenLastHolder(t);
+  const first=h.name?String(h.name).split(" ")[0]:"";
+  const foot=h.kind
+    ? `<button class="btn btn-ghost" style="flex:1" id="reopenNo" onclick="doReopen('${id}',false)">No — someone else</button>
+       <button class="btn btn-primary" style="flex:1" id="reopenYes" onclick="doReopen('${id}',true)">Yes — send ${esc(h.kind==="tech"?first:"them")} back</button>`
+    : `<button class="btn btn-ghost" style="flex:1" onclick="openTicket('${id}')">Cancel</button>
+       <button class="btn btn-primary" style="flex:1" id="reopenNo" onclick="doReopen('${id}',false)">↩ Reopen as unassigned</button>`;
+  modal(`<div class="sheet-head"><h2>Reopen this ticket</h2><button class="x-btn" onclick="openTicket('${id}')">✕</button></div>
+    <div class="sheet-body">
+      <p style="margin:0;color:var(--ink-mid);font-size:14px">${esc(storeName(t.storeId))} · ${esc(t.shortId||"")} · ${esc((STATUSES[t.status]||{}).label||t.status)}</p>
+      <p style="margin:10px 0 0;font-size:14px">${esc(t.description||"")}</p>
+      <div class="field" style="margin-top:14px"><label class="label" for="reopenWhy">What is still wrong?
+        <span style="font-weight:400;color:var(--ink-dim)">· optional</span></label>
+        <textarea class="input" id="reopenWhy" rows="2" placeholder="e.g. Still leaking after the repair — worse when the dish machine runs."></textarea>
+        <div style="font-size:11px;color:var(--ink-dim);margin-top:6px">Goes on the ticket, and into the email whoever is sent back receives.</div>
+      </div>
+      ${h.kind
+        ? `<div class="reopen-q"><b>Do you want the same ${h.word} to come back?</b>
+             <div>${h.kind==="tech"?"🔧":"🏢"} ${esc(h.name)}</div>
+             <div class="reopen-hint">${h.kind==="tech"
+               ? `<b>Yes</b> dispatches it straight back to ${esc(first)}. <b>No</b> puts it in the unassigned pool.`
+               : `<b>Yes</b> assigns it to them again — they still need to be contacted. <b>No</b> puts it in the unassigned pool.`}</div></div>`
+        : `<div class="reopen-q"><b>This will reopen as Unassigned.</b>
+             <div class="reopen-hint">${esc(h.gone||"Nobody was on this ticket as a technician or vendor, so there is no one to send back.")} It goes to the unassigned pool to be routed.</div></div>`}
+    </div>
+    <div class="sheet-foot">${foot}</div>`);
+  setTimeout(()=>{const b=$("reopenWhy");if(b)b.focus()},80);
+}
+async function doReopen(id,same){
+  const t=reopenTicketRec(id);
+  if(!t){toast("Ticket not found","err");return}
+  if(!canReopen({...t,_id:id})){toast("Only a District Manager, Director or Overwatch can reopen a ticket","err");return}
+  const h=reopenLastHolder(t);
+  const back=!!(same&&h.kind);
+  const why=(($("reopenWhy")||{}).value||"").trim();
+  ["reopenYes","reopenNo"].forEach(k=>{const b=$(k);if(b)b.disabled=true});
+  const btn=$(back?"reopenYes":"reopenNo"), label=btn?btn.innerHTML:"";
+  if(btn)btn.innerHTML='<span class="inline-spin"></span> Reopening…';
+  const prevStatus=t.status;
+  const status=back?(h.kind==="tech"?"dispatched":"assigned"):"unassigned";
+  const activity=arr_(t.activity).slice();
+  activity.push({ts:now(),by:SESSION.name,role:SESSION.role,action:"status",toStatus:status,
+    note:"Reopened"+(back?" — back to "+h.name:" — unassigned")+(why?": "+why:"")});
+  const comments=arr_(t.comments).slice();
+  /* Sent back to the same person, the reason travels as their instructions
+     (the ticket and the email both show those). With nobody named yet it goes
+     on the thread instead, where whoever picks it up will read it. */
+  if(why&&!back)comments.push({id:uid(),by:SESSION.name,role:SESSION.role,email:SESSION.email,text:why,ts:now(),reopenNote:true});
+  const updated={...t,activity,comments,status,
+    assignedTechId:back&&h.kind==="tech"?h.id:null,
+    assignedVendorId:back&&h.kind==="vendor"?h.id:null,
+    assignedCoachId:null,assignedManagerStoreId:null,
+    assignNote:(why&&back)?{text:why,by:SESSION.name,at:now(),to:h.name}:null,
+    /* The old close-out is history now (its note is still on the activity
+       trail). Leaving these would show "Closing notes" on a live ticket and
+       start the next visit's timer from last month. */
+    closeNote:null,finishedAt:null,clockInAt:null,clockOutAt:null,waitingReason:null,
+    ...(status==="dispatched"?{dispatchedAt:now()}:{}),
+    reopenedAt:now(),reopenedBy:SESSION.name,
+    previousClosedAt:Number(closedAt(t))||null,
+    reopenCount:(Number(t.reopenCount)||0)+1,
+    ...(t.reopenRequest?{reopenRequest:{...t.reopenRequest,done:true}}:{}),
+    updatedAt:now()};
+  if(!updated.shareToken)updated.shareToken=newShareToken();
+  delete updated._id;
+  showLoader(true);
+  try{
+    await apiWriteTicket(id,updated);
+    notifyTicket("status",id,updated,{prevStatus,assigneeChanged:true,assignee:assigneeLabelFor(updated),
+      actorName:SESSION.name,actorEmail:SESSION.email});
+    showLoader(false);
+    toast(back?(status==="dispatched"?"Reopened · dispatched to "+h.name:"Reopened · assigned to "+h.name):"Reopened · unassigned");
+    closeModal(); render(); refreshInBackground(); openTicket(id);
+  }catch(e){
+    showLoader(false);
+    toast(e.message||"Could not reopen","err");
+    ["reopenYes","reopenNo"].forEach(k=>{const b=$(k);if(b)b.disabled=false});
+    if(btn)btn.innerHTML=label;
+  }
 }
 /* One-click close-out from the Finished list (overwatch). Immediately sets that
    one ticket to Closed and shows a fading confirmation. */
