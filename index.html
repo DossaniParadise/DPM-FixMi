@@ -565,6 +565,11 @@ body.no-reftags .reftag{display:none}
 .rs-meta.prog{color:var(--s-progress);font-weight:700;font-family:var(--mono)}
 /* below-row action bars (assigned/waiting/in-progress) */
 .row-wrap{display:flex;flex-direction:column}
+.row.row-unsent{border-style:dashed;cursor:default}
+.row.row-unsent .row-desc,.row.row-unsent .row-store{opacity:.8}
+.row.row-unsent.failed{border-color:var(--red);border-style:solid}
+.unsent-chip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--amber-deep);white-space:nowrap}
+.unsent-chip.failed{color:var(--red)}
 .row-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
   background:var(--tint);border:1px solid var(--tint-line);border-top:none;border-radius:0 0 10px 10px;
   margin-top:-1px;padding:9px 15px;font-size:13px;color:var(--ink-mid)}
@@ -818,6 +823,11 @@ html[data-theme="dark"] .leaflet-tooltip-top:before{border-top-color:var(--panel
 .set-tab:hover{color:var(--ink)}
 .set-tab.on{background:var(--amber-fill);color:#fff}
 .set-hint{color:var(--ink-dim);font-size:13px;margin-top:0}
+.num-out{margin-top:12px;font-size:13px;color:var(--ink)}
+.num-row{display:flex;gap:8px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
+.num-row .num-arrow{color:var(--ink-dim)}
+.num-row .num-store{margin-left:auto;color:var(--ink-dim);text-align:right}
+.num-warn{margin-top:8px;padding:9px 11px;border-radius:9px;background:rgba(220,38,38,.08);color:var(--red,#dc2626);font-size:13px}
 .va-group{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
   color:var(--ink-mid);margin:12px 2px 6px}
 .va-row{margin-bottom:6px}
@@ -1597,7 +1607,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.75";
+const APP_VERSION = "9.78";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -3420,6 +3430,7 @@ async function apiWriteMulti(updates){
 }
 async function refresh(){
   MASTER=await apiGet();
+  dropStoreIndex();
   RESTAURANTS=MASTER.restaurants||{};
   // Merge the lazy closed-cache over the server payload. Per ticket, the copy
   // with the newer updatedAt wins: a ticket just closed here keeps its closed
@@ -3441,6 +3452,8 @@ async function refresh(){
     if(!s || (t.updatedAt||0)>(s.updatedAt||0)) TICKETS[id]=t;
     else delete LOCAL_ECHO[id];
   }
+  applyRenumEcho();            // a number changed here stays changed while the CDN copy lags
+  watchMadeHere();             // did someone else file with the same number at the same moment?
   if(NOTIFY_ECHO){
     MASTER.admins=MASTER.admins||{};
     const srv=MASTER.admins.notifyPrefs;
@@ -3554,6 +3567,8 @@ function publishedVersion(){
 /* "Busy" is anything a reload would destroy: an open sheet, a focused field,
    or a photo going up. */
 function appBusy(){
+  if(typeof hasUnsentTickets==="function"&&hasUnsentTickets())return true;   // a reload now would lose it
+  if(NUMCHECK_BUSY)return true;                // mid-way through renumbering: let it finish first
   const o=$("modalOverlay");
   if(o&&o.classList.contains("on"))return true;
   if(_uploadsInFlight>0)return true;
@@ -3711,22 +3726,377 @@ function mailtoLink(to,subject,body,replyTo){
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function escA(s){return String(s??"").replace(/"/g,"&quot;")}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
-// Readable per-store, per-category sequential ID, e.g. 23086-PLM-0004.
-// No transactions on the API, so we scan existing tickets for the max sequence
-// and bump. Caller re-reads fresh right before this to minimize collision window.
-function nextShortId(sid,category){
+/* ============================================================ TICKET NUMBERS
+   Readable per-store, per-category number, e.g. 23086-PLM-0004.
+
+   It used to be worked out by looking through the tickets in memory for the
+   highest number and adding one. Closed tickets are not in memory — not for
+   a GM or a technician at all, and not for anyone else until the archive has
+   finished downloading — so as soon as the newest ticket in a category was
+   closed, the next one filed there was handed its number again.
+
+   The last number used is now saved, per store and category, under
+   admins/ticketSeq in the master. It only ever goes up, and it does not care
+   which tickets happen to be loaded. Nothing here needs the closed archive
+   except the very first run, which reads it once to learn where every
+   sequence has got to. */
+const SEQ_NODE="admins/ticketSeq";
+let SEQ_ECHO={};            // key -> highest number this device has handed out or learnt (the master is ~60s stale)
+let SEQ_SEEDED_HERE=false;  // this device wrote the first counters; the CDN may not show them for a minute
+let SEQ_REJECTED=null;      // the API refused the counter: fall back to the old way and say so in Settings
+let SEQ_LAST_ERR=null;
+let SEQ_META_ECHO=null;     // the check's own record, until the (stale) master shows it
+let RENUM_ECHO={};          // ticket id -> {from,to,at}: a number changed here, shown until the server agrees
+let MADE_HERE={};           // ticket id -> when: tickets filed from this device, watched briefly for a twin
+const SEQ_TWIN_WATCH_MS=3*60*1000;
+
+function pad4(n){return String(n).padStart(4,"0")}
+function shortIdStem(sid,category){
   const digits=String(storeNum(sid)).replace(/\D/g,"")||"00000";
   const pfx=CAT_PREFIX[category]||String(category||"GEN").slice(0,3).toUpperCase();
-  const stem=`${digits}-${pfx}-`;
-  let max=0;
-  Object.values(TICKETS).forEach(t=>{
-    if(typeof t.shortId==="string" && t.shortId.startsWith(stem)){
-      const n=parseInt(t.shortId.slice(stem.length),10);
-      if(!isNaN(n)&&n>max)max=n;
-    }
-  });
-  return stem+String(max+1).padStart(4,"0");
+  return `${digits}-${pfx}`;
 }
+/* "23086-PLM-0004" -> {stem:"23086-PLM", n:4}. Anything that is not a
+   sequence number (an old import, a hand-typed id) is left alone. */
+function splitShortId(s){
+  const m=typeof s==="string"&&s.match(/^(.+)-(\d+)$/);
+  return m?{stem:m[1],n:parseInt(m[2],10)}:null;
+}
+/* The database refuses . $ # [ ] / in a key. */
+function seqKey(stem){return String(stem).toUpperCase().replace(/[.$#\[\]\/]/g,"_")}
+function serverSeq(){return ((MASTER&&MASTER.admins)||{}).ticketSeq||null}
+function seqMeta(){const s=serverSeq(), m=(s&&s._meta)||null;
+  if(SEQ_META_ECHO&&(!m||(Number(m.checkedAt)||0)<(Number(SEQ_META_ECHO.checkedAt)||0)))return SEQ_META_ECHO;
+  return m}
+function seqSeeded(){return SEQ_SEEDED_HERE||!!(seqMeta()&&seqMeta().seededAt)}
+function seqKnown(key){const s=serverSeq();return Math.max(Number(s&&s[key])||0,SEQ_ECHO[key]||0)}
+/* Highest number in use per sequence, over a set of tickets. */
+function seqHighs(tickets,into){
+  const hi=into||{};
+  Object.values(tickets||{}).forEach(t=>{
+    if(!t||t.pending||t.failed)return;
+    [t.shortId,...arr_(t.previousShortIds)].forEach(sidStr=>{
+      const p=splitShortId(sidStr); if(!p||isNaN(p.n))return;
+      const k=seqKey(p.stem); if(p.n>(hi[k]||0))hi[k]=p.n;
+    });
+  });
+  return hi;
+}
+/* Every ticket this device can currently see, open and closed. */
+function loadedTickets(){return {...CLOSED_TICKETS,...TICKETS}}
+/* The closed archive, for its numbers only. Uses the copy in memory when
+   there is a fresh one; otherwise downloads it and lets it go again, so a GM
+   filing the very first ticket after this update is not left carrying it. */
+async function archiveForNumbers(){
+  if(CLOSED_LOADED&&(Date.now()-CLOSED_FETCHED_AT)<CLOSED_TTL_MS)return CLOSED_TICKETS;
+  const r=await fetchWithTimeout(API_BASE_URL+"?closed=only",{cache:"no-store"},60000);
+  if(!r.ok)throw new Error("Could not read the closed tickets (HTTP "+r.status+")");
+  const data=await r.json();
+  return data[TICKETS_NODE]||{};
+}
+async function seqPost(updates){
+  assertWritable(updates);
+  const r=await fetchWithTimeout(API_BASE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:APP_WRITE_PASSWORD,updates})},25000);
+  if(!r.ok){let m="HTTP "+r.status;try{m=(await r.json()).error||m}catch(e){}const err=new Error(m);err.http=r.status;throw err}
+}
+/* Hand out the next number for each {sid,cat} (or {stem}) asked for, and save
+   the new high-water marks BEFORE the tickets themselves are written: a number
+   that is reserved and then never used leaves a harmless gap, while one that
+   is used and not recorded is how repeats happen.
+   Returns {ids:[…], saved:true|false}. Call right after refresh(). */
+async function takeShortIds(wants){
+  const stems=wants.map(w=>w.stem||shortIdStem(w.sid,w.cat));
+  let seed=null;
+  if(!SEQ_REJECTED&&!seqSeeded()){
+    /* First ticket filed anywhere since this update: learn where every
+       sequence stands, closed tickets included, and save the lot. If the
+       archive cannot be read, carry on with what is visible — never refuse a
+       ticket over its number — and leave the seeding to the next one. */
+    try{ seed=seqHighs(await archiveForNumbers()); }
+    catch(e){ SEQ_LAST_ERR=e.message||String(e); console.warn("[fixmi] ticket numbers: could not read the archive —",SEQ_LAST_ERR); seed=null; }
+  }
+  const vis=seqHighs(loadedTickets());
+  const bumped={}, ids=[], echoWas={};
+  stems.forEach(stem=>{
+    const k=seqKey(stem);
+    const n=Math.max(seqKnown(k),vis[k]||0,seed?(seed[k]||0):0,bumped[k]||0)+1;
+    bumped[k]=n; ids.push(stem+"-"+pad4(n));
+  });
+  Object.entries(bumped).forEach(([k,n])=>{ echoWas[k]=SEQ_ECHO[k]||0; if(n>echoWas[k])SEQ_ECHO[k]=n });   // reserved on this device from this moment
+  /* If the reservation never reached the server (offline, timed out), hand
+     the numbers back, so the try-again gets the same ones rather than skipping. */
+  const handBack=()=>Object.entries(bumped).forEach(([k,n])=>{ if(SEQ_ECHO[k]===n){ if(echoWas[k])SEQ_ECHO[k]=echoWas[k]; else delete SEQ_ECHO[k]; } });
+  if(SEQ_REJECTED)return {ids,saved:false};
+  let updates={};
+  if(seed){
+    const all={...seed};
+    Object.entries(vis).forEach(([k,n])=>{ if(n>(all[k]||0))all[k]=n });
+    const srv=serverSeq()||{};
+    Object.keys(srv).forEach(k=>{ if(k!=="_meta"&&Number(srv[k])>(all[k]||0))all[k]=Number(srv[k]) });
+    Object.entries(SEQ_ECHO).forEach(([k,n])=>{ if(n>(all[k]||0))all[k]=n });
+    updates[SEQ_NODE]={...all,_meta:{...(srv._meta||{}),seededAt:now(),seededBy:(SESSION&&SESSION.name)||"",v:APP_VERSION}};
+    try{
+      await seqPost(updates);
+      SEQ_SEEDED_HERE=true; SEQ_LAST_ERR=null;
+      Object.entries(all).forEach(([k,n])=>{ if(n>(SEQ_ECHO[k]||0))SEQ_ECHO[k]=n });
+      return {ids,saved:true};
+    }catch(e){ if(!(e&&e.http))handBack(); return seqWriteFailed(e,ids) }
+  }
+  Object.entries(bumped).forEach(([k,n])=>{ updates[SEQ_NODE+"/"+k]=n });
+  try{ await seqPost(updates); SEQ_LAST_ERR=null; return {ids,saved:true}; }
+  catch(e){ if(!(e&&e.http))handBack(); return seqWriteFailed(e,ids) }
+}
+/* The server answered and said no: the counter is not usable on this API, so
+   stop trying for this session and number the old way rather than block the
+   ticket. No answer at all (offline, timed out): the ticket would fail too —
+   let the caller's own failure handling deal with it. */
+function seqWriteFailed(e,ids){
+  SEQ_LAST_ERR=(e&&e.message)||String(e);
+  if(e&&e.http){ SEQ_REJECTED=SEQ_LAST_ERR; console.warn("[fixmi] ticket numbers: the counter was refused —",SEQ_LAST_ERR); return {ids,saved:false}; }
+  throw e;
+}
+/* Is this number still free as far as this device can see? Used when a failed
+   submit is tried again with the number it was first given. */
+function shortIdFree(shortId,exceptId){
+  const want=String(shortId).toUpperCase();
+  return !Object.entries(loadedTickets()).some(([id,t])=>id!==exceptId&&t&&String(t.shortId||"").toUpperCase()===want);
+}
+
+/* ---- a number that has to change ----------------------------------------
+   Two tickets can only end up sharing a number in two ways now: they did
+   before this update, or two people filed in the same store and category in
+   the same minute (the master read is up to a minute stale and the API has no
+   transactions). Either way the OLDER ticket keeps the number and the newer
+   one takes the next free one. updatedAt is deliberately left alone and no
+   activity entry is added — a renumber is not work on the job, and must not
+   reset reminders or move a closed ticket into this week's reports. The old
+   number stays on the ticket (previousShortIds) so links, searches and emails
+   that carry it still land on the right ticket. */
+function renumbered(t,newShortId){
+  const u={...t,shortId:newShortId,
+    previousShortIds:[...arr_(t.previousShortIds).filter(x=>x!==t.shortId),t.shortId],
+    renumberedAt:now()};
+  delete u._id;
+  return u;
+}
+function putLocal(id,t){
+  if(t.status==="closed"){ if(CLOSED_LOADED||CLOSED_TICKETS[id])CLOSED_TICKETS[id]=t; if(TICKETS[id])TICKETS[id]=t; }
+  else TICKETS[id]=t;
+  dropStoreIndex(); delete _tkHay[id];
+}
+/* The master (and the archive) are served up to a minute stale, and a
+   renumber leaves updatedAt alone, so the ordinary write-echo cannot tell the
+   two copies apart. Until the server shows the new number, keep ours. */
+function applyRenumEcho(){
+  for(const [id,e] of Object.entries(RENUM_ECHO)){
+    if(now()-e.at>5*60*1000){delete RENUM_ECHO[id];continue}
+    const t=TICKETS[id]||CLOSED_TICKETS[id];
+    if(!t)continue;
+    if(t.shortId===e.from)putLocal(id,renumbered(t,e.to));
+    else delete RENUM_ECHO[id];                      // the server has caught up (or it moved on)
+  }
+}
+/* Who gives way when two tickets hold one number: the one filed later; if
+   they were filed in the same millisecond, the one with the later id. Every
+   device applies the same rule, so they agree without talking to each other. */
+function numberLoser(aId,a,bId,b){
+  const ca=Number(a.createdAt)||0, cb=Number(b.createdAt)||0;
+  if(ca!==cb)return ca>cb?aId:bId;
+  return aId>bId?aId:bId;
+}
+/* A ticket filed from this device a moment ago: if another ticket with the
+   same number turns up (someone else filed at the same moment), and ours is
+   the later one, move ours. Runs after every refresh for three minutes. */
+let _twinBusy=false;
+function watchMadeHere(){
+  const ids=Object.keys(MADE_HERE); if(!ids.length||_twinBusy)return;
+  const byNum={};
+  Object.entries(TICKETS).forEach(([id,t])=>{ if(t&&t.shortId&&!t.pending&&!t.failed)(byNum[String(t.shortId).toUpperCase()]=byNum[String(t.shortId).toUpperCase()]||[]).push(id) });
+  for(const id of ids){
+    if(now()-MADE_HERE[id]>SEQ_TWIN_WATCH_MS){delete MADE_HERE[id];continue}
+    const t=TICKETS[id]; if(!t||!t.shortId||RENUM_ECHO[id])continue;
+    const twins=(byNum[String(t.shortId).toUpperCase()]||[]).filter(x=>x!==id);
+    if(!twins.length)continue;
+    if(twins.some(x=>numberLoser(id,t,x,TICKETS[x])===id)){
+      _twinBusy=true;
+      renumberOne(id).catch(e=>console.warn("[fixmi] could not renumber",id,e)).finally(()=>{_twinBusy=false});
+      return;
+    }
+  }
+}
+async function renumberOne(id){
+  const t=TICKETS[id]||CLOSED_TICKETS[id]; if(!t)return null;
+  const p=splitShortId(t.shortId); if(!p)return null;
+  const from=t.shortId;
+  const got=await takeShortIds([{stem:p.stem}]);
+  const cur=TICKETS[id]||CLOSED_TICKETS[id]||t;       // whatever arrived while the number was being reserved
+  if(cur.shortId!==from)return null;
+  const u=renumbered(cur,got.ids[0]);
+  await apiWrite(`${TICKETS_NODE}/${id}`,u);
+  RENUM_ECHO[id]={from,to:u.shortId,at:now()};
+  putLocal(id,u); if(u.status!=="closed")LOCAL_ECHO[id]=u;
+  console.log("[fixmi] ticket number changed",from,"→",u.shortId);
+  if(!modalIsUp())render();
+  return u.shortId;
+}
+
+/* ---- the check (Overwatch) ------------------------------------------------
+   Finds every number held by more than one ticket — open and closed — and
+   gives the newer ticket(s) the next free number. Runs by itself the first
+   time Overwatch opens the app after this update, and from Settings → Tickets
+   whenever asked. No emails are sent for it. */
+const SEQ_RAN_KEY="dpm_fixmi_numcheck_at";
+let NUMCHECK_BUSY=false, NUMCHECK_LAST=null;
+function numCheckRanRecently(ms){
+  let at=0; try{at=Number(localStorage.getItem(SEQ_RAN_KEY))||0}catch(e){}
+  return (Date.now()-at)<ms;
+}
+function findRepeats(all){
+  const groups={};
+  Object.entries(all).forEach(([id,t])=>{
+    if(!t||t.pending||t.failed||!splitShortId(t.shortId))return;
+    const k=String(t.shortId).toUpperCase();
+    (groups[k]=groups[k]||[]).push(id);
+  });
+  return Object.values(groups).filter(g=>g.length>1);
+}
+/* full=true reads the closed archive as well; false only looks at what is
+   already loaded (the cheap check Overwatch runs on later visits). The
+   archive is read for this and let go again — it is not kept in memory. */
+async function checkTicketNumbers(full,onProgress){
+  if(NUMCHECK_BUSY)return null;
+  if(!SESSION||SESSION.role!=="admin"||SESSION._sim)return null;
+  NUMCHECK_BUSY=true;
+  const out={at:now(),full:!!full,looked:0,planned:0,changed:[],history:[],failed:0,error:null};
+  try{
+    const closed=full?await archiveForNumbers():{};
+    await refresh();
+    const all={...closed,...loadedTickets()};
+    for(const [id,e] of Object.entries(RENUM_ECHO)){       // a stale copy of one we already moved
+      if(all[id]&&all[id].shortId===e.from)all[id]=renumbered(all[id],e.to);
+    }
+    out.looked=Object.keys(all).length;
+    const repeats=findRepeats(all);
+    const hi=seqHighs(all);
+    const srv=serverSeq()||{};
+    Object.keys(srv).forEach(k=>{ if(k!=="_meta"&&Number(srv[k])>(hi[k]||0))hi[k]=Number(srv[k]) });
+    Object.entries(SEQ_ECHO).forEach(([k,n])=>{ if(n>(hi[k]||0))hi[k]=n });
+    const plan=[];
+    repeats.forEach(g=>{
+      g.sort((a,b)=>numberLoser(a,all[a],b,all[b])===a?1:-1);     // the keeper first
+      g.slice(1).forEach(id=>{
+        const t=all[id], p=splitShortId(t.shortId), k=seqKey(p.stem);
+        hi[k]=(hi[k]||0)+1;
+        plan.push({id,from:t.shortId,to:p.stem+"-"+pad4(hi[k]),storeId:t.storeId,closed:t.status==="closed"});
+      });
+    });
+    /* The counters first — the same rule as for a new ticket. A full check
+       saves the whole table, which is also what seeds it. It is NOT marked
+       as checked yet: that happens only once every ticket below has been
+       written, so a check cut short (tab closed, connection lost) simply
+       runs again at the next sign-in and finishes the rest. */
+    const meta0={...(srv._meta||{}),seededAt:(srv._meta&&srv._meta.seededAt)||now(),v:APP_VERSION};
+    if(!SEQ_REJECTED&&(full||plan.length)){
+      const updates={};
+      if(full) updates[SEQ_NODE]={...hi,_meta:meta0};
+      else plan.forEach(c=>{const k=seqKey(splitShortId(c.to).stem);updates[SEQ_NODE+"/"+k]=hi[k]});
+      try{
+        await seqPost(updates); SEQ_LAST_ERR=null;
+        if(full)SEQ_SEEDED_HERE=true;
+      }catch(e){ seqWriteFailed(e,[]); }
+    }
+    Object.entries(hi).forEach(([k,n])=>{ if(n>(SEQ_ECHO[k]||0))SEQ_ECHO[k]=n });
+    out.planned=plan.length;
+    if(typeof onProgress==="function")onProgress(0,plan.length);
+    /* Then the tickets, a handful per request. */
+    for(let i=0;i<plan.length;i+=25){
+      const chunk=plan.slice(i,i+25), updates={}, made={};
+      chunk.forEach(c=>{
+        const t=all[c.id]; if(!t||t.shortId!==c.from||isUnsent(c.id))return;
+        made[c.id]=renumbered(t,c.to); updates[`${TICKETS_NODE}/${c.id}`]=made[c.id];
+      });
+      if(!Object.keys(updates).length)continue;
+      try{
+        await apiWriteMulti(updates);
+        chunk.forEach(c=>{ const u=made[c.id]; if(!u)return;
+          all[c.id]=u;
+          RENUM_ECHO[c.id]={from:c.from,to:c.to,at:now()};
+          putLocal(c.id,u); if(u.status!=="closed")LOCAL_ECHO[c.id]=u;
+          out.changed.push(c); });
+        if(typeof onProgress==="function")onProgress(Math.min(i+25,plan.length),plan.length);
+      }catch(e){ out.failed+=plan.length-i; out.error=e.message||String(e); break; }
+    }
+    if(full&&!out.error&&!SEQ_REJECTED){
+      const meta={...meta0,checkedAt:now(),checkedBy:SESSION.name||"",fixed:(Number(meta0.fixed)||0)+out.changed.length};
+      try{ await seqPost({[SEQ_NODE+"/_meta"]:meta}); SEQ_META_ECHO=meta; }
+      catch(e){ seqWriteFailed(e,[]); }
+    }
+    Object.entries(all).forEach(([id,t])=>{
+      if(t&&arr_(t.previousShortIds).length)out.history.push({id,to:t.shortId,from:arr_(t.previousShortIds).join(", "),storeId:t.storeId,at:t.renumberedAt||0});
+    });
+    out.history.sort((a,b)=>(b.at||0)-(a.at||0));
+    if(full&&!out.error){ try{localStorage.setItem(SEQ_RAN_KEY,String(Date.now()))}catch(e){} }
+  }catch(e){ out.error=(e&&e.name==="AbortError")?"Timed out reading the tickets":(e.message||String(e)); }
+  finally{ NUMCHECK_BUSY=false; }
+  NUMCHECK_LAST=out;
+  return out;
+}
+/* On sign-in, Overwatch only. The first visit after the update does the full
+   check (it needs the closed archive, once); later visits only glance at the
+   open tickets already on screen, which costs nothing. */
+async function autoCheckTicketNumbers(){
+  if(!SESSION||SESSION.role!=="admin"||SESSION._sim)return;
+  if(hasUnsentTickets()||modalIsUp()){ setTimeout(autoCheckTicketNumbers,15000); return; }
+  const firstTime=!(seqMeta()&&seqMeta().checkedAt)&&!numCheckRanRecently(5*60*1000);
+  if(!firstTime&&!findRepeats(TICKETS).length)return;
+  let told=false;
+  const r=await checkTicketNumbers(firstTime,(done,total)=>{
+    if(!told&&total>50){ told=true; toast(`Giving new numbers to ${total.toLocaleString()} tickets that shared one — this runs in the background, keep working.`); }
+  });
+  if(!r)return;
+  if(r.changed.length){
+    toast(`Ticket numbers checked — ${r.changed.length} ticket${r.changed.length===1?"":"s"} that shared a number ${r.changed.length===1?"was":"were"} renumbered. See Settings → Tickets.`);
+    if(!modalIsUp())render();
+  }
+}
+
+/* ---- Settings → Tickets → Ticket numbers ---- */
+function numStatusHtml(){
+  if(SEQ_REJECTED)return `<div class="num-warn">⚠ The saved number counter was refused by the database (${esc(SEQ_REJECTED)}). FixMi is numbering the old way for now, so a number could still repeat. Nothing else is affected.</div>`;
+  const m=seqMeta();
+  if(m&&m.checkedAt)return `Last full check: <b>${esc(fmtDate(m.checkedAt))}</b>${m.checkedBy?" by "+esc(m.checkedBy):""} · ${Number(m.fixed)||0} renumbered in total.`;
+  if(m&&m.seededAt)return "The number counter is running. No full check has been run yet.";
+  return "No full check has been run yet.";
+}
+function numResultHtml(r){
+  if(!r)return "";
+  if(r.error&&!r.changed.length)return `<div class="num-warn">Could not finish the check: ${esc(r.error)}</div>`;
+  const row=c=>`<div class="num-row"><span class="mono">${esc(c.from)}</span><span class="num-arrow">→</span><span class="mono"><b>${esc(c.to)}</b></span><span class="num-store">${esc(storeName(c.storeId))}</span></div>`;
+  const cap=(list)=>list.slice(0,200).map(row).join("")+(list.length>200?`<div class="set-hint">…and ${list.length-200} more.</div>`:"");
+  const earlier=r.history.filter(h=>!r.changed.some(c=>c.id===h.id));
+  return `<div class="num-out">
+    <div><b>${r.looked.toLocaleString()}</b> tickets looked at${r.full?", open and closed":""}. ${r.changed.length
+      ?`<b>${r.changed.length}</b> shared a number with an older ticket and ${r.changed.length===1?"was":"were"} given a new one:`
+      :"No number is held by more than one ticket."}</div>
+    ${cap(r.changed)}
+    ${r.error?`<div class="num-warn">Stopped early: ${esc(r.error)}. ${r.failed} still to do — run the check again.</div>`:""}
+    ${earlier.length?`<div style="margin-top:10px">Renumbered before now (${earlier.length}):</div>${cap(earlier)}`:""}
+  </div>`;
+}
+async function runNumberCheck(){
+  let btn=$("numCheckBtn");
+  if(numCheckRanRecently(90000)){toast("Checked a moment ago — the database takes about a minute to settle. Try again shortly.");return}
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Checking every ticket…'}
+  const r=await checkTicketNumbers(true,(done,total)=>{
+    const b=$("numCheckBtn"); if(b&&total)b.innerHTML=`<span class="inline-spin"></span> Renumbering ${done.toLocaleString()} of ${total.toLocaleString()}…`;
+  });
+  btn=$("numCheckBtn");
+  if(btn){btn.disabled=false;btn.innerHTML="🔢 Check ticket numbers now"}
+  if(!r){toast("A check is already running","err");return}
+  if($("numStatus"))$("numStatus").innerHTML=numStatusHtml();
+  if($("numOut"))$("numOut").innerHTML=numResultHtml(r);
+}
+
 function now(){return Date.now()}
 function fmtDate(ts){if(!ts)return"—";const d=new Date(ts);return d.toLocaleDateString("en-US",{month:"short",day:"numeric"})+" · "+d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}
 function timeAgo(ts){if(!ts)return"";const s=Math.floor((now()-ts)/1000);if(s<60)return"just now";const m=Math.floor(s/60);if(m<60)return m+"m ago";const h=Math.floor(m/60);if(h<24)return h+"h ago";return Math.floor(h/24)+"d ago"}
@@ -4295,15 +4665,44 @@ function techBoardTickets(){
     .filter(t=>(TECH_VISIBLE_STATUSES.includes(t.status)&&t.assignedTechId===SESSION.refId)
       ||(t.status==="closed"&&techWorkedOn(t)));
 }
+/* Which tickets sit at which store — worked out ONCE per redraw.
+   ticketsForStore used to copy and filter every ticket in memory each time it
+   was asked about one store, and a redraw asks about every store: 120 stores
+   × 5,500 tickets is 660,000 copies to draw one screen. That was survivable
+   with a few hundred open tickets and became a half-second freeze per redraw
+   the moment the closed archive was in memory.
+
+   The index holds ids only and is thrown away at the end of the current task
+   (and at the start of every redraw and refresh), so it can never outlive a
+   change to the tickets it was built from. The ticket itself is read fresh
+   from TICKETS on every call. */
+let _storeIdx=null, _storeIdxSrc=null;
+function dropStoreIndex(){_storeIdx=null;_storeIdxSrc=null}
+function storeIndex(){
+  if(_storeIdx&&_storeIdxSrc===TICKETS)return _storeIdx;
+  const idx=new Map();
+  for(const k in TICKETS){
+    const t=TICKETS[k]; if(!t)continue;
+    const a=idx.get(t.storeId); if(a)a.push(k); else idx.set(t.storeId,[k]);
+  }
+  _storeIdx=idx; _storeIdxSrc=TICKETS;
+  queueMicrotask(dropStoreIndex);
+  return idx;
+}
 function ticketsForStore(sid){
-  return Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}))
-    .filter(t=>t.storeId===sid)
-    .filter(t=>canSeeClosed() || t.status!=="closed")
+  const ids=storeIndex().get(sid); if(!ids)return [];
+  const closedOK=canSeeClosed(), isTech=SESSION.role==="tech", out=[];
+  for(const k of ids){
+    const t=TICKETS[k];
+    if(!t||t.storeId!==sid)continue;                 // moved or removed since the index was built
+    if(!closedOK&&t.status==="closed")continue;
     // A tech sees ONLY tickets dispatched specifically to them — never other
     // tickets at the store, even unassigned ones — plus closed ones they worked.
-    .filter(t=>SESSION.role!=="tech"
-      || (TECH_VISIBLE_STATUSES.includes(t.status)&&t.assignedTechId===SESSION.refId)
-      || (t.status==="closed"&&techWorkedOn(t)));
+    if(isTech&&!((TECH_VISIBLE_STATUSES.includes(t.status)&&t.assignedTechId===SESSION.refId)
+                 ||(t.status==="closed"&&techWorkedOn(t))))continue;
+    out.push({_id:k,...t});
+  }
+  return out;
 }
 
 /* ---- tech zones, specialties and colours -------------------------------------
@@ -4437,10 +4836,14 @@ function enterApp(){
   startPoll();
   openTicketFromUrl(); // #t/<shortId> from an email link or copied URL
   openStoreFromUrl();  // #s/<storeId> from a weekly summary
+  if(SESSION.role==="admin")setTimeout(autoCheckTicketNumbers,5000);   // repeated ticket numbers, see TICKET NUMBERS
   refreshPaymiCount();
   if(!window.__paymiTimer)window.__paymiTimer=setInterval(refreshPaymiCount,5*60*1000);
 }
-function logout(){SESSION=null;REAL_SESSION=null;clearSession();stopPoll();
+function logout(){
+  if(hasUnsentTickets()&&!confirm("A ticket has not finished submitting. Sign out anyway and lose it?"))return;
+  SUBMIT_JOBS={};                         // they chose to leave; do not ask a second time on the reload
+  SESSION=null;REAL_SESSION=null;clearSession();stopPoll();
   // Drop the ticket hash first, or the reload would re-enter the ticket as a guest.
   try{history.replaceState(null,"",appBaseUrl())}catch(e){}
   location.reload();
@@ -4471,6 +4874,7 @@ async function silentRefresh(){
   const dot=$("pollDot");dot.classList.add("busy");$("pollTxt").textContent="syncing";
   try{
     await refresh();
+    releaseClosedIfIdle();
     const modalUp=$("modalOverlay")&&$("modalOverlay").classList.contains("on");
     /* Never rebuild the view out from under someone who is typing in it. On a
        phone that also resets the on-screen keyboard back to letters, which is
@@ -4516,6 +4920,7 @@ function restoreFocus(f){
   }catch(e){}
 }
 function render(){
+  dropStoreIndex();                 // every redraw starts from the tickets as they are now
   const _focus=captureFocus();
   const v=$("mainView");
   const role=SESSION.role;
@@ -4538,7 +4943,7 @@ function owToggle(){
   const b=(k,label,ico)=>`<button class="ow-tab${owView===k?" on":""}" onclick="setOwView('${k}')">${ico} ${label}</button>`;
   return `<div class="ow-toggle">${b("map","Map","🗺")}${b("list","List","☰")}${b("tiles","Tiles","▦")}</div>`;
 }
-function setOwView(k){owView=k;if(k==="tiles")coachScreen="hub";render();}
+function setOwView(k){owView=k;if(k==="tiles")coachScreen="hub";render();releaseClosedIfIdle();}
 /* The results half of the board: heading, the "showing the first N" note and
    the rows. Rendered on its own so a keystroke never touches the controls. */
 function boardListHtml(rows,label){
@@ -4690,7 +5095,7 @@ function renderCoachHub(){
       :`<div class="empty"><div class="empty-mark">🏪</div><h3>No stores in your area</h3><p>Managed in the master.</p></div>`}`;
 }
 function openCoachStore(sid){coachScreen=sid;render();}
-function coachBackToHub(){coachScreen="hub";render();}
+function coachBackToHub(){coachScreen="hub";render();releaseClosedIfIdle();}
 function renderCoachStore(sid){
   // Guard: if the store isn't theirs (or vanished), bounce to the hub.
   if(!coachStoreList().includes(sid)){coachScreen="hub";return renderCoachHub();}
@@ -4944,9 +5349,34 @@ function closedStale(){
    largest thing this app holds, and most of a session never looks at it. */
 const CLOSED_GRACE_MS=90000;
 let _closedRelease=null;
-function scheduleReleaseClosed(){
+/* Loaded in passing and then left alone — by a report, the new-ticket check,
+   a link to a closed ticket. Longer than the tab's grace, so somebody filing
+   one ticket after another is not made to download the archive each time, but
+   an idle session still hands the memory back. */
+const CLOSED_IDLE_MS=10*60*1000;
+function scheduleReleaseClosed(ms){
   cancelReleaseClosed();
-  _closedRelease=setTimeout(()=>{_closedRelease=null;releaseClosed();render()},CLOSED_GRACE_MS);
+  _closedRelease=setTimeout(()=>{_closedRelease=null;
+    if(archiveWanted())return;        // back in use; the next idle check starts a new countdown
+    releaseClosed();render()},ms||CLOSED_GRACE_MS);
+}
+/* Is anything on screen actually using the closed archive right now?
+   It used to be released only when somebody LEFT the Closed tab. But half a
+   dozen other things load it — the closed report, Insights, the technician
+   report, job costs, the export, a link to a closed ticket — and none of them
+   ever handed it back, so after any one of those it sat in memory, and in
+   every redraw, for the rest of the session. */
+function archiveWanted(){
+  if(curFilter==="closed"||curFilter==="all")return true;
+  const o=$("modalOverlay"); if(o&&o.classList.contains("on"))return true;   // a report or ticket may be reading it
+  if($("clZone"))return true;        // a store page with its closed section open, whoever is looking at it
+  return false;
+}
+/* Called whenever a screen that might have needed the archive goes away. */
+function releaseClosedIfIdle(){
+  if(!CLOSED_LOADED)return;
+  if(archiveWanted()){cancelReleaseClosed();return}
+  if(!_closedRelease)scheduleReleaseClosed(CLOSED_IDLE_MS);
 }
 function cancelReleaseClosed(){
   if(_closedRelease){clearTimeout(_closedRelease);_closedRelease=null}
@@ -4955,6 +5385,7 @@ function releaseClosed(){
   if(!CLOSED_LOADED&&!Object.keys(CLOSED_TICKETS).length)return;
   Object.keys(CLOSED_TICKETS).forEach(id=>{ if((TICKETS[id]||{}).status==="closed") delete TICKETS[id] });
   CLOSED_TICKETS={}; CLOSED_LOADED=false; CLOSED_FETCHED_AT=0;
+  dropStoreIndex();
   _tkHay={};                       // the search index over those tickets goes too
 }
 /* Fetch the closed-ticket details on demand and cache them for the session.
@@ -4967,6 +5398,7 @@ let CLOSED_ERR=null;        // last closed-fetch failure message (job-costs pane
 function canSeeClosedReport(){return ["admin","director","coach","viewer"].includes(SESSION.role)}
 async function ensureClosedLoaded(force){
   if(!canSeeClosed()) return false;
+  cancelReleaseClosed();            // somebody wants it — do not drop it out from under them
   if(!force && CLOSED_LOADED && (Date.now()-CLOSED_FETCHED_AT)<CLOSED_TTL_MS) return true;
   showLoader(true);
   try{
@@ -4979,8 +5411,12 @@ async function ensureClosedLoaded(force){
     if(typeof data.closedTicketCount==="number") CLOSED_COUNT=data.closedTicketCount;
     CLOSED_LOADED=true; CLOSED_FETCHED_AT=Date.now(); CLOSED_ERR=null;
     TICKETS={...TICKETS,...CLOSED_TICKETS};
+    applyRenumEcho();
     console.log("[Closed] "+Object.keys(CLOSED_TICKETS).length+" closed tickets loaded");
-    render();
+    /* Redraw the page only if it is what the person is looking at. With a
+       sheet open the page is hidden behind it; rebuilding it there bought
+       nothing and froze the sheet mid-keystroke. */
+    {const o=$("modalOverlay"); if(!o||!o.classList.contains("on"))render();}
     return true;
   }catch(e){CLOSED_ERR=(e&&e.name==="AbortError")?"Timed out loading closed tickets":(e.message||"Could not load closed tickets");toast(CLOSED_ERR,"err");
     try{const o=$("modalOverlay");if(!o||!o.classList.contains("on"))render()}catch(_){}
@@ -5018,7 +5454,7 @@ function ticketHaystack(t){
   if(hit&&hit.key===key)return hit;
   const who=ticketAssignee(t);
   const sh=storeHaystack(t.storeId);
-  const text=[t.shortId,t.description,catPath(t),
+  const text=[t.shortId,...arr_(t.previousShortIds),t.description,catPath(t),
     (STATUSES[t.status]||{}).label,t.status,PRIORITIES[t.priority||"normal"],
     who?who.name:"",who?who.email:"",
     /* Raw ids too: when a directory record has gone, the id is the only handle
@@ -5132,6 +5568,7 @@ function elapsedHM(ts){
   return (h?h+"h ":"")+mm+"m";
 }
 function ticketRow(t){
+  if(t.pending||t.failed)return unsentRow(t);        // not a real ticket yet — see SUBMITTING…
   const st=STATUSES[t.status]||STATUSES.unassigned;
   /* Every other view is a single status, so the heading already says which.
      ALL mixes them, and then each row has to carry its own. */
@@ -5451,6 +5888,8 @@ function modal(html){
   activeModal=o;
 }
 function closeModal(){
+  setTimeout(releaseClosedIfIdle,0);      // whatever was reading the closed archive has gone
+  setTimeout(flushWhenNoModal,0);         // anything that was waiting for the sheet to go
   DECK={sid:null,ids:[],i:0};
   _modalReturn=null;
   clearTicketHash();
@@ -5535,7 +5974,7 @@ function dupMatches(sid,cat,sub,desc){
 }
 let draftPhotos=[];
 function openCreate(preStore){
-  draftPhotos=[]; MS_SEL=new Set(); DUP_HITS=[]; DUP_RECURRENCE_OF=null;
+  draftPhotos=[]; MS_SEL=new Set(); DUP_HITS=[]; DUP_RECURRENCE_OF=null; RETRY_OF=null;
   let ids = SESSION.role==="manager" ? [SESSION.storeId] : myStoreIds();
   ids.sort((a,b)=>storeName(a).localeCompare(storeName(b)));
   const storeOpts=ids.map(id=>`<option value="${id}"${preStore===id?" selected":""}>${esc(storeName(id))}</option>`).join("");
@@ -5800,6 +6239,7 @@ async function apiWriteTicket(id,updated){
   await apiWrite(`${TICKETS_NODE}/${id}`,updated);
   if(updated.status==="closed"){CLOSED_TICKETS[id]=updated;delete TICKETS[id];}
   else {TICKETS[id]=updated;LOCAL_ECHO[id]=updated;delete CLOSED_TICKETS[id];}
+  dropStoreIndex();
 }
 function renderDraftPreview(){const el=$("cPreview");if(!el)return;
   el.innerHTML=draftPhotos.map((p,i)=>`<div class="pv"><img src="${p.localUrl}" alt=""><button class="pv-x" onclick="draftPhotos.splice(${i},1);renderDraftPreview()">✕</button></div>`).join("");applyTags()}
@@ -5962,7 +6402,7 @@ async function submitTicket(){
     try{
       const urls=[];for(const p of draftPhotos)urls.push(await uploadPhoto(p.file));
       await refresh();
-      const taken=new Set(Object.values(TICKETS).map(t=>t.shortId));
+      const numbers=(await takeShortIds(targets.map(tsid=>({sid:tsid,cat})))).ids;   // all reserved in one go
       let done=0;
       for(const tsid of targets){
         btn.innerHTML=`<span class="inline-spin"></span> ${done+1} / ${targets.length}…`;
@@ -5970,9 +6410,7 @@ async function submitTicket(){
         const hit=tree.find(c=>c.key===cat);
         const tcat=cat;                       // as chosen, at every store
         const tsub=(sub&&hit&&(hit.subs||[]).some(x=>x.key===sub))?sub:"";
-        let shortId=nextShortId(tsid,tcat), guard=0;
-        while(taken.has(shortId)&&guard++<50){const m=shortId.match(/-(\d+)$/);shortId=shortId.replace(/-\d+$/,"-"+String(parseInt(m[1],10)+1).padStart(4,"0"));}
-        taken.add(shortId);
+        const shortId=numbers[done];
         const id=uid();
         const ticket={shortId,shareToken:newShareToken(),storeId:tsid,category:tcat,subcategory:tsub,priority:$("cPri").value,description:desc,photos:urls,
           status:(mine?"dispatched":"unassigned"),assignedVendorId:null,assignedCoachId:null,assignedManagerStoreId:null,assignedTechId:(mine?SESSION.refId:null),
@@ -5982,7 +6420,7 @@ async function submitTicket(){
           activity:[{ts:now(),by:SESSION.name,role:SESSION.role,action:"created",note:`Sent to ${targets.length} stores`},
             ...(mine?[{ts:now(),by:SESSION.name,role:SESSION.role,action:"assign",toStatus:"dispatched",note:"🔧 "+SESSION.name+" (self)"}]:[])],comments:[]};
         await apiWrite(`${TICKETS_NODE}/${id}`,ticket);
-        TICKETS[id]=ticket; LOCAL_ECHO[id]=ticket; done++;
+        TICKETS[id]=ticket; LOCAL_ECHO[id]=ticket; MADE_HERE[id]=now(); done++;
         notifyTicket("created",id,ticket);
       }
       refreshInBackground(); closeModal(); render();
@@ -5990,65 +6428,224 @@ async function submitTicket(){
     }catch(e){toast(e.message||"Could not create tickets","err");btn.disabled=false;btn.textContent="Create ticket"}
     return;
   }
-  const btn=$("cSubmit");btn.disabled=true;btn.innerHTML='<span class="inline-spin"></span> Creating…';
+  /* From here the form's job is done. The ticket goes on the list at once,
+     marked "Submitting…", and the two trips to the server happen behind it —
+     see queueSubmit. Everything the send needs is read off the form NOW,
+     because the form is about to close. */
+  const retryOf=RETRY_OF; RETRY_OF=null;
+  const prevJob=retryOf?SUBMIT_JOBS[retryOf]:null;
+  const keepNum=(prevJob&&prevJob.num&&prevJob.sid===sid&&prevJob.cat===cat)?prevJob.num:null;   // same store and category: same number
+  if(retryOf)discardSubmit(retryOf,true);               // this replaces the failed attempt it was reopened from
+  const job={id:uid(), at:now(), sid, cat, sub, pri:$("cPri").value, desc, mine, num:keepNum,
+    photos:draftPhotos.map(p=>({file:p.file,localUrl:p.localUrl,url:p.url||null})),
+    recurrence:DUP_RECURRENCE_OF?{id:DUP_RECURRENCE_OF.id,shortId:DUP_RECURRENCE_OF.shortId}:null,
+    by:{email:SESSION.email,role:SESSION.role,name:SESSION.name,refId:SESSION.refId||null}};
+  DUP_RECURRENCE_OF=null; draftPhotos=[];
+  closeModal();
+  if(SESSION.role==="manager")managerScreen="list";
+  /* Drop them onto the store they just filed for, so the new row is what they
+     are looking at. A GM used to be left on the hub, where a new ticket is
+     only a number on a tile — nothing there could say "Submitting…". */
+  if(["coach","director","manager"].includes(SESSION.role))coachScreen=sid;
+  openGroups[sid]=true;
+  queueSubmit(job);
+  render();
+}
+
+/* ============================================================ SUBMITTING…
+   A new ticket used to hold the form on screen, spinner turning, for as long
+   as two server round trips took: re-read the database to pick the next
+   ticket number, then write. Nothing about that wait needed the person.
+
+   Now the ticket is put on the list the moment Create is pressed, labelled
+   "Submitting…", and the same two trips run behind it. Three rules keep that
+   honest:
+
+   · A ticket that is still submitting cannot be opened or changed. It has no
+     number yet and is not in the database, so anything done to it would be
+     written over, or would write a half-made ticket.
+   · Submissions go ONE AT A TIME, in the order they were pressed. Two running
+     side by side would both read the same "highest number so far" and hand
+     out the same ticket number.
+   · If it does not go through, it does not vanish and it is not silently
+     retried. The row stays, says "Not submitted", and offers Try again, Edit
+     and Discard — with everything that was typed, and the photos, intact.
+
+   Leaving the page while one is in flight would lose it, so the browser asks
+   first, and the auto-updater waits. */
+let SUBMIT_JOBS={};                 // id -> job, while submitting or failed
+let RETRY_OF=null;                  // the failed job the open form was reopened from
+let _submitChain=Promise.resolve();
+function hasUnsentTickets(){return Object.keys(SUBMIT_JOBS).length>0}
+function isUnsent(id){const t=TICKETS[id];return !!(t&&(t.pending||t.failed))}
+function provisionalTicket(job,failed,reason){
+  return {shortId:"", storeId:job.sid, category:job.cat, subcategory:job.sub, priority:job.pri,
+    description:job.desc, photos:[], status:(job.mine?"dispatched":"unassigned"),
+    assignedTechId:(job.mine?job.by.refId:null), assignedVendorId:null, assignedCoachId:null, assignedManagerStoreId:null,
+    createdBy:job.by.email, createdByRole:job.by.role, createdByName:job.by.name,
+    createdAt:job.at, updatedAt:now(), activity:[], comments:[],
+    nPhotos:job.photos.length,
+    ...(failed?{failed:true,failReason:String(reason||"")}:{pending:true})};
+}
+function setProvisional(job,failed,reason){
+  const t=provisionalTicket(job,failed,reason);
+  TICKETS[job.id]=t; LOCAL_ECHO[job.id]=t; dropStoreIndex();
+}
+function queueSubmit(job){
+  SUBMIT_JOBS[job.id]=job;
+  setProvisional(job);
+  _submitChain=_submitChain.then(()=>runSubmit(job)).catch(e=>console.warn("[fixmi] submit queue",e));
+}
+async function runSubmit(job){
+  const id=job.id;
+  if(SUBMIT_JOBS[id]!==job)return;                       // discarded while it waited its turn
   try{
-    const urls=[];for(const p of draftPhotos)urls.push(await uploadPhoto(p.file));
-    const id=uid();
+    // Photos first. A URL already obtained on an earlier attempt is kept, so a
+    // retry does not upload the same picture twice.
+    for(const p of job.photos){ if(!p.url)p.url=await uploadPhoto(p.file); }
+    const urls=job.photos.map(p=>p.url);
     // Re-read fresh right before assigning the sequence number to shrink the
     // collision window (no server transaction available).
     await refresh();
-    let shortId=nextShortId(sid,cat);
-    const taken=new Set(Object.values(TICKETS).map(t=>t.shortId));
-    let guard=0;
-    while(taken.has(shortId)&&guard++<50){
-      const m=shortId.match(/-(\d+)$/);
-      shortId=shortId.replace(/-\d+$/,"-"+String(parseInt(m[1],10)+1).padStart(4,"0"));
+    if(SUBMIT_JOBS[id]!==job)return;                     // discarded during the read
+    /* The number is reserved in the master before the ticket is written. A
+       try-again keeps the number its first attempt was given, so a bad
+       connection does not burn through the sequence. */
+    if(!(job.num&&shortIdFree(job.num,id))){
+      job.num=(await takeShortIds([{sid:job.sid,cat:job.cat}])).ids[0];
+      if(SUBMIT_JOBS[id]!==job)return;                   // discarded while the number was being reserved
     }
+    const shortId=job.num;
+    const rec=job.recurrence, by=job.by, mine=job.mine;
     // NOTE: ticket stores ONLY storeId as its anchor. No DM/director/tech frozen on it.
     const ticket={
-      shortId, shareToken:newShareToken(), storeId:sid,
-      category:cat, subcategory:sub, priority:$("cPri").value, description:desc, photos:urls,
-      status:(mine?"dispatched":"unassigned"), assignedVendorId:null, assignedCoachId:null,assignedManagerStoreId:null, assignedTechId:(mine?SESSION.refId:null),
-      ...(mine?{dispatchedAt:now()}:{}),
-      createdBy:SESSION.email, createdByRole:SESSION.role, createdByName:SESSION.name,
-      createdAt:now(), updatedAt:now(),
-      ...(DUP_RECURRENCE_OF?{recurrenceOf:DUP_RECURRENCE_OF.id,recurrenceOfShortId:DUP_RECURRENCE_OF.shortId}:{}),
-      activity:[{ts:now(),by:SESSION.name,role:SESSION.role,action:"created",
-          ...(DUP_RECURRENCE_OF?{note:"Repeat of "+DUP_RECURRENCE_OF.shortId}:{})},
-        ...(mine?[{ts:now(),by:SESSION.name,role:SESSION.role,action:"assign",toStatus:"dispatched",note:"🔧 "+SESSION.name+" (self, found on site)"}]:[])],
+      shortId, shareToken:newShareToken(), storeId:job.sid,
+      category:job.cat, subcategory:job.sub, priority:job.pri, description:job.desc, photos:urls,
+      status:(mine?"dispatched":"unassigned"), assignedVendorId:null, assignedCoachId:null,assignedManagerStoreId:null, assignedTechId:(mine?by.refId:null),
+      ...(mine?{dispatchedAt:job.at}:{}),
+      createdBy:by.email, createdByRole:by.role, createdByName:by.name,
+      createdAt:job.at, updatedAt:now(),
+      ...(rec?{recurrenceOf:rec.id,recurrenceOfShortId:rec.shortId}:{}),
+      activity:[{ts:job.at,by:by.name,role:by.role,action:"created",
+          ...(rec?{note:"Repeat of "+rec.shortId}:{})},
+        ...(mine?[{ts:job.at,by:by.name,role:by.role,action:"assign",toStatus:"dispatched",note:"🔧 "+by.name+" (self, found on site)"}]:[])],
       comments:[]
     };
     await apiWrite(`${TICKETS_NODE}/${id}`,ticket);
-    // Echo locally: the new ticket must appear NOW, not after the CDN copy catches up.
-    TICKETS[id]=ticket; LOCAL_ECHO[id]=ticket;
+    if(SUBMIT_JOBS[id]!==job){                           // discarded in the last half-second: it is written, so keep it
+      console.warn("[fixmi] a discarded ticket had already been written:",shortId);
+    }
+    // It is real now. Swap the placeholder for the ticket itself.
+    delete SUBMIT_JOBS[id];
+    TICKETS[id]=ticket; LOCAL_ECHO[id]=ticket; dropStoreIndex();
+    MADE_HERE[id]=now();
     notifyTicket("created",id,ticket);
     /* A repeat is only useful if you can see it from the old ticket as well —
        otherwise the fourth failure of one freezer looks like four unrelated
        jobs. Best effort: the new ticket is already filed either way. */
-    if(DUP_RECURRENCE_OF){
+    if(rec){
       try{
-        const old=CLOSED_TICKETS[DUP_RECURRENCE_OF.id]||TICKETS[DUP_RECURRENCE_OF.id];
+        const old=CLOSED_TICKETS[rec.id]||TICKETS[rec.id];
         if(old){
           const oa=arr_(old.activity).slice();
-          oa.push({ts:now(),by:SESSION.name,role:SESSION.role,action:"edit",
-            note:"Happened again \u2014 see "+shortId});
-          await apiWriteTicket(DUP_RECURRENCE_OF.id,{...old,activity:oa,
+          oa.push({ts:now(),by:by.name,role:by.role,action:"edit",
+            note:"Happened again — see "+shortId});
+          await apiWriteTicket(rec.id,{...old,activity:oa,
             recurredAs:shortId,recurredAt:now(),updatedAt:now()});
         }
       }catch(e){ console.warn("[fixmi] could not back-link the repeat",e); }
     }
-    const repeatOf=DUP_RECURRENCE_OF; DUP_RECURRENCE_OF=null;
+    toast(rec?("Ticket submitted · "+shortId+" — repeat of "+rec.shortId):("Ticket submitted · "+shortId));
+    softRender();
     refreshInBackground();
-    closeModal();toast(repeatOf?("Ticket created · "+shortId+" \u2014 repeat of "+repeatOf.shortId):("Ticket created · "+shortId));
-    if(SESSION.role==="manager")managerScreen="list";
-    if(SESSION.role==="coach"||SESSION.role==="director")coachScreen=sid;   // drop them onto the store they just filed for
-    openGroups[sid]=true;render();
+    /* The follow-up questions wait until the ticket exists — they act on it —
+       and until nothing else is on screen, so they never land on top of
+       whatever the person has moved on to. */
+    const role=SESSION&&SESSION.role, same=SESSION&&SESSION.email===by.email;
     // District manager: offer to dispatch straight to the store's in-house tech.
-    if((SESSION.role==="coach"||SESSION.role==="director")&&!mine) askDispatchToTech(id,sid);
+    if(same&&(role==="coach"||role==="director")&&!mine) whenNoModal(()=>{ if(TICKETS[id]&&TICKETS[id].status==="unassigned")askDispatchToTech(id,job.sid) });
     // Manager filing something urgent: a ticket alone doesn't wake anyone up.
-    if(SESSION.role==="manager"&&(ticket.priority==="urgent"||ticket.priority==="emergency")) promptContactDM(id);
-  }catch(e){toast(e.message||"Could not create ticket","err");btn.disabled=false;btn.textContent="Create ticket"}
+    if(same&&role==="manager"&&(ticket.priority==="urgent"||ticket.priority==="emergency")) whenNoModal(()=>promptContactDM(id));
+  }catch(e){
+    if(SUBMIT_JOBS[id]!==job)return;
+    job.error=(e&&e.message)||"Could not reach the server";
+    setProvisional(job,true,job.error);
+    toast("A ticket was not submitted — it is still on your list","err");
+    softRender();
+  }
 }
+function submitRetry(id){
+  const job=SUBMIT_JOBS[id]; if(!job||!(TICKETS[id]||{}).failed)return;
+  job.error=null; setProvisional(job); render();
+  _submitChain=_submitChain.then(()=>runSubmit(job)).catch(e=>console.warn("[fixmi] submit queue",e));
+}
+function discardSubmit(id,quiet){
+  const job=SUBMIT_JOBS[id]; if(!job)return;
+  if(!quiet&&!confirm("Discard this ticket? What you typed will be lost."))return;
+  delete SUBMIT_JOBS[id]; delete TICKETS[id]; delete LOCAL_ECHO[id]; dropStoreIndex();
+  if(!quiet){toast("Discarded");render()}
+}
+/* Back into the form, exactly as it was left, to fix something and resend. */
+function submitEdit(id){
+  const job=SUBMIT_JOBS[id]; if(!job||!(TICKETS[id]||{}).failed)return;
+  openCreate(job.sid);
+  RETRY_OF=id;
+  const set=(k,v)=>{const el=$(k); if(el)el.value=v};
+  set("cCat",job.cat); syncCreateSubs(); set("cSub",job.sub); set("cPri",job.pri); set("cDesc",job.desc);
+  if($("cMine"))$("cMine").checked=!!job.mine;
+  draftPhotos=job.photos.map(p=>({file:p.file,localUrl:p.localUrl,url:p.url||null}));
+  if(job.recurrence)DUP_RECURRENCE_OF={...job.recurrence};
+  renderDraftPreview();
+}
+/* A tap on a row that is not a real ticket yet. */
+function unsentTap(id){
+  const t=TICKETS[id]; if(!t)return;
+  toast(t.failed?"This ticket was not submitted — use Try again below it":"Still submitting — it will open in a moment",t.failed?"err":"ok");
+}
+function unsentRow(t){
+  const pri=t.priority||"normal", priClass={normal:"n",urgent:"u",emergency:"e"}[pri]||"n";
+  const id=t._id;
+  return `
+    <div class="row-wrap">
+    <div class="row row-unsent${t.failed?" failed":""}" onclick="unsentTap('${id}')">
+      <div class="row-main">
+        <div class="row-top"><span class="row-store">${esc(storeName(t.storeId))}</span></div>
+        <div class="row-desc">${esc(t.description||"No description")}</div>
+        <div class="row-meta">
+          <span class="r-pri ${priClass}">${PRIORITIES[pri]||"Normal"}</span>
+          <span class="r-sep">·</span><span>${catPath(t)}</span>
+          ${t.nPhotos?`<span class="r-sep">·</span><span>📷 ${t.nPhotos}</span>`:""}
+        </div>
+      </div>
+      <div class="row-right"><div class="row-status">${t.failed
+        ? `<div class="unsent-chip failed">✕ Not submitted</div>`
+        : `<div class="unsent-chip"><span class="inline-spin"></span> Submitting…</div>`}</div></div>
+    </div>${t.failed?`<div class="row-bar" onclick="event.stopPropagation()">
+      <span><b>This ticket has not been sent.</b> ${esc(t.failReason||"")}</span>
+      <div class="rb-btns">
+        <button class="btn btn-primary btn-sm" onclick="submitRetry('${id}')">↻ Try again</button>
+        <button class="btn btn-ghost btn-sm" onclick="submitEdit('${id}')">✎ Edit</button>
+        <button class="btn btn-ghost btn-sm" onclick="discardSubmit('${id}')">Discard</button>
+      </div></div>`:""}</div>`;
+}
+/* Run something once no sheet is open — immediately if none is. */
+const _whenNoModal=[];
+function modalIsUp(){const o=$("modalOverlay");return !!(o&&o.classList.contains("on"))}
+function whenNoModal(fn){ if(!modalIsUp()){fn();return} _whenNoModal.push(fn) }
+function flushWhenNoModal(){
+  while(_whenNoModal.length&&!modalIsUp()){const f=_whenNoModal.shift();try{f()}catch(e){console.warn(e)}}
+}
+/* Redraw without trampling anybody: not under an open sheet (it waits for the
+   sheet to close) and not through a search box somebody is typing in. */
+let _softQueued=false;
+function softRender(){
+  if(_softQueued)return;
+  _softQueued=true;
+  whenNoModal(()=>{_softQueued=false; if(!typingInView()||!repaintList())render()});
+}
+window.addEventListener("beforeunload",e=>{
+  if(hasUnsentTickets()){e.preventDefault();e.returnValue="A ticket has not finished submitting.";return e.returnValue}
+});
 
 /* ---- district manager post-create prompt: request the store's tech? ----
    Yes → the job goes straight to Dispatched with that tech on it (one patch, so
@@ -6569,11 +7166,25 @@ function clearStoreHash(){
 }
 
 async function openTicketFromUrl(){
-  const m=location.hash.match(/^#t\/([^\/]+)(?:\/[^\/]*)?$/); // token after the number is ignored when signed in
+  const m=location.hash.match(/^#t\/([^\/]+)(?:\/([^\/]*))?$/);
   if(!m||!SESSION)return false;
   const key=decodeURIComponent(m[1]).trim().toUpperCase();
-  const find=()=>Object.keys(TICKETS).find(k=>String(TICKETS[k].shortId||"").toUpperCase()===key||k.toUpperCase()===key);
-  let id=find();
+  /* A link from an email carries the ticket's own token after the number.
+     The token names exactly one ticket; a number, on tickets filed before
+     v9.78, could name two — and a ticket whose number has since been changed
+     is still reached by the number it had when the email was sent. So: the
+     token first, then the number, then a number the ticket used to have. */
+  const tok=(m[2]||"").trim();
+  const ks=()=>Object.keys(TICKETS);
+  const byTok=()=>tok?ks().find(k=>TICKETS[k]&&TICKETS[k].shareToken===tok):undefined;
+  const byNum=()=>ks().find(k=>String(TICKETS[k].shortId||"").toUpperCase()===key||k.toUpperCase()===key)
+    || ks().find(k=>arr_(TICKETS[k].previousShortIds).some(x=>String(x).toUpperCase()===key));
+  const find=()=>byTok()||byNum();
+  let id=byTok();
+  /* No ticket in view has that token. Before trusting the number, see whether
+     the ticket the link was made for is a closed one. */
+  if(!id && tok && canSeeClosed() && !CLOSED_LOADED){ if(await ensureClosedLoaded()) id=byTok(); }
+  if(!id) id=byNum();
   if(!id && canSeeClosed()){ if(await ensureClosedLoaded()) id=find(); }
   if(!id){toast("Ticket "+key+" wasn't found","err");clearTicketHash();return false}
   const t=TICKETS[id];
@@ -6586,6 +7197,7 @@ async function openTicketFromUrl(){
 }
 let _modalReturn=null;   // "techreport" when a ticket was opened from the report
 function openTicket(id,ret){
+  if(isUnsent(id)){unsentTap(id);return}
   if(ret!==undefined)_modalReturn=ret;   // sticky: survives the re-renders after a comment
   cmtPhotos=[];               // fresh comment-photo draft per ticket sheet
   const t={_id:id,...TICKETS[id]};
@@ -6635,6 +7247,7 @@ function openTicket(id,ret){
       <div class="detail-row"><span class="k">District Manager</span><span class="v">${coach?esc(coach.name):"—"}</span></div>
       <div class="detail-row"><span class="k">Reported by</span><span class="v">${esc(t.createdByName||t.createdBy||"—")}</span></div>
       <div class="detail-row"><span class="k">Opened</span><span class="v">${fmtDate(t.createdAt)}</span></div>
+      ${arr_(t.previousShortIds).length?`<div class="detail-row"><span class="k">Number</span><span class="v">Was ${esc(arr_(t.previousShortIds).join(", "))}${t.renumberedAt?" · changed "+fmtDateShort(t.renumberedAt):""} — another ticket had the same number</span></div>`:""}
       ${t.reopenCount?`<div class="detail-row"><span class="k">Reopened</span><span class="v">${t.reopenCount} time${t.reopenCount===1?"":"s"}${t.reopenedAt?" · last "+fmtDateShort(t.reopenedAt):""}</span></div>`:""}
       ${linkedTicketRows(t)}
       ${(t.reopenRequest&&!t.reopenRequest.done)?`<div class="tk-reopenreq">
@@ -7007,6 +7620,7 @@ function roBlocked(id){
 }
 async function patchTicket(id,patch,activityEntry){
   const t=TICKETS[id];if(!t){toast("Ticket not found","err");return false}
+  if(t.pending||t.failed){toast(t.failed?"That ticket was not submitted":"That ticket is still submitting \u2014 give it a moment","err");return false}
   if(patch&&patch.status==="closed"&&t.status!=="closed"&&!canCloseTickets()){toast(NO_CLOSE_MSG,"err");return false}
   if(roBlocked(id))return false;
   const prevStatus=t.status;
@@ -7023,7 +7637,7 @@ async function patchTicket(id,patch,activityEntry){
     else delete CLOSED_TICKETS[id];
     // Echo the write locally so the UI reflects it IMMEDIATELY — the CDN copy
     // of the master can lag ~60s, and waiting on it made every click feel dead.
-    TICKETS[id]=updated; LOCAL_ECHO[id]=updated;
+    TICKETS[id]=updated; LOCAL_ECHO[id]=updated; dropStoreIndex();
     /* News is a real status move OR a change of who the ticket is on. Handing a
        job from one tech to another keeps the status at "dispatched", so on the
        status test alone that reassignment went out silently. */
@@ -8984,7 +9598,14 @@ async function impStepSave(){
   r.assignKind=aTech?"tech":(aVend?"vendor":"");
   r.assignId=aTech||aVend||"";
   const id=uid();
-  const shortId=nextShortId(r.sid,cat);
+  let shortId;
+  try{ shortId=(await takeShortIds([{sid:r.sid,cat}])).ids[0]; }
+  catch(e){
+    IMP_FAIL++;
+    if(btn){btn.disabled=false;btn.innerHTML="✓ Import this ticket"}
+    toast(e.message||"Could not reserve a ticket number","err");
+    return;
+  }
   const activity=[{ts:r.createdAt,by:r.createdByName||"OwlOps",role:"manager",action:"created",note:"Imported from OwlOps #"+r.ref}];
   const comments=[];
   if(r.lastNote)comments.push({id:uid(),by:r.lastBy||"OwlOps",role:"manager",email:"",text:r.lastNote,ts:r.updatedAt||r.createdAt});
@@ -9012,6 +9633,7 @@ async function impStepSave(){
   }
   try{
     await apiWrite(`${TICKETS_NODE}/${id}`,t);
+    if(t.status==="closed"){ if(CLOSED_LOADED)CLOSED_TICKETS[id]=t; }   // an imported closed ticket belongs to the archive
     TICKETS[id]=t; LOCAL_ECHO[id]=t;
     r.done=shortId; r.skip=true; IMP_DONE++;
     toast("Imported "+shortId);
@@ -11624,7 +12246,12 @@ On Thu, Sep 25, 2026 at 9:14 AM FixMi <maintenance@dossaniparadise.com> wrote:
       <button class="btn btn-ghost btn-block" onclick="openCatEditor()">🗂 Edit categories by division</button>
       <div class="section-label" style="margin-top:22px">Import<span class="ln"></span></div>
       <p class="set-hint">Bring in open tickets from an OwlOps export. Nothing is written until you approve the preview.</p>
-      <button class="btn btn-ghost btn-block" onclick="openImport()">📥 Import tickets from OwlOps</button>`;
+      <button class="btn btn-ghost btn-block" onclick="openImport()">📥 Import tickets from OwlOps</button>
+      <div class="section-label" style="margin-top:22px">Ticket numbers<span class="ln"></span></div>
+      <p class="set-hint">The last number used at each store, in each category, is saved, so a number is never given out twice — even after the ticket that had it is closed. This check reads every ticket, open and closed, and where two share a number it gives the newer one the next free number. The older ticket keeps its number, the old number still finds the renumbered ticket, and no emails are sent.</p>
+      <div class="set-hint" id="numStatus" style="margin-bottom:10px">${numStatusHtml()}</div>
+      <button class="btn btn-ghost btn-block" id="numCheckBtn" onclick="runNumberCheck()">🔢 Check ticket numbers now</button>
+      <div id="numOut">${NUMCHECK_LAST?numResultHtml(NUMCHECK_LAST):""}</div>`;
 
   const app=`
       <div class="section-label">Default home view<span class="ln"></span></div>
