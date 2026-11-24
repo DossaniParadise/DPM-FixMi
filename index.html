@@ -925,6 +925,23 @@ html[data-theme="dark"] .leaflet-tooltip-top:before{border-top-color:var(--panel
 .zm-pin{border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:grid;place-items:center;cursor:pointer}
 .zm-pin.on span{color:#fff;font-weight:800;font-size:12px;text-shadow:0 1px 2px rgba(0,0,0,.45)}
 .leaflet-container{font:inherit}
+.zm-pin.em{box-shadow:0 0 0 3px var(--red),0 1px 4px rgba(0,0,0,.4)}
+.zm-pin.done span{color:#fff;font-weight:800;font-size:11px;line-height:1}
+.ow-svgfallback svg{display:block;width:100%;height:auto}
+.zl-list{display:flex;flex-direction:column;border-top:1px solid var(--line);background:var(--panel)}
+.zl-row{display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
+.zl-row:last-child{border-bottom:none}
+.zl-main{flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding:11px 12px;background:none;border:none;text-align:left;font:inherit;color:var(--ink);cursor:pointer}
+.zl-main:hover{background:var(--panel-2)}
+.zl-n{flex-shrink:0;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--amber);color:#fff;font-weight:800;font-size:14px}
+.zl-row.idle .zl-n{background:var(--line);color:var(--ink-dim);font-size:13px}
+.zl-row.em .zl-n{background:var(--red)}
+.zl-t{display:flex;flex-direction:column;min-width:0}
+.zl-name{font-weight:650;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.zl-sub{font-size:12px;color:var(--ink-dim);margin-top:1px}
+.zl-em{color:var(--red)}
+.zl-go{display:grid;place-items:center;width:48px;text-decoration:none;font-size:18px;border-left:1px solid var(--line)}
+.zl-go:hover{background:var(--panel-2)}
 @media(max-width:600px){.ow-leaflet{height:380px}}
 .ow-map-wrap{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel-2)}
 .ow-map{display:block;width:100%;height:auto}
@@ -1608,7 +1625,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.79";
+const APP_VERSION = "9.80";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -4934,17 +4951,26 @@ function render(){
   else                      body=renderBoard();
   // Overwatch's Map/List views get the slim inventory strip; Tiles already
   // renders the full inventory card inside the hub itself.
-  v.innerHTML=(role==="admin"?paymiBanner():"")+owToggle()+(role==="admin"&&owView!=="tiles"?invOwBar():"")+body;
+  const html=(role==="admin"?paymiBanner():"")+owToggle()+(role==="admin"&&owView!=="tiles"?invOwBar():"")+body;
+  /* The background refresh calls render() every 20 seconds. On Map that tore
+     the map out and built a new one each time, so a technician who had zoomed
+     in on one part of town was thrown back out to the whole area three times
+     a minute. If the map on screen is live and what would be drawn is exactly
+     what is already there, leave it be. */
+  if(owView==="map"&&zoneMapIsLive()&&html===_mapHtml){ applyTags(); restoreFocus(_focus); return; }
+  v.innerHTML=html;
+  _mapHtml=(owView==="map")?html:null;
   applyTags();
   restoreFocus(_focus);
   if(owView==="map")setTimeout(initZoneMap,0);
 }
+let _mapHtml=null;
 /* View switcher — available to every role. */
 function owToggle(){
   const b=(k,label,ico)=>`<button class="ow-tab${owView===k?" on":""}" onclick="setOwView('${k}')">${ico} ${label}</button>`;
   return `<div class="ow-toggle">${b("map","Map","🗺")}${b("list","List","☰")}${b("tiles","Tiles","▦")}</div>`;
 }
-function setOwView(k){owView=k;if(k==="tiles")coachScreen="hub";render();releaseClosedIfIdle();}
+function setOwView(k){owView=k;ZONEMAP_KEEP=null;if(k==="tiles")coachScreen="hub";render();releaseClosedIfIdle();}
 /* The results half of the board: heading, the "showing the first N" note and
    the rows. Rendered on its own so a keystroke never touches the controls. */
 function boardListHtml(rows,label){
@@ -8721,17 +8747,55 @@ function owBubble(x,y,r,cols,open){
          `<g clip-path="url(#${id})">${bands}</g>`+
          `<circle cx="${x}" cy="${y}" r="${r}" fill="none" stroke="#fff" stroke-width="${stroke}"/>`;
 }
+/* A technician's map answers one question: where do I have work, and how
+   much. So for a technician the number on a pin is the jobs at that store
+   that are WITH THEM and still to do — dispatched, waiting or in progress, the
+   same three the list calls "on your plate". A job they have already marked
+   finished is not work to drive to: it is kept on the map as a small ticked
+   dot (it is still theirs until a DM closes it) but it is not counted. It
+   used to be, which is how the map said "8 open" while the list said 6. */
+const TECH_TODO_STATUSES=["dispatched","waiting","in_progress"];
+function techMapJobs(){
+  const by={};
+  Object.entries(TICKETS).forEach(([id,t])=>{
+    if(!t||t.pending||t.failed||t.assignedTechId!==SESSION.refId)return;
+    const todo=TECH_TODO_STATUSES.includes(t.status), done=t.status==="finished";
+    if(!todo&&!done)return;
+    const r=by[t.storeId]=by[t.storeId]||{todo:0,done:0,emerg:0,prog:0,wait:0};
+    if(done){r.done++;return}
+    r.todo++;
+    if((t.priority||"normal")==="emergency")r.emerg++;
+    if(t.status==="in_progress")r.prog++;
+    if(t.status==="waiting")r.wait++;
+  });
+  return by;
+}
+const jobsWord=n=>`${n} job${n===1?"":"s"}`;
+/* What a pin, a tooltip or a row says about one store. */
+function zoneCountText(p){
+  if(!p.tech)return `${p.open} open`;
+  if(p.open)return jobsWord(p.open)+(p.done?` · ${p.done} finished`:"");
+  return p.done?`${p.done} finished, waiting to be closed`:"nothing for you here";
+}
+/* …and what tapping it does. A technician always gets the deck of their own
+   jobs there; they never have a pin without one. */
+function zoneOpenStore(sid){
+  if(SESSION.role==="tech"){openStoreDeck(sid);return}
+  owFocusStore(sid);
+}
 function renderZoneMap(){
+  __owBubbleUid=0;                 // so the same data always draws the same markup (see render)
   const zones=techZones();
+  const isTech=SESSION.role==="tech";
+  const mineBy=isTech?techMapJobs():null;
   // Overwatch sees every store; everyone else only their own scope. Techs see
   // the stores they actually have work at.
   let ids;
   if(SESSION.role==="admin") ids=Object.keys(RESTAURANTS);
-  else if(SESSION.role==="tech")
-    ids=[...new Set(Object.values(TICKETS).filter(t=>t.assignedTechId===SESSION.refId
-        &&TECH_VISIBLE_STATUSES.includes(t.status)).map(t=>t.storeId))];
+  else if(isTech) ids=Object.keys(mineBy).filter(sid=>RESTAURANTS[sid]);
   else ids=myStoreIds();
-  const openCount=sid=>ticketsForStore(sid).filter(t=>ACTIVE_STATUSES.includes(t.status)).length;
+  const openCount=sid=>isTech?((mineBy[sid]||{}).todo||0)
+    :ticketsForStore(sid).filter(t=>ACTIVE_STATUSES.includes(t.status)).length;
 
   const mapped=[],unmapped=[];
   ids.forEach(sid=>{
@@ -8742,11 +8806,14 @@ function renderZoneMap(){
     const tids=(SESSION.role==="tech")?[SESSION.refId]:storeTechIds(sid);
     const cols=tids.length?tids.map(id=>(zones[id]||{}).color||NO_TECH_COLOR):[NO_TECH_COLOR];
     const names=tids.length?tids.map(id=>(zones[id]||{}).name||"Unknown tech"):["No tech assigned"];
-    const rec={sid,open:openCount(sid),tids,cols,techName:names.join(" + ")};
+    const mj=isTech?(mineBy[sid]||{}):{};
+    const rec={sid,open:openCount(sid),tids,cols,techName:names.join(" + "),
+      tech:isTech,done:mj.done||0,emerg:mj.emerg||0,prog:mj.prog||0,wait:mj.wait||0};
     (c?mapped:unmapped).push(c?{...rec,...c}:rec);
   });
 
   const totalOpen=ids.reduce((n,sid)=>n+openCount(sid),0);
+  const totalDone=isTech?ids.reduce((n,sid)=>n+((mineBy[sid]||{}).done||0),0):0;
 
   /* Legend covers EVERY technician in the directory — including any with no
      stores yet — so the roster here always matches FindMi. A shared store is
@@ -8786,12 +8853,20 @@ function renderZoneMap(){
       const badge=active
         ? `<text x="${x}" y="${(+y+4.2).toFixed(1)}" text-anchor="middle" fill="#fff" font-size="${p.open>99?9:p.open>9?11:12.5}" font-weight="800" pointer-events="none">${p.open}</text>`
         : "";
-      return `<g class="ow-dot${active?" on":""}" data-sid="${p.sid}" data-name="${escA(storeName(p.sid))}" data-open="${p.open}" data-tech="${escA(p.techName)}"
+      return `<g class="ow-dot${active?" on":""}" data-sid="${p.sid}" data-name="${escA(storeName(p.sid))}" data-open="${p.open}" data-tech="${escA(p.techName)}" data-say="${escA(zoneCountText(p))}"
               onmousemove="owTip(event,this)" onmouseleave="owTipHide()" onclick="owDotClick(this)">
         ${owBubble(x,y,r,p.cols,active)}
+        ${(p.tech&&p.emerg)?`<circle cx="${x}" cy="${y}" r="${r+3}" fill="none" stroke="var(--red)" stroke-width="2.5"/>`:""}
         ${badge}
       </g>`;}).join("");
-    ZONEMAP_PTS=mapped.map(p=>({sid:p.sid,lat:p.lat,lng:p.lng,open:p.open,cols:p.cols,techName:p.techName}));
+    /* This drawing is what shows when the map library or its tiles cannot be
+       fetched — a weak signal in a back room is enough. The dots were being
+       worked out and then never put on the page, so that case fell through to
+       the "no GPS coordinates" message below, which was simply untrue. */
+    svg=`<svg viewBox="0 0 ${W} ${H}" class="ow-svg" preserveAspectRatio="xMidYMid meet">
+      <rect x="0" y="0" width="${W}" height="${H}" fill="var(--panel-2)"/>${dots}</svg>`;
+    ZONEMAP_PTS=mapped.map(p=>({sid:p.sid,lat:p.lat,lng:p.lng,open:p.open,cols:p.cols,techName:p.techName,
+      tech:p.tech,done:p.done,emerg:p.emerg}));
   }else{
     /* Reset on EVERY render, not only when there is something to draw. This
        used to live inside the branch above, so a user whose stores have no
@@ -8815,9 +8890,9 @@ function renderZoneMap(){
         ${offOpen?`with <b>${offOpen} open job${offOpen===1?"":"s"}</b> between them `:""}${
         unmapped.length===1?"has":"have"} no GPS coordinates in FindMi.</div>
       <div class="ow-um-rows">${unmapped.slice().sort((a,b)=>b.open-a.open||storeName(a.sid).localeCompare(storeName(b.sid)))
-        .map(r=>`<button class="ow-um${r.open?" has":""}" onclick="${r.open?`openStoreDeck('${r.sid}')`:`owFocusStore('${r.sid}')`}">
+        .map(r=>`<button class="ow-um${r.open?" has":""}" onclick="${(r.open||r.tech)?`openStoreDeck('${r.sid}')`:`owFocusStore('${r.sid}')`}">
           <span class="ow-um-n">${esc(storeName(r.sid))}</span>
-          <span class="ow-um-c">${r.open?`${r.open} open`:"all clear"}</span></button>`).join("")}</div>
+          <span class="ow-um-c">${r.tech?esc(zoneCountText(r)):(r.open?`${r.open} open`:"all clear")}</span></button>`).join("")}</div>
       <div class="ow-um-fix">Add a latitude and longitude to ${unmapped.length===1?"it":"them"} in FindMi and ${unmapped.length===1?"it":"they"} will appear on the map.</div>
     </div>`:"";
 
@@ -8827,6 +8902,51 @@ function renderZoneMap(){
     ? ` · <b>${offOpen} not on the map</b>`
     : (unmapped.length?` · ${unmapped.length} store${unmapped.length===1?"":"s"} without GPS`:"");
 
+  if(isTech){
+    /* The legend of every technician in the company is Overwatch's view of
+       who covers what. On a technician's own map it read as a list of
+       colleagues with "0 open" beside each — untrue, and nothing to do with
+       them. They get their own stores instead: the same count as the pin,
+       what state the work is in, how far away it is when the phone will say,
+       and one tap into the jobs. */
+    const all=[...mapped,...unmapped];
+    const dist=r=>(TECH_LOC&&r.lat!=null)?distanceMiles(TECH_LOC,{lat:r.lat,lng:r.lng}):null;
+    all.forEach(r=>{r.mi=dist(r)});
+    all.sort((a,b)=>(b.emerg?1:0)-(a.emerg?1:0)||(b.open?1:0)-(a.open?1:0)
+      ||((a.mi==null?1e9:a.mi)-(b.mi==null?1e9:b.mi))||b.open-a.open||storeName(a.sid).localeCompare(storeName(b.sid)));
+    const rows=all.map(r=>{
+      const bits=[];
+      if(r.open&&r.done)bits.push(`${r.open} to do`);          // say which is which when a store has both
+      if(r.emerg)bits.push(`<b class="zl-em">${r.emerg} emergency</b>`);
+      if(r.prog)bits.push(`${r.prog} in progress`);
+      if(r.wait)bits.push(`${r.wait} waiting`);
+      if(r.done)bits.push(`${r.done} finished, waiting to be closed`);
+      if(r.mi!=null)bits.push(`${r.mi<10?r.mi.toFixed(1):Math.round(r.mi)} mi away`);
+      if(r.lat==null)bits.push("not on the map (no GPS)");
+      const geo=storeGeoUrl(r.sid);
+      return `<div class="zl-row${r.open?"":" idle"}${r.emerg?" em":""}" data-sid="${r.sid}" data-open="${r.open}" data-done="${r.done}">
+        <button class="zl-main" onclick="openStoreDeck('${r.sid}')">
+          <span class="zl-n">${r.open?r.open:"✓"}</span>
+          <span class="zl-t"><span class="zl-name">${esc(storeName(r.sid))}</span>
+            <span class="zl-sub">${bits.join(" · ")||(r.open?jobsWord(r.open)+" to do":"")}</span></span>
+        </button>
+        ${geo?`<a class="zl-go" href="${escA(geo)}" target="_blank" rel="noopener" title="Directions">📍</a>`:""}
+      </div>`;}).join("");
+    const offT=unmapped.reduce((n,r)=>n+r.open,0);
+    return `
+    <div class="page-head"><div>
+      <div class="page-title">My jobs on the map</div>
+      <div class="page-meta">${esc(SESSION.name)} · ${jobsWord(totalOpen)} at ${ids.filter(sid=>(mineBy[sid]||{}).todo).length} store${ids.filter(sid=>(mineBy[sid]||{}).todo).length===1?"":"s"}${
+        totalDone?` · ${totalDone} finished, waiting to be closed`:""}${offT?` · <b>${offT} not on the map</b>`:""}</div>
+    </div></div>
+    ${ids.length?`<div class="ow-map-wrap">
+      <div id="owLeaflet" class="ow-leaflet"></div>
+      <div class="ow-svgfallback">${svg}</div>
+      <div class="ow-tip" id="owTip"></div>
+      <div class="zl-list">${rows}</div>
+    </div>`:`<div class="empty"><div class="empty-mark">🗺</div><h3>No jobs with you right now</h3><p>When a job is dispatched to you, its store appears here.</p></div>`}
+    ${canCreate()?`<button class="fab" onclick="openCreate()">＋ New</button>`:""}`;
+  }
   return `
     <div class="page-head"><div>
       <div class="page-title">Open tickets by zone</div>
@@ -8863,40 +8983,65 @@ function ensureLeaflet(){
 }
 /* Bubble as an HTML marker so it matches the SVG look: split colour bands for
    shared stores, count badge, faded dot when nothing is open. */
+function zonePinSize(p){return p.open>0?28:((p.tech&&p.done)?20:12)}
 function zoneMarkerHtml(p){
-  const active=p.open>0, size=active?28:12;
+  const active=p.open>0, size=zonePinSize(p);
   const bands=p.cols.length<=1
     ? `background:${p.cols[0]||NO_TECH_COLOR}`
     : `background:linear-gradient(90deg,${p.cols.map((c,i)=>{
         const a=(i*100/p.cols.length).toFixed(2),b=((i+1)*100/p.cols.length).toFixed(2);
         return `${c} ${a}%,${c} ${b}%`}).join(",")})`;
-  return `<div class="zm-pin${active?" on":""}" style="width:${size}px;height:${size}px;${bands};opacity:${active?0.95:0.5}">${
-    active?`<span>${p.open}</span>`:""}</div>`;
+  return `<div class="zm-pin${active?" on":""}${(p.tech&&p.emerg)?" em":""}${(p.tech&&!active&&p.done)?" done":""}" style="width:${size}px;height:${size}px;${bands};opacity:${active?0.95:(p.tech&&p.done?0.7:0.5)}">${
+    active?`<span>${p.open}</span>`:((p.tech&&p.done)?`<span>✓</span>`:"")}</div>`;
 }
+/* The map on screen right now is a working Leaflet map (not the drawing that
+   stands in when the library cannot be fetched). */
+function zoneMapIsLive(){
+  const host=$("owLeaflet");
+  try{return !!(host&&ZONEMAP&&ZONEMAP.getContainer()===host&&host.style.display==="block")}catch(e){return false}
+}
+/* Where the person has moved the map to. When the jobs change and the map
+   does have to be redrawn — a new dispatch, a job finished — it comes back
+   where they left it rather than zoomed out to everything. Cleared when they
+   leave Map, and never carried from one person to another. */
+let ZONEMAP_KEEP=null;
+function zoneMapKey(){return SESSION?[SESSION.role,SESSION.refId||SESSION.email||"",SESSION._sim?1:0].join("|"):""}
 async function initZoneMap(){
   const host=$("owLeaflet");
   if(!host||!ZONEMAP_PTS.length)return;
   if(!await ensureLeaflet())return;           // SVG fallback stays visible
   document.querySelectorAll(".ow-svgfallback").forEach(e=>e.style.display="none");
   host.style.display="block";
+  if(host!==$("owLeaflet"))return;             // the page was redrawn while the library was loading
   if(ZONEMAP){try{ZONEMAP.remove()}catch(e){}ZONEMAP=null}
-  ZONEMAP=L.map(host,{zoomControl:true,attributionControl:true,scrollWheelZoom:false});
+  const map=ZONEMAP=L.map(host,{zoomControl:true,attributionControl:true,scrollWheelZoom:false});
   // Voyager: subtle terrain + highway and city labels without the clutter of a
   // full street map at low zoom.
-  addBasemap(ZONEMAP,host);
+  addBasemap(map,host);
   const bounds=[];
   ZONEMAP_PTS.forEach(p=>{
-    const size=p.open>0?28:12;
+    const size=zonePinSize(p);
     const m=L.marker([p.lat,p.lng],{icon:L.divIcon({className:"zm-wrap",html:zoneMarkerHtml(p),
-      iconSize:[size,size],iconAnchor:[size/2,size/2]}),riseOnHover:true}).addTo(ZONEMAP);
-    m.bindTooltip(`${storeName(p.sid)} — ${p.open} open · ${p.techName}`,{direction:"top",offset:[0,-10]});
+      iconSize:[size,size],iconAnchor:[size/2,size/2]}),riseOnHover:true,
+      zIndexOffset:p.emerg?1000:(p.open>0?500:0)}).addTo(map);
+    m.bindTooltip(p.tech?`${storeName(p.sid)} — ${zoneCountText(p)}`:`${storeName(p.sid)} — ${p.open} open · ${p.techName}`,{direction:"top",offset:[0,-10]});
     /* Stay on the map. A pin with work opens that store's deck; an empty one
-       still falls through to the list, where "nothing open" makes sense. */
-    m.on("click",()=>{ if(p.open>0) openStoreDeck(p.sid); else owFocusStore(p.sid) });
+       still falls through to the list, where "nothing open" makes sense. A
+       technician's pins are all their own jobs, so theirs always open the deck. */
+    m.on("click",()=>{ if(p.open>0||p.tech) openStoreDeck(p.sid); else owFocusStore(p.sid) });
     bounds.push([p.lat,p.lng]);
   });
-  if(bounds.length) ZONEMAP.fitBounds(bounds,{padding:[36,36],maxZoom:11});
-  setTimeout(()=>{try{ZONEMAP.invalidateSize()}catch(e){}},120);
+  const key=zoneMapKey();
+  const keep=(ZONEMAP_KEEP&&ZONEMAP_KEEP.key===key&&ZONEMAP_KEEP.user)?ZONEMAP_KEEP:null;
+  if(keep) map.setView(keep.center,keep.zoom,{animate:false});
+  else if(bounds.length) map.fitBounds(bounds,{padding:[36,36],maxZoom:11});
+  ZONEMAP_KEEP={key,user:!!keep,center:keep?keep.center:null,zoom:keep?keep.zoom:null};
+  const mine=ZONEMAP_KEEP;
+  map.on("moveend zoomend",()=>{ if(ZONEMAP_KEEP!==mine||ZONEMAP!==map)return;
+    const c=map.getCenter(); mine.center=[c.lat,c.lng]; mine.zoom=map.getZoom(); });
+  /* Only a move the PERSON made counts — fitting the map to the pins moves it too. */
+  ["pointerdown","touchstart","wheel","keydown"].forEach(ev=>host.addEventListener(ev,()=>{ if(ZONEMAP_KEEP===mine)mine.user=true },{passive:true}));
+  setTimeout(()=>{try{map.invalidateSize()}catch(e){}},120);
 }
 
 // Tap a store on the map -> its ticket list, filtered to that store.
@@ -8915,13 +9060,14 @@ let DECK={sid:null,ids:[],i:0};
 function deckTickets(sid){
   return Object.keys(TICKETS).map(k=>({_id:k,...TICKETS[k]}))
     .filter(t=>t.storeId===sid&&ACTIVE_STATUSES.includes(t.status))
-    .filter(t=>SESSION.role!=="tech"||t.assignedTechId===SESSION.refId)
-    .sort((a,b)=>priRankOf(a)-priRankOf(b)||(a.createdAt||0)-(b.createdAt||0))
+    .filter(t=>SESSION.role!=="tech"||(t.assignedTechId===SESSION.refId&&(TECH_TODO_STATUSES.includes(t.status)||t.status==="finished")))
+    .sort((a,b)=>(SESSION.role==="tech"?((a.status==="finished")-(b.status==="finished")):0)
+      ||priRankOf(a)-priRankOf(b)||(a.createdAt||0)-(b.createdAt||0))
     .map(t=>t._id);
 }
 function openStoreDeck(sid,start){
   const ids=deckTickets(sid);
-  if(!ids.length){ toast("Nothing open at "+storeName(sid)); return }
+  if(!ids.length){ toast(SESSION.role==="tech"?"No jobs with you at "+storeName(sid):"Nothing open at "+storeName(sid)); return }
   DECK={sid,ids,i:Math.min(Math.max(0,start||0),ids.length-1)};
   drawDeck();
 }
@@ -9033,7 +9179,7 @@ function owTip(e,g){
   if(!tip||!wrap)return;
   const n=+g.getAttribute("data-open");
   tip.innerHTML=`<div class="owt-name">${esc(g.getAttribute("data-name"))}</div>
-    <div class="owt-sub"><b>${n}</b> open ticket${n===1?"":"s"} · ${esc(g.getAttribute("data-tech"))}</div>`;
+    <div class="owt-sub">${SESSION.role==="tech"?esc(g.getAttribute("data-say")||""):`<b>${n}</b> open ticket${n===1?"":"s"} · ${esc(g.getAttribute("data-tech"))}`}</div>`;
   const r=wrap.getBoundingClientRect();
   let x=e.clientX-r.left+14, y=e.clientY-r.top+14;
   tip.classList.add("on");
@@ -9048,6 +9194,7 @@ function owTipHide(){const t=$("owTip");if(t)t.classList.remove("on")}
    button rather than navigating away before it can be read. */
 function owDotClick(g){
   const sid=g.getAttribute("data-sid");
+  if(SESSION.role==="tech"){owTipHide();openStoreDeck(sid);return}   // their pins are their jobs: straight to them
   if(!IS_MOBILE){owFocusStore(sid);return}
   const tip=$("owTip"), wrap=g.closest(".ow-map-wrap");
   if(!tip||!wrap){owFocusStore(sid);return}
