@@ -823,6 +823,7 @@ html[data-theme="dark"] .leaflet-tooltip-top:before{border-top-color:var(--panel
 .set-tab:hover{color:var(--ink)}
 .set-tab.on{background:var(--amber-fill);color:#fff}
 .set-hint{color:var(--ink-dim);font-size:13px;margin-top:0}
+.upload-zone.uz-need{border-color:var(--red);background:rgba(220,38,38,.06)}
 .num-out{margin-top:12px;font-size:13px;color:var(--ink)}
 .num-row{display:flex;gap:8px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
 .num-row .num-arrow{color:var(--ink-dim)}
@@ -1607,7 +1608,7 @@ window.addEventListener("storage",e=>{
 const APP_WRITE_PASSWORD = "rm123"; // must match ROLES.MAINTENANCE on the API
 const IMGBB_API_KEY = "b733862d15744e2bfaa4329d122f4ba0";
 const POLL_MS = 20000;
-const APP_VERSION = "9.78";
+const APP_VERSION = "9.79";
 let   SHOW_REF_TAGS = false; // default OFF — toggle with the # button in the top bar
 
 const ROLE_PASSWORDS = {
@@ -5167,9 +5168,15 @@ function renderBoard(){
         ${tile("finished",finN,"FINISHED","Work done","var(--s-finished)")}
         ${tile("closed",clN,"CLOSED",CLOSED_LOADED?closedRangeLabel():"Tap to load","var(--s-closed)")}
       </div>`;
+    /* The technician's list is where a technician lands, and it had no way to
+       open a ticket at all: the form has carried their "Assign this job to
+       me" box for a long time, but the only button that led to it sat on the
+       Tiles view. */
+    const techFab=canCreate()?`<button class="fab" onclick="openCreate()">＋ New</button>`:"";
     const techHead=`
       <div class="page-head">
         <div><div class="page-title">${esc(title)}</div><div class="page-meta">${esc(meta)}</div></div>
+        <div class="head-actions">${canCreate()?`<button class="btn btn-primary btn-sm" onclick="openCreate()">＋ New ticket</button>`:""}</div>
       </div>
       ${techTiles}
       <div class="board-controls">
@@ -5184,8 +5191,8 @@ function renderBoard(){
       ${(curFilter==="dispatched"&&curSort==="priority")?(TECH_LOC
         ? `<div class="loc-note ok">📍 Sorted nearest first from your location</div>`
         : `<button class="loc-note ask" onclick="requestTechLocation(true)">📍 Turn on location to sort nearest jobs first</button>`):""}`;
-    if(curFilter==="closed"&&!CLOSED_LOADED) return techHead+closedLoadPrompt();
-    if(!storeIds.length) return techHead+`<div class="empty"><div class="empty-mark">🏪</div><h3>No stores dispatched to you</h3><p>Managed in the master.</p></div>`;
+    if(curFilter==="closed"&&!CLOSED_LOADED) return techHead+closedLoadPrompt()+techFab;
+    if(!storeIds.length) return techHead+`<div class="empty"><div class="empty-mark">🏪</div><h3>No stores dispatched to you</h3><p>Managed in the master.</p></div>`+techFab;
     let trows=allTickets.slice();
     if(curStore!=="all") trows=trows.filter(t=>t.storeId===curStore);
     trows=applyFilterSearch(trows);
@@ -5214,7 +5221,7 @@ function renderBoard(){
     const tbody = trows.length
       ? `<div class="rows">${(curFilter==="closed"&&curSort==="priority")?closedRowsGrouped(trows):trows.map(ticketRow).join("")}</div>`
       : `<div class="empty"><div class="empty-mark">🗂️</div><h3>Nothing here</h3><p>${curSearch?"No tickets match your search.":"No tickets in this view."}</p></div>`;
-    return techHead+tlistHead+tbody;
+    return techHead+tlistHead+tbody+techFab;
   }
 
   // Open (yellow) = all not-closed; Closed (grey) always visible.
@@ -5973,9 +5980,32 @@ function dupMatches(sid,cat,sub,desc){
   return out.slice(0,DUP_MAX);
 }
 let draftPhotos=[];
+/* Where this person may open a ticket.
+   A technician: the stores FindMi lists them on, plus any store where a job
+   is with them right now — sent to cover a store that is not theirs, they are
+   standing in it and are the one who will see what else is broken. "Right
+   now" is any job of theirs that has not been closed: one they just marked
+   finished still counts, because that is exactly when the next problem gets
+   noticed on the way out. */
+function createStoreIds(){
+  if(!SESSION)return [];
+  if(SESSION.role==="manager")return [SESSION.storeId];
+  const ids=new Set(myStoreIds());
+  if(SESSION.role==="tech"){
+    Object.values(TICKETS).forEach(t=>{
+      if(t&&t.assignedTechId===SESSION.refId&&t.status!=="closed"&&!t.pending&&!t.failed&&RESTAURANTS[t.storeId])ids.add(t.storeId);
+    });
+  }
+  return [...ids];
+}
+/* A technician's ticket must carry a photo: they are on site with the thing
+   in front of them, and the picture is what lets dispatch route it without a
+   phone call. */
+function createNeedsPhoto(){return !!SESSION&&SESSION.role==="tech"}
 function openCreate(preStore){
   draftPhotos=[]; MS_SEL=new Set(); DUP_HITS=[]; DUP_RECURRENCE_OF=null; RETRY_OF=null;
-  let ids = SESSION.role==="manager" ? [SESSION.storeId] : myStoreIds();
+  let ids = createStoreIds();
+  if(!ids.length){toast(SESSION.role==="tech"?"You are not listed on any store and have no job at one, so there is nowhere to open a ticket. Ask dispatch.":"No stores are assigned to you","err");return}
   ids.sort((a,b)=>storeName(a).localeCompare(storeName(b)));
   const storeOpts=ids.map(id=>`<option value="${id}"${preStore===id?" selected":""}>${esc(storeName(id))}</option>`).join("");
   const priOpts=Object.entries(PRIORITIES).map(([k,v])=>`<option value="${k}"${k==="normal"?" selected":""}>${v}</option>`).join("");
@@ -6023,8 +6053,8 @@ function openCreate(preStore){
       <div class="field" style="margin-top:14px"><label class="label">What's the issue?</label>
         <textarea class="input" id="cDesc" placeholder="Describe the problem and location." oninput="dupCheckLater()"></textarea></div>
       <div id="cDup"></div>
-      <div class="field" style="margin-top:14px"><label class="label">Photos (optional)</label>
-        <div class="upload-zone" onclick="$('cFile').click()"><div class="uz-ic">📷</div><div class="uz-t">Add photos</div><div class="uz-h mono">tap to choose · or paste a screenshot · up to 5</div></div>
+      <div class="field" style="margin-top:14px"><label class="label">${createNeedsPhoto()?`Photos <span style="color:var(--red)">(required — at least one)</span>`:"Photos (optional)"}</label>
+        <div class="upload-zone" id="cZone" onclick="$('cFile').click()"><div class="uz-ic">📷</div><div class="uz-t">${createNeedsPhoto()?"Add a photo of the problem":"Add photos"}</div><div class="uz-h mono">tap to choose · or paste a screenshot · up to 5</div></div>
         <input type="file" id="cFile" accept="image/*" multiple style="display:none" onchange="addDraftPhotos(this)">
         <div class="preview-strip" id="cPreview"></div></div>
     </div>
@@ -6242,6 +6272,7 @@ async function apiWriteTicket(id,updated){
   dropStoreIndex();
 }
 function renderDraftPreview(){const el=$("cPreview");if(!el)return;
+  {const z=$("cZone"); if(z&&draftPhotos.length)z.classList.remove("uz-need")}
   el.innerHTML=draftPhotos.map((p,i)=>`<div class="pv"><img src="${p.localUrl}" alt=""><button class="pv-x" onclick="draftPhotos.splice(${i},1);renderDraftPreview()">✕</button></div>`).join("");applyTags()}
 /* The picker follows the selected store's division: Burger King gets the
    two-level tree (subcategory required), everyone else the flat list. */
@@ -6373,6 +6404,15 @@ async function submitTicket(){
   const subEl=$("cSub"), needSub=$("cSubWrap")&&$("cSubWrap").style.display!=="none";
   const sub=needSub?(subEl.value||""):"";
   if(needSub&&!sub&&!CREATE_SUB_OPTIONAL){toast("Pick a subcategory","err");return}
+  /* Checked here, in the one function every route to a new ticket passes
+     through, so there is no way round it — including the Edit of a failed
+     submit, which comes back through this same form. */
+  if(createNeedsPhoto()&&!draftPhotos.length){
+    toast("Add at least one photo of the problem","err");
+    const z=$("cZone"); if(z){z.classList.add("uz-need");z.scrollIntoView({block:"center",behavior:"smooth"})}
+    return;
+  }
+  if(sid&&SESSION.role==="tech"&&!createStoreIds().includes(sid)){toast("You can't open a ticket at "+storeName(sid),"err");return}
   // A tech filing an on-site issue keeps the job unless they untick the box.
   // Read it BEFORE the awaits below, while the form is still on screen.
   const mine = SESSION.role==="tech" && !!$("cMine") && $("cMine").checked;
